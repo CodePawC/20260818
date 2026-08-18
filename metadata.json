@@ -1,0 +1,6 @@
+{
+  "name": "医疗设备管理台账系统",
+  "description": "专业的医学装备与空间资产管理平台，提供基于院区-楼宇-楼层-科室-责任工程师的标准主数据字典、设备台账、级联调拨、不良事件及应急调配联动与AI智能维保分析功能。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
