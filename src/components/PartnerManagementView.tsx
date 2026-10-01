@@ -1,10 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   PartnerOrganization, 
   PartnerType, 
   MedicalEquipment 
 } from '../types';
 import { getPartnersWithStats, PartnerAggregatedStats } from '../utils/partnerData';
+import { Pagination } from './Pagination';
 import { 
   Building2, 
   Search, 
@@ -30,8 +31,10 @@ import {
   Sparkles,
   ArrowUpRight,
   Edit2,
-  Trash2
+  Trash2,
+  Landmark
 } from 'lucide-react';
+import { MonthlyFinanceReportModal } from './MonthlyFinanceReportModal';
 
 interface PartnerManagementViewProps {
   partners: PartnerOrganization[];
@@ -59,6 +62,15 @@ export const PartnerManagementView: React.FC<PartnerManagementViewProps> = ({
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [isFinanceModalOpen, setIsFinanceModalOpen] = useState(false);
+
+  // 分页状态
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(9);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedType, searchKeyword, statusFilter, viewMode]);
 
   // Calculate aggregated stats for each partner
   const partnersWithStats: PartnerAggregatedStats[] = useMemo(() => {
@@ -126,6 +138,12 @@ export const PartnerManagementView: React.FC<PartnerManagementViewProps> = ({
       return true;
     });
   }, [partnersWithStats, selectedType, statusFilter, searchKeyword]);
+
+  // 当前分页切片数据
+  const paginatedPartners = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredPartnersWithStats.slice(start, start + pageSize);
+  }, [filteredPartnersWithStats, currentPage, pageSize]);
 
   const handleCopy = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -390,6 +408,16 @@ export const PartnerManagementView: React.FC<PartnerManagementViewProps> = ({
             </button>
           </div>
 
+          {/* Monthly Finance Report Button */}
+          <button
+            onClick={() => setIsFinanceModalOpen(true)}
+            className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded-md text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer shadow-2xs"
+            title="按月统计各维保合作单位维修费用与财务科付款资金请款单"
+          >
+            <Landmark className="w-3.5 h-3.5 text-emerald-600" />
+            <span className="hidden sm:inline">财务资金请款月报</span>
+          </button>
+
           {/* Export CSV */}
           <button
             onClick={handleExportCsv}
@@ -412,26 +440,26 @@ export const PartnerManagementView: React.FC<PartnerManagementViewProps> = ({
 
       </div>
 
-      {/* 3. Partners Content Area: Grid or Table */}
-      <div className="flex-1 overflow-y-auto min-h-0">
-        
-        {filteredPartnersWithStats.length === 0 ? (
-          <div className="bg-white rounded-lg border border-slate-200 p-12 text-center text-slate-400 space-y-3">
-            <Building2 className="w-12 h-12 text-slate-300 mx-auto" />
-            <div className="text-sm font-semibold text-slate-600">未找到符合筛选条件的往来单位</div>
-            <p className="text-xs text-slate-400">可尝试调整检索关键词，或点击右上角登记新往来单位。</p>
-          </div>
-        ) : viewMode === 'grid' ? (
-          
-          /* GRID VIEW */
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 pb-2">
-            {filteredPartnersWithStats.map(({ partner, managedEquipmentCount, activeFaultEquipmentCount, maintenanceEquipmentCount, totalRepairsCount, totalRepairCost, lastServiceDate }) => {
-              const meta = getTypeMeta(partner.type);
-              return (
-                <div
-                  key={partner.id}
-                  className="bg-white rounded-xl border border-slate-200 shadow-2xs hover:shadow-md transition-all flex flex-col justify-between overflow-hidden group/card hover:border-blue-300"
-                >
+      {/* 3. Partners Content Area: Grid or Table with Single-Screen Layout & Pagination */}
+      <div className="flex-1 min-h-0 flex flex-col overflow-hidden bg-slate-50/50 rounded-xl border border-slate-200">
+        <div className="flex-1 min-h-0 overflow-y-auto p-3">
+          {filteredPartnersWithStats.length === 0 ? (
+            <div className="bg-white rounded-lg border border-slate-200 p-12 text-center text-slate-400 space-y-3">
+              <Building2 className="w-12 h-12 text-slate-300 mx-auto" />
+              <div className="text-sm font-semibold text-slate-600">未找到符合筛选条件的往来单位</div>
+              <p className="text-xs text-slate-400">可尝试调整检索关键词，或点击右上角登记新往来单位。</p>
+            </div>
+          ) : viewMode === 'grid' ? (
+            
+            /* GRID VIEW */
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 pb-2">
+              {paginatedPartners.map(({ partner, managedEquipmentCount, activeFaultEquipmentCount, maintenanceEquipmentCount, totalRepairsCount, totalRepairCost, lastServiceDate }) => {
+                const meta = getTypeMeta(partner.type);
+                return (
+                  <div
+                    key={partner.id}
+                    className="bg-white rounded-xl border border-slate-200 shadow-2xs hover:shadow-md transition-all flex flex-col justify-between overflow-hidden group/card hover:border-blue-300"
+                  >
                   {/* Card Header */}
                   <div className="p-4 pb-3 border-b border-slate-100 bg-gradient-to-b from-slate-50/70 to-white">
                     <div className="flex items-start justify-between gap-2">
@@ -566,7 +594,7 @@ export const PartnerManagementView: React.FC<PartnerManagementViewProps> = ({
           /* TABLE VIEW */
           <div className="bg-white rounded-lg border border-slate-200 shadow-2xs overflow-hidden">
             <table className="w-full text-left text-xs border-collapse">
-              <thead>
+              <thead className="sticky top-0 bg-slate-50 z-10 shadow-2xs">
                 <tr className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200">
                   <th className="py-2.5 px-3">单位名称 / 简称</th>
                   <th className="py-2.5 px-3">单位类别</th>
@@ -578,7 +606,7 @@ export const PartnerManagementView: React.FC<PartnerManagementViewProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                {filteredPartnersWithStats.map(({ partner, managedEquipmentCount, activeFaultEquipmentCount, totalRepairCost }) => {
+                {paginatedPartners.map(({ partner, managedEquipmentCount, activeFaultEquipmentCount, totalRepairCost }) => {
                   const meta = getTypeMeta(partner.type);
                   return (
                     <tr key={partner.id} className="hover:bg-blue-50/40 transition">
@@ -668,8 +696,30 @@ export const PartnerManagementView: React.FC<PartnerManagementViewProps> = ({
             </table>
           </div>
         )}
+        </div>
 
+        {/* 固定底部单屏分页栏 */}
+        <Pagination
+          currentPage={currentPage}
+          pageSize={pageSize}
+          totalCount={filteredPartnersWithStats.length}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={(sz) => {
+            setPageSize(sz);
+            setCurrentPage(1);
+          }}
+        />
       </div>
+
+      {/* Monthly Finance Report Modal */}
+      {isFinanceModalOpen && (
+        <MonthlyFinanceReportModal
+          isOpen={isFinanceModalOpen}
+          onClose={() => setIsFinanceModalOpen(false)}
+          equipmentList={equipmentList}
+          partnersList={partners}
+        />
+      )}
 
     </div>
   );

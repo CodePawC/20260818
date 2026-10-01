@@ -1,3 +1,5 @@
+import { VendorUserAccount } from "../types/vendorCollaborationTypes";
+import { VENDOR_ACCOUNTS } from "../utils/vendorCollaborationData";
 import React, { useState, useMemo } from 'react';
 import { 
   ShieldCheck, 
@@ -35,10 +37,11 @@ import {
 
 interface LoginPageProps {
   onLogin: (user: AuthUser) => void;
+  onLoginAsVendor?: (vendor: VendorUserAccount) => void;
   masterStaff: StaffPersonMaster[];
 }
 
-export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, masterStaff }) => {
+export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onLoginAsVendor, masterStaff }) => {
   const [activeMode, setActiveMode] = useState<'persona' | 'form'>('persona');
   const [selectedClusterFilter, setSelectedClusterFilter] = useState<string>('all');
   
@@ -324,6 +327,42 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, masterStaff }) =>
                 </div>
               )}
 
+              {/* 合作供应商专属协同门户直通区 */}
+              {(selectedClusterFilter === "all" || selectedClusterFilter === "oem_vendor") && onLoginAsVendor && (
+                <div className="bg-emerald-950/40 border border-emerald-500/40 rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <Building2 className="w-5 h-5 text-emerald-400" />
+                      <span className="font-bold text-white text-sm">外协维保合作供应商专属协同门户通道</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        供应商报价·多科室议价·发票直传
+                      </span>
+                    </div>
+                  </div>
+                  <p className="text-xs text-slate-300 mb-3">
+                    点击下方合作单位可直接以该供应商身份登录，进行在线报价、响应多科室议价函、提交完工服务单与上传增值税发票。
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                    {VENDOR_ACCOUNTS.map((v) => (
+                      <button
+                        key={v.vendorId}
+                        type="button"
+                        onClick={() => onLoginAsVendor(v)}
+                        className="p-2.5 bg-slate-900/90 hover:bg-emerald-900/40 border border-slate-700 hover:border-emerald-500/80 rounded-lg text-left transition group cursor-pointer"
+                      >
+                        <div className="text-xs font-bold text-white group-hover:text-emerald-300 truncate">
+                          {v.vendorName}
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-0.5 flex justify-between">
+                          <span>对接人: {v.contactPerson}</span>
+                          <span className="text-emerald-400 font-mono text-[10px]">一键直登 ➔</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* 主数据干系人员工卡片网格 */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 max-h-[460px] overflow-y-auto pr-1">
                 {filteredStaffList.map((person) => {
@@ -479,7 +518,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, masterStaff }) =>
                         type="password"
                         value={inputPassword}
                         onChange={(e) => setInputPassword(e.target.value)}
-                        placeholder="请输入密码 (演示环境默认 123456)"
+                        placeholder="请输入密码"
                         className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-9 pr-3 py-2 text-sm text-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
                       />
                     </div>

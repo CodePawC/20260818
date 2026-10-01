@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Scale, 
   ShieldCheck, 
@@ -24,9 +24,7 @@ import {
   HelpCircle,
   TrendingDown,
   ChevronLeft,
-  ChevronRight,
-  ChevronsLeft,
-  ChevronsRight
+  ChevronRight
 } from 'lucide-react';
 import { MetrologyCatalogueItem, MedicalEquipment } from '../types';
 import { 
@@ -34,6 +32,7 @@ import {
   matchEquipmentToMetrologyCatalogue, 
   reclassifyEquipmentListByPolicy 
 } from '../utils/metrologyCatalogueData';
+import { Pagination } from './Pagination';
 
 interface MetrologyCatalogueTabProps {
   catalogue: MetrologyCatalogueItem[];
@@ -60,7 +59,6 @@ export const MetrologyCatalogueTab: React.FC<MetrologyCatalogueTabProps> = ({
   // 分页状态
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(10);
-  const [jumpPageInput, setJumpPageInput] = useState<string>('');
 
   // 表单状态
   const [formCode, setFormCode] = useState('');
@@ -142,33 +140,15 @@ export const MetrologyCatalogueTab: React.FC<MetrologyCatalogueTabProps> = ({
     });
   }, [catalogue, searchQuery, filterType]);
 
-  // 总页数与当前页切片
-  const totalPages = Math.max(1, Math.ceil(filteredCatalogue.length / pageSize));
-  
-  // 确保搜索或过滤变动时当前页不越界
-  const validCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
-  if (currentPage !== validCurrentPage && filteredCatalogue.length > 0) {
-    setCurrentPage(validCurrentPage);
-  }
+  // 重置分页
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, filterType]);
 
   const paginatedCatalogue = useMemo(() => {
-    const startIndex = (validCurrentPage - 1) * pageSize;
+    const startIndex = (currentPage - 1) * pageSize;
     return filteredCatalogue.slice(startIndex, startIndex + pageSize);
-  }, [filteredCatalogue, validCurrentPage, pageSize]);
-
-  const handlePageChange = (page: number) => {
-    const target = Math.min(Math.max(1, page), totalPages);
-    setCurrentPage(target);
-  };
-
-  const handleJumpPage = (e: React.FormEvent) => {
-    e.preventDefault();
-    const pageNum = parseInt(jumpPageInput, 10);
-    if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= totalPages) {
-      setCurrentPage(pageNum);
-      setJumpPageInput('');
-    }
-  };
+  }, [filteredCatalogue, currentPage, pageSize]);
 
   // 打开新增/编辑弹窗
   const handleOpenAdd = () => {
@@ -296,95 +276,93 @@ export const MetrologyCatalogueTab: React.FC<MetrologyCatalogueTabProps> = ({
       )}
 
       {/* 1. 法规政策核心说明与对比横幅 (政策背景与辨析) */}
-      <div className="bg-linear-to-r from-slate-900 via-indigo-950 to-blue-950 text-white p-5 rounded-2xl shadow-sm border border-slate-800 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-indigo-600/80 border border-indigo-400/40 flex items-center justify-center text-white shadow-inner shrink-0">
+      <div className="bg-slate-900 text-white p-4 sm:p-5 rounded-xl shadow-xs border border-slate-800 space-y-3.5">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="flex items-start sm:items-center gap-3 min-w-0">
+            <div className="w-9 h-9 rounded-lg bg-indigo-600/80 border border-indigo-400/40 flex items-center justify-center text-white shadow-inner shrink-0 mt-0.5 sm:mt-0">
               <Scale className="w-5 h-5 text-indigo-200" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold text-white tracking-wide">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-sm sm:text-base font-bold text-white tracking-wide truncate">
                   国家法定强检目录维护与计量政策管理中心
                 </h3>
-                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[11px] font-bold border border-emerald-400/30 flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 text-emerald-300" /> 国家免征强检收费政策
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[11px] font-bold border border-emerald-400/30 flex items-center gap-1 shrink-0">
+                  <Sparkles className="w-3 h-3 text-emerald-300 shrink-0" /> 国家免征强检收费政策
                 </span>
               </div>
-              <p className="text-xs text-slate-300 mt-1 max-w-4xl leading-relaxed">
-                依据《中华人民共和国计量法》及财政部、发改委<strong>财税〔2017〕20号</strong>文件，
-                医疗卫生领域强制检定器具实行<strong>全国免费检定（免征强检费，由国家财政保障）</strong>；
-                非强检设备则由医院依法自主管理，委托具备资质的第三方进行<strong>定期自费校准（收费检验）</strong>。
+              <p className="text-xs text-slate-300 mt-1 leading-relaxed line-clamp-2 sm:line-clamp-none">
+                依据《计量法》及<strong>财税〔2017〕20号</strong>，
+                医疗卫生强检器具实行<strong>全国免费检定（免征强检费，国家财政保障）</strong>；
+                非强检设备由医院自主管理，委托第三方进行<strong>定期自费校准（收费检验）</strong>。
               </p>
             </div>
           </div>
 
           {/* Action Buttons */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0 self-end lg:self-center">
             <button
               onClick={() => setShowPolicyDrawer(!showPolicyDrawer)}
-              className="px-3 py-1.5 rounded-lg bg-indigo-800/60 hover:bg-indigo-700 text-indigo-100 border border-indigo-500/40 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition"
+              className="px-3 py-1.5 rounded-lg bg-indigo-800/60 hover:bg-indigo-700 text-indigo-100 border border-indigo-500/40 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition whitespace-nowrap"
             >
-              <BookOpen className="w-3.5 h-3.5" />
-              <span>政策法规知识库 {showPolicyDrawer ? '▲' : '▼'}</span>
+              <BookOpen className="w-3.5 h-3.5 shrink-0" />
+              <span>政策法规库 {showPolicyDrawer ? '▲' : '▼'}</span>
             </button>
 
             <button
               onClick={handleReclassifyAllEquipment}
-              className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md flex items-center gap-1.5 cursor-pointer transition hover:scale-102"
+              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs flex items-center gap-1.5 cursor-pointer transition whitespace-nowrap active:scale-98"
               title="按当前国家目录规则重新智能扫描全院设备台账并修正分类属性"
             >
-              <Zap className="w-3.5 h-3.5 text-amber-300" />
-              <span>一键智能对齐全院设备政策</span>
+              <Zap className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+              <span>一键对齐全院设备</span>
             </button>
           </div>
         </div>
 
         {/* 政策法规与对比解析展开卡片 */}
         {showPolicyDrawer && (
-          <div className="p-4 bg-slate-950/80 border border-indigo-800/60 rounded-xl space-y-3 text-xs animate-fadeIn">
+          <div className="p-3.5 bg-slate-950/90 border border-indigo-800/60 rounded-xl space-y-2.5 text-xs animate-fadeIn">
             <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-              <h4 className="font-bold text-indigo-300 flex items-center gap-1.5">
-                <Info className="w-4 h-4 text-indigo-400" /> 
+              <h4 className="font-bold text-indigo-300 flex items-center gap-1.5 truncate">
+                <Info className="w-4 h-4 text-indigo-400 shrink-0" /> 
                 【国家法定强检】与【医院自费定期校准】法律与经济属性权威对比
               </h4>
-              <span className="text-[11px] text-slate-400">法规依据：计量法第9条 / 财税〔2017〕20号 / 市场监管总局2020年第42号公告</span>
+              <span className="text-[11px] text-slate-400 shrink-0 hidden md:inline">法规依据：计量法第9条 / 财税〔2017〕20号</span>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px]">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-[11px]">
               {/* 强检属性 */}
-              <div className="p-3 bg-emerald-950/40 border border-emerald-800/50 rounded-lg space-y-1.5">
-                <div className="flex items-center justify-between">
+              <div className="p-2.5 bg-emerald-950/40 border border-emerald-800/50 rounded-lg space-y-1">
+                <div className="flex items-center justify-between gap-1 flex-wrap">
                   <span className="font-bold text-emerald-300 text-xs flex items-center gap-1">
-                    <ShieldCheck className="w-4 h-4 text-emerald-400" /> 国家法定强制检定 (强检目录)
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> 国家法定强制检定 (强检目录)
                   </span>
-                  <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/40">
-                    国家财政保障 · 0元免费检定
+                  <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-semibold border border-emerald-500/40 text-[10px]">
+                    0元免费检定
                   </span>
                 </div>
-                <ul className="space-y-1 text-slate-300 list-disc list-inside">
-                  <li><strong>典型设备：</strong>心电图机、脑电图仪、超声诊断仪(彩超)、CT机、DSA血管造影机、常规X射线DR、水银/电子血压计、医用直线加速器等。</li>
-                  <li><strong>申报渠道：</strong>必须通过国家市场监督管理总局 <strong>e-CQS 全国强检业务平台</strong> 申报备案与预约检定。</li>
-                  <li><strong>结论证书：</strong>出具具有法定效力的<strong>《检定证书》</strong>（合格）或《检定结果通知书》（不合格）。</li>
-                  <li><strong>法律责任：</strong>《计量法》第9条明文规定，超期脱检设备<strong>严禁用于临床医疗</strong>，否则面临市场监管部门行政处罚。</li>
+                <ul className="space-y-0.5 text-slate-300 list-disc list-inside">
+                  <li><strong>典型设备：</strong>心电图机、脑电图仪、超声诊断仪(彩超)、CT机、DSA、常规DR、血压计、直线加速器等。</li>
+                  <li><strong>申报渠道：</strong>通过国家市场监管总局 <strong>e-CQS 全国强检业务平台</strong> 申报备案。</li>
+                  <li><strong>法律效力：</strong>出具法定《检定证书》，未检或脱检设备严禁用于临床医疗。</li>
                 </ul>
               </div>
 
               {/* 非强检定期校准属性 */}
-              <div className="p-3 bg-sky-950/40 border border-sky-800/50 rounded-lg space-y-1.5">
-                <div className="flex items-center justify-between">
+              <div className="p-2.5 bg-sky-950/40 border border-sky-800/50 rounded-lg space-y-1">
+                <div className="flex items-center justify-between gap-1 flex-wrap">
                   <span className="font-bold text-sky-300 text-xs flex items-center gap-1">
-                    <Scale className="w-4 h-4 text-sky-400" /> 非强检 / 医院自费定期校准
+                    <Scale className="w-3.5 h-3.5 text-sky-400 shrink-0" /> 非强检 / 医院自费定期校准
                   </span>
-                  <span className="px-1.5 py-0.5 rounded bg-sky-500/20 text-sky-300 font-bold border border-sky-500/40">
-                    医院依法自主管理 · 商业付费检验
+                  <span className="px-1.5 py-0.2 rounded bg-sky-500/20 text-sky-300 font-semibold border border-sky-500/40 text-[10px]">
+                    商业付费检验
                   </span>
                 </div>
-                <ul className="space-y-1 text-slate-300 list-disc list-inside">
-                  <li><strong>典型设备：</strong>输液泵/注射泵、监护仪综合参数、高频手术电刀、呼吸机、除颤仪、婴儿培养箱、离心机、电子天平、生物安全柜等。</li>
-                  <li><strong>管理模式：</strong>不属于国家强制免征目录，由医院根据临床质控、等级评审标准和使用规范，<strong>自主委托具备CNAS/CMA资质的机构</strong>。</li>
-                  <li><strong>费用性质：</strong>由医院<strong>自费支付校准服务费</strong>，列入年度医学工程科维保质控预算。</li>
-                  <li><strong>结论报告：</strong>出具<strong>《校准证书》</strong>或检测报告，给出测量不确定度与校准因子。</li>
+                <ul className="space-y-0.5 text-slate-300 list-disc list-inside">
+                  <li><strong>典型设备：</strong>输液泵/注射泵、监护仪综合参数、高频手术电刀、呼吸机、除颤仪、离心机等。</li>
+                  <li><strong>管理模式：</strong>由医院自主委托具备 CNAS/CMA 资质的第三方机构开展定期校准。</li>
+                  <li><strong>费用性质：</strong>由医院自费支付校准服务费，出具《校准证书》或检测报告。</li>
                 </ul>
               </div>
             </div>
@@ -392,89 +370,89 @@ export const MetrologyCatalogueTab: React.FC<MetrologyCatalogueTabProps> = ({
         )}
 
         {/* 2. 经济效益与全院台账统计卡片 (KPI Row) */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1 border-t border-indigo-900/50">
-          <div className="bg-slate-900/70 p-3 rounded-xl border border-indigo-900/50 flex flex-col">
-            <span className="text-slate-400 text-[11px] font-medium flex items-center gap-1">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" /> 全院强检设备 (国家免费)
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5 pt-1 border-t border-indigo-900/50">
+          <div className="bg-slate-900/80 p-2.5 sm:p-3 rounded-lg border border-indigo-900/50 flex flex-col justify-between min-w-0">
+            <span className="text-slate-400 text-[11px] font-medium flex items-center gap-1 truncate">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> 强检设备 (国家免费)
             </span>
             <div className="flex items-baseline gap-1 mt-1">
-              <span className="text-xl font-extrabold text-emerald-400 font-mono">
+              <span className="text-lg sm:text-xl font-bold text-emerald-400 font-mono">
                 {stats.mandatoryEquipmentCount}
               </span>
               <span className="text-[11px] text-slate-400">台</span>
             </div>
-            <span className="text-[10px] text-emerald-300 mt-0.5">
-              占计量在册设备 {Math.round((stats.mandatoryEquipmentCount / Math.max(1, stats.mandatoryEquipmentCount + stats.paidCalibrationEquipmentCount)) * 100)}%
+            <span className="text-[10px] text-emerald-300/90 mt-0.5 truncate">
+              占比 {Math.round((stats.mandatoryEquipmentCount / Math.max(1, stats.mandatoryEquipmentCount + stats.paidCalibrationEquipmentCount)) * 100)}%
             </span>
           </div>
 
-          <div className="bg-slate-900/70 p-3 rounded-xl border border-indigo-900/50 flex flex-col">
-            <span className="text-slate-400 text-[11px] font-medium flex items-center gap-1">
-              <TrendingDown className="w-3.5 h-3.5 text-emerald-400" /> 国家政策年免征减免效益
+          <div className="bg-slate-900/80 p-2.5 sm:p-3 rounded-lg border border-indigo-900/50 flex flex-col justify-between min-w-0">
+            <span className="text-slate-400 text-[11px] font-medium flex items-center gap-1 truncate">
+              <TrendingDown className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> 年免征减免效益
             </span>
             <div className="flex items-baseline gap-1 mt-1">
-              <span className="text-xl font-extrabold text-emerald-300 font-mono">
+              <span className="text-lg sm:text-xl font-bold text-emerald-300 font-mono notranslate" translate="no">
                 ￥{stats.totalEstimatedSavings.toLocaleString()}
               </span>
               <span className="text-[10px] text-slate-400">/年</span>
             </div>
-            <span className="text-[10px] text-slate-400 mt-0.5">
+            <span className="text-[10px] text-slate-400 mt-0.5 truncate">
               财税〔2017〕20号政策红利
             </span>
           </div>
 
-          <div className="bg-slate-900/70 p-3 rounded-xl border border-indigo-900/50 flex flex-col">
-            <span className="text-slate-400 text-[11px] font-medium flex items-center gap-1">
-              <Scale className="w-3.5 h-3.5 text-sky-400" /> 自费定期校准设备
+          <div className="bg-slate-900/80 p-2.5 sm:p-3 rounded-lg border border-indigo-900/50 flex flex-col justify-between min-w-0">
+            <span className="text-slate-400 text-[11px] font-medium flex items-center gap-1 truncate">
+              <Scale className="w-3.5 h-3.5 text-sky-400 shrink-0" /> 自费定期校准设备
             </span>
             <div className="flex items-baseline gap-1 mt-1">
-              <span className="text-xl font-extrabold text-sky-400 font-mono">
+              <span className="text-lg sm:text-xl font-bold text-sky-400 font-mono">
                 {stats.paidCalibrationEquipmentCount}
               </span>
               <span className="text-[11px] text-slate-400">台</span>
             </div>
-            <span className="text-[10px] text-sky-300 mt-0.5">
-              年度校准预算预估: ￥{stats.totalEstimatedBudget.toLocaleString()}
+            <span className="text-[10px] text-sky-300/90 mt-0.5 truncate">
+              预估预算: ￥{stats.totalEstimatedBudget.toLocaleString()}
             </span>
           </div>
 
-          <div className="bg-slate-900/70 p-3 rounded-xl border border-indigo-900/50 flex flex-col">
-            <span className="text-slate-400 text-[11px] font-medium flex items-center gap-1">
-              <BookOpen className="w-3.5 h-3.5 text-indigo-400" /> 标准目录字典规则
+          <div className="bg-slate-900/80 p-2.5 sm:p-3 rounded-lg border border-indigo-900/50 flex flex-col justify-between min-w-0">
+            <span className="text-slate-400 text-[11px] font-medium flex items-center gap-1 truncate">
+              <BookOpen className="w-3.5 h-3.5 text-indigo-400 shrink-0" /> 标准目录字典规则
             </span>
             <div className="flex items-baseline gap-1 mt-1">
-              <span className="text-xl font-extrabold text-white font-mono">
+              <span className="text-lg sm:text-xl font-bold text-white font-mono">
                 {stats.totalCatalogCount}
               </span>
               <span className="text-[11px] text-slate-400">项</span>
             </div>
-            <span className="text-[10px] text-slate-400 mt-0.5">
-              强检 {stats.mandatoryCatalogCount} 项 / 自费校准 {stats.periodicCatalogCount} 项
+            <span className="text-[10px] text-slate-400 mt-0.5 truncate">
+              强检 {stats.mandatoryCatalogCount} / 校准 {stats.periodicCatalogCount} 项
             </span>
           </div>
         </div>
       </div>
 
       {/* 3. 目录管理过滤栏与操作工具栏 */}
-      <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-2xs flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-2 flex-1 min-w-[280px]">
+      <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+        <div className="flex flex-wrap items-center gap-2 flex-1 min-w-0">
           {/* 搜索框 */}
-          <div className="relative flex-1 max-w-md">
+          <div className="relative flex-1 min-w-[180px]">
             <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜索目录名称、编号、关键词 (如: 心电图、CT、输液泵)..."
+              placeholder="搜索目录名称、编号、关键词..."
               className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:bg-white focus:ring-2 focus:ring-indigo-500 font-medium"
             />
           </div>
 
           {/* 筛选 Pills */}
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg text-xs">
+          <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg text-xs shrink-0 overflow-x-auto">
             <button
               onClick={() => setFilterType('all')}
-              className={`px-2.5 py-1 rounded-md font-bold transition cursor-pointer ${
+              className={`px-2.5 py-1 rounded-md font-bold transition cursor-pointer whitespace-nowrap ${
                 filterType === 'all' ? 'bg-white text-indigo-700 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -482,27 +460,27 @@ export const MetrologyCatalogueTab: React.FC<MetrologyCatalogueTabProps> = ({
             </button>
             <button
               onClick={() => setFilterType('mandatory')}
-              className={`px-2.5 py-1 rounded-md font-bold transition cursor-pointer flex items-center gap-1 ${
+              className={`px-2.5 py-1 rounded-md font-bold transition cursor-pointer flex items-center gap-1 whitespace-nowrap ${
                 filterType === 'mandatory' ? 'bg-emerald-600 text-white shadow-2xs' : 'text-slate-600 hover:text-emerald-700'
               }`}
             >
-              <ShieldCheck className="w-3 h-3" />
-              <span>国家强检 (免费 {stats.mandatoryCatalogCount})</span>
+              <ShieldCheck className="w-3 h-3 shrink-0" />
+              <span>强检 (免费 {stats.mandatoryCatalogCount})</span>
             </button>
             <button
               onClick={() => setFilterType('periodic_calibration')}
-              className={`px-2.5 py-1 rounded-md font-bold transition cursor-pointer flex items-center gap-1 ${
+              className={`px-2.5 py-1 rounded-md font-bold transition cursor-pointer flex items-center gap-1 whitespace-nowrap ${
                 filterType === 'periodic_calibration' ? 'bg-sky-600 text-white shadow-2xs' : 'text-slate-600 hover:text-sky-700'
               }`}
             >
-              <Scale className="w-3 h-3" />
-              <span>定期校准 (自费 {stats.periodicCatalogCount})</span>
+              <Scale className="w-3 h-3 shrink-0" />
+              <span>校准 (自费 {stats.periodicCatalogCount})</span>
             </button>
           </div>
         </div>
 
         {/* 右侧动作按钮 */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
           <button
             onClick={() => {
               if (window.confirm('确定将国家强检及校准目录重置为国家市场监督管理总局标准字典规范吗？')) {
@@ -510,26 +488,26 @@ export const MetrologyCatalogueTab: React.FC<MetrologyCatalogueTabProps> = ({
                 showToast('已恢复国家法定强检标准目录字典');
               }
             }}
-            className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-semibold flex items-center gap-1 cursor-pointer transition"
+            className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-semibold flex items-center gap-1 cursor-pointer transition whitespace-nowrap"
             title="恢复国家法定标准字典模板"
           >
-            <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+            <RotateCcw className="w-3.5 h-3.5 text-slate-500 shrink-0" />
             <span>恢复标准字典</span>
           </button>
 
           <button
             onClick={handleOpenAdd}
-            className="px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer transition"
+            className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer transition whitespace-nowrap"
           >
-            <Plus className="w-3.5 h-3.5" />
-            <span>新增目录条目</span>
+            <Plus className="w-3.5 h-3.5 shrink-0" />
+            <span>新增条目</span>
           </button>
         </div>
       </div>
 
       {/* 4. 目录条目表格清单 */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden flex flex-col">
-        {/* 表格顶部快捷分页与数据概览栏 */}
+        {/* 表格顶部数据概览栏 */}
         <div className="px-4 py-2.5 bg-slate-50/90 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-2">
             <span className="font-bold text-slate-800 flex items-center gap-1.5">
@@ -539,59 +517,6 @@ export const MetrologyCatalogueTab: React.FC<MetrologyCatalogueTabProps> = ({
             <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 font-bold border border-indigo-200 text-[11px]">
               共 {filteredCatalogue.length} 项
             </span>
-            {filteredCatalogue.length > 0 && (
-              <span className="text-slate-500 hidden sm:inline text-[11px]">
-                (显示第 <span className="font-semibold text-slate-700">{(validCurrentPage - 1) * pageSize + 1}</span> - <span className="font-semibold text-slate-700">{Math.min(validCurrentPage * pageSize, filteredCatalogue.length)}</span> 项)
-              </span>
-            )}
-          </div>
-
-          <div className="flex items-center gap-3">
-            {/* 每页条数快捷选择 */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-slate-500">每页:</span>
-              <select
-                value={pageSize}
-                onChange={(e) => {
-                  setPageSize(Number(e.target.value));
-                  setCurrentPage(1);
-                }}
-                className="bg-white border border-slate-300 rounded px-2 py-1 text-xs text-slate-800 font-bold focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-2xs"
-              >
-                <option value={5}>5 条/页</option>
-                <option value={10}>10 条/页</option>
-                <option value={15}>15 条/页</option>
-                <option value={20}>20 条/页</option>
-                <option value={50}>50 条/页</option>
-              </select>
-            </div>
-
-            {/* 顶部快捷翻页 */}
-            <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg p-0.5 shadow-2xs">
-              <button
-                type="button"
-                onClick={() => handlePageChange(validCurrentPage - 1)}
-                disabled={validCurrentPage === 1}
-                className="px-2 py-0.5 rounded text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer font-bold text-xs flex items-center gap-0.5 transition"
-                title="上一页"
-              >
-                <ChevronLeft className="w-3.5 h-3.5" />
-                <span className="hidden md:inline">上一页</span>
-              </button>
-              <span className="px-2 py-0.5 text-xs font-mono font-bold text-indigo-700 bg-indigo-50 rounded">
-                {validCurrentPage} / {totalPages}
-              </span>
-              <button
-                type="button"
-                onClick={() => handlePageChange(validCurrentPage + 1)}
-                disabled={validCurrentPage === totalPages}
-                className="px-2 py-0.5 rounded text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer font-bold text-xs flex items-center gap-0.5 transition"
-                title="下一页"
-              >
-                <span className="hidden md:inline">下一页</span>
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
-            </div>
           </div>
         </div>
 
@@ -624,7 +549,7 @@ export const MetrologyCatalogueTab: React.FC<MetrologyCatalogueTabProps> = ({
               ) : (
                 paginatedCatalogue.map((item, index) => {
                   const isMandatory = item.managementType === 'mandatory';
-                  const globalIndex = (validCurrentPage - 1) * pageSize + index + 1;
+                  const globalIndex = (currentPage - 1) * pageSize + index + 1;
                   return (
                     <tr 
                       key={item.id}
@@ -761,147 +686,17 @@ export const MetrologyCatalogueTab: React.FC<MetrologyCatalogueTabProps> = ({
           </table>
         </div>
 
-        {/* 表格底部标准分页栏 */}
-        <div className="px-4 py-3 bg-slate-50/90 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
-          {/* 左侧：条数信息与每页条数选择 */}
-          <div className="flex items-center gap-3">
-            <span className="text-slate-600">
-              共 <span className="font-bold text-slate-900">{filteredCatalogue.length}</span> 条目录
-              {filteredCatalogue.length > 0 && (
-                <span className="text-slate-500 ml-1">
-                  (当前显示第 <span className="font-semibold text-slate-800">{(validCurrentPage - 1) * pageSize + 1}</span> - <span className="font-semibold text-slate-800">{Math.min(validCurrentPage * pageSize, filteredCatalogue.length)}</span> 条)
-                </span>
-              )}
-            </span>
-
-            <div className="flex items-center gap-1.5 border-l border-slate-300 pl-3">
-              <span className="text-slate-500">每页:</span>
-              <select
-                value={pageSize}
-                onChange={(e) => {
-                  setPageSize(Number(e.target.value));
-                  setCurrentPage(1);
-                }}
-                className="bg-white border border-slate-300 rounded px-2 py-0.5 text-xs text-slate-800 font-medium focus:outline-hidden focus:ring-1 focus:ring-indigo-500 cursor-pointer"
-              >
-                <option value={5}>5 条/页</option>
-                <option value={10}>10 条/页</option>
-                <option value={15}>15 条/页</option>
-                <option value={20}>20 条/页</option>
-                <option value={50}>50 条/页</option>
-              </select>
-            </div>
-          </div>
-
-          {/* 右侧：翻页按钮与跳转 */}
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1">
-              {/* 首页 */}
-              <button
-                type="button"
-                onClick={() => handlePageChange(1)}
-                disabled={validCurrentPage === 1}
-                className="p-1 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition"
-                title="首页"
-              >
-                <ChevronsLeft className="w-4 h-4" />
-              </button>
-
-              {/* 上一页 */}
-              <button
-                type="button"
-                onClick={() => handlePageChange(validCurrentPage - 1)}
-                disabled={validCurrentPage === 1}
-                className="p-1 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition"
-                title="上一页"
-              >
-                <ChevronLeft className="w-4 h-4" />
-              </button>
-
-              {/* 页码数字按钮 */}
-              <div className="flex items-center gap-1 px-1">
-                {Array.from({ length: totalPages }, (_, i) => i + 1)
-                  .filter(page => {
-                    if (totalPages <= 7) return true;
-                    if (page === 1 || page === totalPages) return true;
-                    return Math.abs(page - validCurrentPage) <= 1;
-                  })
-                  .reduce<(number | string)[]>((acc, page, idx, arr) => {
-                    if (idx > 0 && typeof arr[idx - 1] === 'number' && (page as number) - (arr[idx - 1] as number) > 1) {
-                      acc.push(`dots-${page}`);
-                    }
-                    acc.push(page);
-                    return acc;
-                  }, [])
-                  .map((item) => {
-                    if (typeof item === 'string') {
-                      return (
-                        <span key={item} className="px-1 text-slate-400 font-mono">...</span>
-                      );
-                    }
-                    const isCurrent = item === validCurrentPage;
-                    return (
-                      <button
-                        key={item}
-                        type="button"
-                        onClick={() => handlePageChange(item)}
-                        className={`min-w-[28px] h-7 px-1.5 rounded text-xs font-bold font-mono transition cursor-pointer ${
-                          isCurrent
-                            ? 'bg-indigo-600 text-white shadow-2xs'
-                            : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
-                        }`}
-                      >
-                        {item}
-                      </button>
-                    );
-                  })}
-              </div>
-
-              {/* 下一页 */}
-              <button
-                type="button"
-                onClick={() => handlePageChange(validCurrentPage + 1)}
-                disabled={validCurrentPage === totalPages}
-                className="p-1 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition"
-                title="下一页"
-              >
-                <ChevronRight className="w-4 h-4" />
-              </button>
-
-              {/* 末页 */}
-              <button
-                type="button"
-                onClick={() => handlePageChange(totalPages)}
-                disabled={validCurrentPage === totalPages}
-                className="p-1 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition"
-                title="末页"
-              >
-                <ChevronsRight className="w-4 h-4" />
-              </button>
-            </div>
-
-            {/* 跳页输入 */}
-            <form onSubmit={handleJumpPage} className="flex items-center gap-1 ml-2 border-l border-slate-300 pl-2">
-              <span className="text-slate-500">前往:</span>
-              <input
-                type="number"
-                min={1}
-                max={totalPages}
-                value={jumpPageInput}
-                onChange={(e) => setJumpPageInput(e.target.value)}
-                placeholder={`${validCurrentPage}`}
-                className="w-12 h-7 bg-white border border-slate-300 rounded px-1.5 text-center text-xs text-slate-800 font-mono focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
-              />
-              <span className="text-slate-500">页</span>
-              <button
-                type="submit"
-                className="h-7 px-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-medium rounded text-xs transition cursor-pointer"
-              >
-                跳转
-              </button>
-            </form>
-          </div>
-        </div>
+        {/* 表格底部统一标准分页栏 */}
+        <Pagination
+          currentPage={currentPage}
+          pageSize={pageSize}
+          totalCount={filteredCatalogue.length}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={(sz) => {
+            setPageSize(sz);
+            setCurrentPage(1);
+          }}
+        />
       </div>
 
       {/* 5. 新增/编辑目录模态弹窗 */}

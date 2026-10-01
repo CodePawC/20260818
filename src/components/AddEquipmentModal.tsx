@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { MedicalEquipment, EquipmentCategory, EquipmentStatus, DepartmentMaster, StaffPersonMaster, LocationRoomMaster, BuildingMaster, CampusMaster, MetrologyCatalogueItem, NmpaCategoryMasterItem } from '../types';
 import { CATEGORIES } from '../mockData';
-import { X, Save, Building2, MapPin, Phone, UserCheck, Sparkles, Check, Layers, ShieldCheck, Scale, AlertCircle, Info, Tag } from 'lucide-react';
+import { X, Save, Building2, MapPin, Phone, UserCheck, Sparkles, Check, Layers, ShieldCheck, Scale, AlertCircle, Info, Tag, Hash } from 'lucide-react';
 import { DepartmentSearchSelect, CascadingSpacePicker, StaffSearchSelect, CascadingCategoryPicker } from './StandardMasterDataSelector';
 import { matchEquipmentToMetrologyCatalogue, enrichEquipmentWithMetrologyPolicy, DEFAULT_METROLOGY_CATALOGUE } from '../utils/metrologyCatalogueData';
 import { DEFAULT_NMPA_CATEGORY_MASTER, matchEquipmentToNmpaCategory } from '../utils/nmpaCategoryData';
 import { enrichEquipmentWithMasterData } from '../utils/masterData';
+import { generatePureNumericInternalNo } from '../utils/internalNoGenerator';
 
 interface AddEquipmentModalProps {
   isOpen: boolean;
@@ -15,6 +16,7 @@ interface AddEquipmentModalProps {
   rooms: LocationRoomMaster[];
   buildings: BuildingMaster[];
   campuses: CampusMaster[];
+  allEquipment?: MedicalEquipment[];
   metrologyCatalogue?: MetrologyCatalogueItem[];
   categoryMaster?: NmpaCategoryMasterItem[];
   onClose: () => void;
@@ -29,6 +31,7 @@ export const AddEquipmentModal: React.FC<AddEquipmentModalProps> = ({
   rooms,
   buildings,
   campuses,
+  allEquipment = [],
   metrologyCatalogue,
   categoryMaster,
   onClose,
@@ -36,6 +39,11 @@ export const AddEquipmentModal: React.FC<AddEquipmentModalProps> = ({
 }) => {
   const [formData, setFormData] = useState<Partial<MedicalEquipment>>({
     id: '',
+    assetNo: '',
+    assetOwnership: '医院自有',
+    codeId: '',
+    internalNo: '',
+    usageLocation: '',
     categoryNo: '06',
     category: '医用成像器械',
     level1No: '01',
@@ -131,6 +139,11 @@ export const AddEquipmentModal: React.FC<AddEquipmentModalProps> = ({
 
       setFormData({
         id: randomId,
+        assetNo: `ZC-2023-${randomId}`,
+        assetOwnership: '医院自有',
+        codeId: `COD-${randomId}`,
+        internalNo: '',
+        usageLocation: '',
         categoryNo: '06',
         category: '医用成像器械',
         level1No: '01',
@@ -221,6 +234,82 @@ export const AddEquipmentModal: React.FC<AddEquipmentModalProps> = ({
               <span>1. 设备基本资产规格</span>
             </h3>
             
+            {/* 资产编号、资产归属、code_id、课内编号 */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 bg-blue-50/50 p-3 rounded-xl border border-blue-100">
+              <div>
+                <label className="block font-bold text-slate-800 text-xs mb-1">
+                  资产编号 <span className="text-slate-400 font-normal">(Asset No.)</span>
+                </label>
+                <input
+                  type="text"
+                  value={formData.assetNo || ''}
+                  onChange={(e) => setFormData({ ...formData, assetNo: e.target.value })}
+                  placeholder="例：ZC-2023-10086"
+                  className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-md font-mono text-xs focus:ring-2 focus:ring-blue-500 font-semibold"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-800 text-xs mb-1">
+                  资产归属 <span className="text-slate-400 font-normal">(Ownership)</span>
+                </label>
+                <select
+                  value={formData.assetOwnership || '医院自有'}
+                  onChange={(e) => setFormData({ ...formData, assetOwnership: e.target.value })}
+                  className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-md text-xs font-semibold focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="医院自有">医院自有 (固定资产)</option>
+                  <option value="经营性租赁">经营性租赁</option>
+                  <option value="融资租赁">融资租赁</option>
+                  <option value="厂商投放">厂商投放 (耗材联动)</option>
+                  <option value="借用设备">跨机构/跨科借用</option>
+                  <option value="受赠资产">公益受赠资产</option>
+                  <option value="科室自筹">科室自筹</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-800 text-xs mb-1">
+                  code_id <span className="text-slate-400 font-normal">(溯源码)</span>
+                </label>
+                <input
+                  type="text"
+                  value={formData.codeId || ''}
+                  onChange={(e) => setFormData({ ...formData, codeId: e.target.value })}
+                  placeholder="例：COD-10086"
+                  className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-md font-mono text-xs focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-bold text-slate-800 text-xs">
+                    科室内部编号 <span className="text-slate-400 font-normal">(纯数字自增)</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextNo = generatePureNumericInternalNo(formData, allEquipment);
+                      setFormData(prev => ({ ...prev, internalNo: nextNo }));
+                    }}
+                    className="text-[11px] text-blue-600 hover:text-blue-800 font-bold flex items-center gap-0.5 cursor-pointer bg-blue-50 hover:bg-blue-100 px-1.5 py-0.5 rounded transition"
+                    title="按【当前科室 + 二级品目】生成纯数字顺序号"
+                  >
+                    <Hash className="w-3 h-3" />
+                    <span>自动分配</span>
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={formData.internalNo || ''}
+                  onChange={(e) => setFormData({ ...formData, internalNo: e.target.value.replace(/\D/g, '') })}
+                  placeholder="例：1, 2, 3 (纯数字)"
+                  className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-md font-mono text-xs focus:ring-2 focus:ring-blue-500 font-bold text-amber-900"
+                  title="纯数字编号：同科室同二级品目下自动按自然数1,2,3顺序递增"
+                />
+              </div>
+            </div>
+
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="block font-medium text-slate-700 mb-1">
@@ -232,13 +321,13 @@ export const AddEquipmentModal: React.FC<AddEquipmentModalProps> = ({
                   value={formData.name || ''}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   placeholder="例：医用多参数监护仪"
-                  className="w-full px-3 py-1.5 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full px-3 py-1.5 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 font-semibold"
                 />
               </div>
 
               <div>
                 <label className="block font-medium text-slate-700 mb-1">
-                  序列号/资产编号 <span className="text-rose-500">*</span>
+                  出厂序列号(SN) <span className="text-rose-500">*</span>
                 </label>
                 <input
                   type="text"
@@ -434,8 +523,8 @@ export const AddEquipmentModal: React.FC<AddEquipmentModalProps> = ({
               />
             </div>
 
-            {/* 电话与楼层微调 */}
-            <div className="grid grid-cols-3 gap-3">
+            {/* 电话与楼层微调 & 具体使用场所 */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div>
                 <label className="block font-bold text-slate-800 text-xs mb-1 flex items-center gap-1">
                   <Building2 className="w-3.5 h-3.5 text-slate-500" />
@@ -475,6 +564,20 @@ export const AddEquipmentModal: React.FC<AddEquipmentModalProps> = ({
                   onChange={(e) => setFormData({ ...formData, nursePhone: e.target.value })}
                   placeholder="例：7991000"
                   className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-md text-xs font-mono font-medium focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-800 text-xs mb-1 flex items-center gap-1">
+                  <MapPin className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>具体使用场所 / 房间</span>
+                </label>
+                <input
+                  type="text"
+                  value={formData.usageLocation || formData.location || ''}
+                  onChange={(e) => setFormData({ ...formData, usageLocation: e.target.value, location: e.target.value })}
+                  placeholder="例：1号楼 3F 超声科1室"
+                  className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-md text-xs font-medium focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
             </div>

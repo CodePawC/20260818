@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Building2, 
   MapPin, 
@@ -50,6 +50,7 @@ import { StaffMasterTab } from './StaffMasterTab';
 import { DEFAULT_METROLOGY_CATALOGUE } from '../utils/metrologyCatalogueData';
 import { DEFAULT_NMPA_CATEGORY_MASTER } from '../utils/nmpaCategoryData';
 import { canManageMasterData } from '../utils/authUtils';
+import { Pagination } from './Pagination';
 
 interface MasterDataViewProps {
   campuses: CampusMaster[];
@@ -209,6 +210,14 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
 
   const [copiedText, setCopiedText] = useState<string | null>(null);
 
+  // 工作场所/安装点分页状态
+  const [workplacePage, setWorkplacePage] = useState<number>(1);
+  const [workplacePageSize, setWorkplacePageSize] = useState<number>(15);
+
+  // 科室主数据字典分页状态
+  const [deptPage, setDeptPage] = useState<number>(1);
+  const [deptPageSize, setDeptPageSize] = useState<number>(15);
+
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
     setCopiedText(text);
@@ -307,6 +316,26 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
     onlyEmergencyDeploy
   ]);
 
+  // 重置科室分页
+  useEffect(() => {
+    setDeptPage(1);
+  }, [
+    searchQuery,
+    selectedHospitalFilter,
+    selectedBuildingId,
+    selectedDeptCategory,
+    selectedDiscipline,
+    selectedEngineerFilter,
+    onlyAdverseReport,
+    onlyEmergencyDeploy
+  ]);
+
+  // 科室分页切片
+  const paginatedDepartments = useMemo(() => {
+    const start = (deptPage - 1) * deptPageSize;
+    return filteredDepartments.slice(start, start + deptPageSize);
+  }, [filteredDepartments, deptPage, deptPageSize]);
+
   // 过滤人员
   const filteredStaff = useMemo(() => {
     return staff.filter(s => {
@@ -366,6 +395,25 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
       return matchSearch && matchCampus && matchBuilding && matchFloor && matchType && matchDept && matchPhone;
     });
   }, [rooms, searchQuery, selectedCampusId, selectedBuildingId, selectedFloorFilter, selectedRoomType, selectedWorkplaceDept, hasPhoneOnly]);
+
+  // 重置工作场所分页
+  useEffect(() => {
+    setWorkplacePage(1);
+  }, [
+    searchQuery,
+    selectedCampusId,
+    selectedBuildingId,
+    selectedFloorFilter,
+    selectedRoomType,
+    selectedWorkplaceDept,
+    hasPhoneOnly
+  ]);
+
+  // 工作场所分页切片
+  const paginatedWorkplaces = useMemo(() => {
+    const start = (workplacePage - 1) * workplacePageSize;
+    return filteredWorkplaces.slice(start, start + workplacePageSize);
+  }, [filteredWorkplaces, workplacePage, workplacePageSize]);
 
   // 工作场所关联设备数统计
   const workplaceEquipmentCount = useMemo(() => {
@@ -851,7 +899,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                             <h4 className="font-bold text-sm text-slate-900">{b.name}</h4>
                             <span className="text-xs text-slate-500 font-medium">({b.campusName})</span>
                             <span className="text-xs font-mono text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">
-                              覆盖 {b.floors.length} 个楼层 · 容纳 {totalDeptsInBuilding} 个科室/部门
+                              覆盖 {(b.floors || []).length} 个楼层 · 容纳 {totalDeptsInBuilding} 个科室/部门
                             </span>
                           </div>
                           {b.description && (
@@ -1161,7 +1209,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                         </td>
                       </tr>
                     ) : (
-                      filteredWorkplaces.map(w => {
+                      paginatedWorkplaces.map(w => {
                         const eqCount = workplaceEquipmentCount[w.id] || 0;
                         return (
                           <tr key={w.id} className="hover:bg-indigo-50/30 transition group">
@@ -1291,6 +1339,18 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                 </table>
               </div>
             </div>
+
+            {/* Workplaces Footer Pagination */}
+            <Pagination
+              currentPage={workplacePage}
+              pageSize={workplacePageSize}
+              totalCount={filteredWorkplaces.length}
+              onPageChange={setWorkplacePage}
+              onPageSizeChange={(sz) => {
+                setWorkplacePageSize(sz);
+                setWorkplacePage(1);
+              }}
+            />
           </div>
         )}
 
@@ -1332,7 +1392,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                           </span>
                           <h4 className="font-bold text-sm text-slate-900">{b.name}</h4>
                         </div>
-                        <p className="text-xs text-slate-500 mt-1">包含 {b.floors.length} 个楼层 · 容纳 {bDepts.length} 个科室</p>
+                        <p className="text-xs text-slate-500 mt-1">包含 {(b.floors || []).length} 个楼层 · 容纳 {(bDepts || []).length} 个科室</p>
                       </div>
                       <div className="text-right">
                         <div className="font-mono font-bold text-indigo-700 text-sm">{totalEquip} 台设备</div>
@@ -1488,7 +1548,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-slate-700">
-                  {filteredDepartments.map(dept => {
+                  {paginatedDepartments.map(dept => {
                     const stats = deptEquipmentStats[dept.name] || { count: 0, value: 0 };
                     return (
                       <tr key={dept.id} className="hover:bg-indigo-50/30 transition">
@@ -1595,6 +1655,18 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                 </tbody>
               </table>
             </div>
+
+            {/* Departments Footer Pagination */}
+            <Pagination
+              currentPage={deptPage}
+              pageSize={deptPageSize}
+              totalCount={filteredDepartments.length}
+              onPageChange={setDeptPage}
+              onPageSizeChange={(sz) => {
+                setDeptPageSize(sz);
+                setDeptPage(1);
+              }}
+            />
           </div>
         )}
 

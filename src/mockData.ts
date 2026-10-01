@@ -2,6 +2,54 @@ import { MedicalEquipment } from './types';
 
 export const INITIAL_EQUIPMENT: MedicalEquipment[] = [
   {
+    id: 'EQ-2023-09855',
+    internalNo: '7991105',
+    categoryNo: '06',
+    category: '医用光学内窥镜与微创器械',
+    level1No: '01',
+    level1Category: '硬性内窥镜',
+    level2No: '01',
+    level2Category: '输尿管硬镜/经皮肾镜',
+    name: '德国狼牌输尿管硬镜',
+    model: 'Richard Wolf 8703.534 (8/9.8Fr 430mm 12°)',
+    manufactureDate: '2023/4/15',
+    enableDate: '2023/5/1',
+    productValidity: '8',
+    sn: 'RW-20230415-87035',
+    manufacturer: '德国狼牌医疗 (Richard Wolf GmbH)',
+    calibration: 'Yes',
+    calibrationType: '常规校准',
+    calibrationUnit: '山东省医疗器械产品质量检验中心',
+    lastCalibrationDate: '2025-11-10',
+    nextCalibrationDate: '2026-11-10',
+    calibrationCertificateNo: 'SD-MD-202511029',
+    department: '麻醉手术科',
+    building: '1号楼 综合楼',
+    floor: '8',
+    nursePhone: '7991086',
+    status: '故障待修',
+    manager: '黄晓彤 护士长 / 崔伟 工程师',
+    purchasePrice: 168000,
+    repairCount: 1,
+    repairRecords: [
+      {
+        id: 'REP-20260921-008',
+        equipmentId: 'EQ-2023-09855',
+        equipmentName: '德国狼牌输尿管硬镜',
+        equipmentSn: 'RW-20230415-87035',
+        faultDate: '2026-09-21',
+        repairType: '紧急故障维修',
+        faultDescription: '术中发现输尿管镜视野严重模糊起雾，光轴反光，需大修重置内部光学柱状透镜',
+        technician: '德国狼牌技术中心 (李海明)',
+        cost: 14200,
+        resolution: '返厂大修更换第2组柱镜、密封保护窗并激光调校光轴',
+        status: '处理中',
+        department: '麻醉手术科'
+      }
+    ],
+    statusLogs: []
+  },
+  {
     id: '10159',
     categoryNo: '06',
     category: '医用成像器械',
@@ -148,7 +196,135 @@ export const INITIAL_EQUIPMENT: MedicalEquipment[] = [
     purchasePrice: 1200000,
     repairCount: 0,
     repairRecords: [],
-    statusLogs: []
+    statusLogs: [],
+    overdueFiling: {
+      filingNo: 'EXT-2026-0518',
+      filingStatus: 'ACTIVE',
+      originalLifespanYears: 10,
+      overdueYears: 3.1,
+      refurbishDate: '2026-05-18',
+      refurbishProvider: '北京岛津原厂技术中心 & 院医学工程处精修组',
+      refurbishSummary: '完成整机高压电缆绝缘层翻新、限束器光学定位定标、滤线栅轨道清洗润滑、平板探测器坏点增益校正及系统深度除尘与主板电容阵列更新。',
+      partsReplaced: ['高压发生器绝缘衬套', '限束器卤素定标光源', '主电源稳压滤波电容组'],
+      refurbishCost: 28500,
+      stabilityTestDate: '2026-05-25',
+      stabilityTestAgency: '山东省医疗器械质量检验中心',
+      stabilityTestReportNo: 'QA-STB-20260525-09',
+      continuousRunHours: 72,
+      driftRate: '<0.28% (符合且优于国标限值≤1.5%)',
+      testItems: [
+        {
+          id: 'TEST-01',
+          name: 'GB 9706.1 保护接地阻抗测试',
+          standard: 'GB 9706.1-2020 第8.6条',
+          result: 'PASS',
+          measuredValue: '0.042 Ω (标准限值: < 0.1 Ω)',
+          conclusion: '保护接地连通性良好，满足一类设备防护标准'
+        },
+        {
+          id: 'TEST-02',
+          name: 'GB 9706.1 对地漏电流与外壳漏电流',
+          standard: 'GB 9706.1-2020 第8.7条',
+          result: 'PASS',
+          measuredValue: '对地漏电流 0.086 mA; 外壳漏电流 0.021 mA (标准限值: < 0.5 mA / 0.1 mA)',
+          conclusion: '正常工况及单一故障工况下漏电流均符合安全限值'
+        },
+        {
+          id: 'TEST-03',
+          name: '72小时满载连续开机曝光稳定性测试',
+          standard: 'YY/T 0011 医用诊断X射线机稳定性评价',
+          result: 'PASS',
+          measuredValue: '管电压输出重复性 CV = 0.45%; 空气比释动能率漂移 0.28%',
+          conclusion: '热衰减性能与输出重复性优异，无异常断电或伪影突发'
+        },
+        {
+          id: 'TEST-04',
+          name: '空间分辨率与低对比度分辨力质控测试',
+          standard: 'WS 76 医用X射线摄影质量控制标准',
+          result: 'PASS',
+          measuredValue: '空间分辨力 3.2 lp/mm (标准≥2.5); 低对比度探测到第5组孔',
+          conclusion: '图像解析度完全符合临床常规平片诊断标准'
+        }
+      ],
+      approvedDate: '2026-06-01',
+      validUntil: '2027-05-31',
+      leadEngineer: '崔伟 (主任工程师)',
+      leadEngineerPhone: '6802',
+      approverRole: '医院医学装备管理与伦理委员会',
+      approverName: '孙志强 (医工处长)',
+      approvalDocNo: '医装委备[2026]019号',
+      monitoringFrequency: 'MONTHLY',
+      lastInspectionDate: '2026-08-10',
+      nextInspectionDate: '2026-09-10',
+      remarks: '本设备已经委员会论证特许准用，仅限用于门诊常规骨骼平片及常规胸腹部非危重筛查，严禁用于急危重症抢救转运。',
+      reports: [
+        {
+          id: 'REP-2026-001',
+          fileName: '山东省医疗器械产品质量检验中心_72小时连续稳定性检测报告.pdf',
+          fileType: 'pdf',
+          fileSize: '3.8 MB',
+          uploadDate: '2026-05-25 15:30',
+          uploaderName: '崔伟 (主任工程师)',
+          reportType: 'stability_72h',
+          reportTypeName: '72小时满负荷连续工况稳定性检测报告',
+          agencyName: '山东省医疗器械产品质量检验中心',
+          reportNo: 'QA-STB-20260525-09',
+          verificationStatus: 'verified',
+          conclusion: 'QUALIFIED',
+          summary: '72h连续开机满负荷曝光无故障，空气比释动能率漂移率0.28%，热衰减与重复性优异',
+          extractedData: {
+            testDate: '2026-05-25',
+            agency: '山东省医疗器械产品质量检验中心',
+            reportNo: 'QA-STB-20260525-09',
+            continuousHours: 72,
+            driftRate: '0.28%',
+            conclusion: '综合评定：合格 (具备 CMA / CNAS 实验室资质认证)'
+          }
+        },
+        {
+          id: 'REP-2026-002',
+          fileName: 'GB9706.1-2020医用电气安全全项测试合格证书.pdf',
+          fileType: 'pdf',
+          fileSize: '2.4 MB',
+          uploadDate: '2026-05-25 16:10',
+          uploaderName: '崔伟 (主任工程师)',
+          reportType: 'electrical_safety_gb9706',
+          reportTypeName: 'GB 9706.1-2020 医用电气安全全项检验证书',
+          agencyName: '山东省医疗器械产品质量检验中心',
+          reportNo: 'QA-SAF-20260525-14',
+          verificationStatus: 'verified',
+          conclusion: 'QUALIFIED',
+          summary: '保护接地阻抗0.042Ω(<0.1Ω)，对地漏电流0.086mA(<0.5mA)，外壳漏电流0.021mA(<0.1mA)',
+          extractedData: {
+            testDate: '2026-05-25',
+            agency: '山东省医疗器械产品质量检验中心',
+            reportNo: 'QA-SAF-20260525-14',
+            groundResistance: '0.042 Ω',
+            leakageCurrent: '0.086 mA',
+            conclusion: '符合 GB 9706.1-2020 及 IEC 60601-1 一类BF型设备电气绝缘要求'
+          }
+        },
+        {
+          id: 'REP-2026-003',
+          fileName: '岛津原厂技术中心深度整修核心配件换新竣工报告.pdf',
+          fileType: 'pdf',
+          fileSize: '1.9 MB',
+          uploadDate: '2026-05-18 11:20',
+          uploaderName: '崔伟 (主任工程师)',
+          reportType: 'refurbish_inspection',
+          reportTypeName: '深度整修与核心配件更新竣工验收单',
+          agencyName: '北京岛津原厂技术服务中心 & 院医学工程处精修组',
+          reportNo: 'SHIMADZU-REFURB-20260518',
+          verificationStatus: 'verified',
+          conclusion: 'QUALIFIED',
+          summary: '高压电缆绝缘层翻新、高压发生器绝缘衬套更换、限束器卤素定标光源换新、主电源滤波电容组更新',
+          extractedData: {
+            testDate: '2026-05-18',
+            conclusion: '深度整修竣工验收合格，各项几何与能量指标已恢复至出厂基准'
+          }
+        }
+      ]
+    }
   },
   {
     id: '10154',
@@ -167,14 +343,83 @@ export const INITIAL_EQUIPMENT: MedicalEquipment[] = [
     calibration: 'Yes',
     calibrationUnit: '市级',
     department: '超声科',
+    ownerDepartment: '超声科',
     building: '1号楼 综合楼',
     floor: '3',
     nursePhone: '',
+    currentLoan: {
+      id: 'LOAN-20260814-001',
+      equipmentId: '10154',
+      equipmentName: '便携式彩色超声诊断系统',
+      ownerDepartment: '超声科',
+      borrowingDepartment: '心血管内科',
+      borrowerName: '王建平医生',
+      borrowerPhone: '13863301122',
+      lenderName: '刘医生',
+      borrowTime: '2026-08-14 09:30',
+      expectedReturnTime: '2026-08-25 17:00',
+      borrowReason: '心内科CCU病房急危重症床旁超声血管与心功能筛查周转借用',
+      loanStatus: 'borrowed',
+      accessories: ['主机电源线', '相控阵心脏探头 (S5-1)', '凸阵腹部探头 (C5-1)', '便携推车与耦合剂'],
+      handoverNotes: '设备外观完好，探头声学透镜完好无损，开机自检通过。'
+    },
+    loanHistory: [
+      {
+        id: 'LOAN-20260115-001',
+        equipmentId: '10154',
+        equipmentName: '便携式彩色超声诊断系统',
+        ownerDepartment: '超声科',
+        borrowingDepartment: '麻醉手术科',
+        borrowerName: '孙志强工程师',
+        borrowerPhone: '13963308811',
+        lenderName: '刘医生',
+        borrowTime: '2026-01-15 08:00',
+        expectedReturnTime: '2026-01-18 18:00',
+        actualReturnTime: '2026-01-18 16:30',
+        borrowReason: '手术室神经阻滞穿刺定位临时借用',
+        loanStatus: 'returned',
+        accessories: ['主机电源线', '高频线阵探头'],
+        handoverNotes: '交接正常',
+        returnNotes: '探头及主机完好无损，功能正常归还。',
+        returnReceiverName: '刘医生'
+      }
+    ],
     status: '正常运行',
     manager: '刘医生',
     purchasePrice: 480000,
-    repairCount: 0,
-    repairRecords: [],
+    repairCount: 2,
+    repairRecords: [
+      {
+        id: 'REP-20260710-04',
+        equipmentId: '10154',
+        equipmentName: '便携式彩色超声诊断系统',
+        equipmentSn: '20PA12030001',
+        repairType: '定期预防性保养',
+        faultDate: '2026-07-10 14:20',
+        faultDescription: '例行探头声束定标与散热滤网清洁，超声声能衰减率在三级合格标准内。',
+        technician: '北京智影售后技术服务中心',
+        cost: 3200,
+        status: '已完成',
+        resolution: '探头声学透镜声场均匀度及信噪比检测通过，设备运行良好。',
+        partsReplaced: '高压滤网总成',
+        completionDate: '2026-07-11 10:00'
+      },
+      {
+        id: 'REP-20260218-08',
+        equipmentId: '10154',
+        equipmentName: '便携式彩色超声诊断系统',
+        equipmentSn: '20PA12030001',
+        repairType: '紧急故障维修',
+        faultDate: '2026-02-18 09:15',
+        faultDescription: '心脏探头接口接触不良，偶发彩超血流信号伪影杂波。',
+        technician: '医学工程科 (张工)',
+        cost: 850,
+        status: '已完成',
+        resolution: '校准探头插座金手指针脚并加装屏蔽铜箔，伪影彻底消除。',
+        partsReplaced: '探头插头PIN针校准及屏蔽铜箔',
+        completionDate: '2026-02-18 16:30'
+      }
+    ],
     statusLogs: []
   },
   {
@@ -200,8 +445,24 @@ export const INITIAL_EQUIPMENT: MedicalEquipment[] = [
     status: '正常运行',
     manager: '赵护士长',
     purchasePrice: 260000,
-    repairCount: 0,
-    repairRecords: [],
+    repairCount: 1,
+    repairRecords: [
+      {
+        id: 'REP-20260605-03',
+        equipmentId: '10380',
+        equipmentName: '便携式彩色多普勒超声诊断系统',
+        equipmentSn: '20PA12030002',
+        repairType: '计量校准',
+        faultDate: '2026-06-05 10:00',
+        faultDescription: '市级计量测试研究院年度强制检定与灵敏度标定，出具合格证书。',
+        technician: '市级计量测试研究院',
+        cost: 1800,
+        status: '已完成',
+        resolution: '探测深度、几何位置示值误差与分辨力均达JJG 899标准，合格准用。',
+        partsReplaced: '计量合格贴签',
+        completionDate: '2026-06-05 16:00'
+      }
+    ],
     statusLogs: []
   },
   {
@@ -227,8 +488,24 @@ export const INITIAL_EQUIPMENT: MedicalEquipment[] = [
     status: '正常运行',
     manager: '设备科备用',
     purchasePrice: 260000,
-    repairCount: 0,
-    repairRecords: [],
+    repairCount: 1,
+    repairRecords: [
+      {
+        id: 'REP-20260512-07',
+        equipmentId: '10416',
+        equipmentName: '便携式彩色多普勒超声诊断系统',
+        equipmentSn: '22PA12110006',
+        repairType: '定期预防性保养',
+        faultDate: '2026-05-12 11:30',
+        faultDescription: '备用机电池充放电周期性激活维护，按键面板胶垫清理消毒。',
+        technician: '医学工程科 (李工)',
+        cost: 0,
+        status: '已完成',
+        resolution: '锂电池自放电率正常，连续续航达2.5小时，回库待命。',
+        partsReplaced: '',
+        completionDate: '2026-05-12 14:00'
+      }
+    ],
     statusLogs: []
   },
   {
@@ -323,8 +600,23 @@ export const INITIAL_EQUIPMENT: MedicalEquipment[] = [
     status: '正常运行',
     manager: 'ICU护理组',
     purchasePrice: 85000,
-    repairCount: 0,
-    repairRecords: [],
+    repairCount: 1,
+    repairRecords: [
+      {
+        id: 'REP-20260722-09',
+        equipmentId: '10077',
+        equipmentName: '病人监护仪',
+        equipmentSn: 'CM-22122924',
+        faultDate: '2026-07-22',
+        repairType: '定期预防性保养',
+        faultDescription: '季度深度清洁与无创血压(NIBP)气路气密性校验，充放气性能合格。',
+        technician: '医学工程科 (周工)',
+        cost: 0,
+        partsReplaced: '',
+        resolution: 'NIBP定标及心电各导联自检通过。',
+        status: '已完成'
+      }
+    ],
     statusLogs: []
   },
   {
@@ -350,8 +642,23 @@ export const INITIAL_EQUIPMENT: MedicalEquipment[] = [
     status: '正常运行',
     manager: 'ICU护理组',
     purchasePrice: 85000,
-    repairCount: 0,
-    repairRecords: [],
+    repairCount: 1,
+    repairRecords: [
+      {
+        id: 'REP-20260411-06',
+        equipmentId: '10076',
+        equipmentName: '病人监护仪',
+        equipmentSn: 'CM-22122925',
+        faultDate: '2026-04-11',
+        repairType: '紧急故障维修',
+        faultDescription: '血氧饱和度探头引线磨损断路，读数时有时无。',
+        technician: '迈瑞售后服务部',
+        cost: 1200,
+        partsReplaced: '成人指夹式血氧探头',
+        resolution: '更换原厂血氧探头，实测脉搏波形连续平稳。',
+        status: '已完成'
+      }
+    ],
     statusLogs: []
   },
   {
@@ -622,8 +929,23 @@ export const INITIAL_EQUIPMENT: MedicalEquipment[] = [
     status: '正常运行',
     manager: '介入科护士站',
     purchasePrice: 85000,
-    repairCount: 0,
-    repairRecords: [],
+    repairCount: 1,
+    repairRecords: [
+      {
+        id: 'REP-20260630-11',
+        equipmentId: '10078',
+        equipmentName: '病人监护仪',
+        equipmentSn: 'CM-25125208',
+        faultDate: '2026-06-30',
+        repairType: '紧急故障维修',
+        faultDescription: '介入手术过程中心电波形偶发抖动，排查接地线螺母氧化。',
+        technician: '医学工程科 (崔工)',
+        cost: 360,
+        partsReplaced: '等电位接地端子柱',
+        resolution: '打磨氧化触点，紧固等电位接地线，术中抗高频电刀干扰测试合格。',
+        status: '已完成'
+      }
+    ],
     statusLogs: []
   },
   {
@@ -649,8 +971,23 @@ export const INITIAL_EQUIPMENT: MedicalEquipment[] = [
     status: '正常运行',
     manager: '手术室麻醉组',
     purchasePrice: 120000,
-    repairCount: 0,
-    repairRecords: [],
+    repairCount: 1,
+    repairRecords: [
+      {
+        id: 'REP-20260315-12',
+        equipmentId: '10067',
+        equipmentName: '病人监护仪',
+        equipmentSn: 'CF-0C107923',
+        faultDate: '2026-03-15',
+        repairType: '定期预防性保养',
+        faultDescription: '手术室麻醉深浅度模块(BIS)校准与多气体分析模块水阱更换。',
+        technician: '迈瑞医疗高级技术专家',
+        cost: 6500,
+        partsReplaced: '麻醉多气体水阱滤杯及定标气阀',
+        resolution: '五种麻醉挥发气体红外浓度标定通过，出具质检报告。',
+        status: '已完成'
+      }
+    ],
     statusLogs: []
   },
   {
@@ -741,7 +1078,7 @@ export const INITIAL_EQUIPMENT: MedicalEquipment[] = [
         repairType: '紧急故障维修',
         faultDescription: '主板供电烧毁，屏幕无法开启。',
         technician: '迈瑞工程师',
-        cost: 0,
+        cost: 42000,
         resolution: '已超安全使用年限，主板停产无原厂配件，技术鉴定后封存停用。',
         status: '已完成',
         completionDate: '2025-11-22'
@@ -881,8 +1218,23 @@ export const INITIAL_EQUIPMENT: MedicalEquipment[] = [
     status: '正常运行',
     manager: 'ICU护理组',
     purchasePrice: 16000,
-    repairCount: 0,
-    repairRecords: [],
+    repairCount: 1,
+    repairRecords: [
+      {
+        id: 'REP-20260718-13',
+        equipmentId: '10188',
+        equipmentName: '双通道微量注射泵',
+        equipmentSn: 'SP5-202302-009',
+        faultDate: '2026-07-18',
+        repairType: '定期预防性保养',
+        faultDescription: '注射泵推杆滑轨精密润滑与堵塞报警压力阈值精度标定。',
+        technician: '医学工程科 (周工)',
+        cost: 150,
+        partsReplaced: '推杆防尘硅胶圈',
+        resolution: '推注精度误差小于±2%，各档位堵塞声光报警灵敏。',
+        status: '已完成'
+      }
+    ],
     statusLogs: []
   },
   {
@@ -915,8 +1267,23 @@ export const INITIAL_EQUIPMENT: MedicalEquipment[] = [
     status: '正常运行',
     manager: '手术室器械组',
     purchasePrice: 280000,
-    repairCount: 0,
-    repairRecords: [],
+    repairCount: 1,
+    repairRecords: [
+      {
+        id: 'REP-20260520-14',
+        equipmentId: '10189',
+        equipmentName: '高频电外科能量平台 (电刀)',
+        equipmentSn: 'VALLEYLAB-8812',
+        faultDate: '2026-05-20',
+        repairType: '紧急故障维修',
+        faultDescription: '单极电凝功率输出偏低，负极回路监测板(REM)误报警。',
+        technician: '美敦力原厂签约维保中心',
+        cost: 8800,
+        partsReplaced: 'REM回路阻抗检测主控板',
+        resolution: '更换REM模组，高频功率计测试单极切/凝输出线性度达标。',
+        status: '已完成'
+      }
+    ],
     statusLogs: []
   },
   {
@@ -941,7 +1308,7 @@ export const INITIAL_EQUIPMENT: MedicalEquipment[] = [
     calibrationUnit: '深圳市计量质量检测研究院 (校准中心)',
     lastCalibrationDate: '2025-10-15',
     nextCalibrationDate: '2026-10-15',
-    calibrationCertificateNo: 'JZ-CAL-2025-8890',
+    calibrationCertificateNo: 'JZ-CAL-2025-8832',
     department: '急诊科',
     building: '1号楼 综合楼',
     floor: '1',
@@ -949,8 +1316,23 @@ export const INITIAL_EQUIPMENT: MedicalEquipment[] = [
     status: '正常运行',
     manager: '王护士长 / 急诊抢救室',
     purchasePrice: 75000,
-    repairCount: 0,
-    repairRecords: [],
+    repairCount: 1,
+    repairRecords: [
+      {
+        id: 'REP-20260801-15',
+        equipmentId: '10176',
+        equipmentName: '双相波除颤起搏监护仪',
+        equipmentSn: 'D3-202209-441',
+        faultDate: '2026-08-01',
+        repairType: '计量校准',
+        faultDescription: '除颤能量释放精度(20J-360J)周期校检，充电时间测试≤3秒。',
+        technician: '市计量院医学计量部',
+        cost: 1600,
+        partsReplaced: '',
+        resolution: '高压储能放电精度误差在1.5%以内，签发检定合格证。',
+        status: '已完成'
+      }
+    ],
     statusLogs: []
   },
   {
@@ -977,9 +1359,47 @@ export const INITIAL_EQUIPMENT: MedicalEquipment[] = [
     nextCalibrationDate: '2026-09-10',
     calibrationCertificateNo: 'JZ-CAL-2025-9923',
     department: '急诊科',
+    ownerDepartment: '急诊科',
     building: '1号楼 综合楼',
     floor: '1',
     nursePhone: '7991120',
+    currentLoan: {
+      id: 'LOAN-20260812-003',
+      equipmentId: '10196',
+      equipmentName: '电动涡轮急救转运呼吸机',
+      ownerDepartment: '急诊科',
+      borrowingDepartment: '重症医学科',
+      borrowerName: '郑晓明医生',
+      borrowerPhone: '13793400918',
+      lenderName: '王护士长',
+      borrowTime: '2026-08-12 11:00',
+      expectedReturnTime: '2026-08-18 18:00',
+      borrowReason: '重症ICU收治多名急性呼吸窘迫综合征(ARDS)患者紧急借调支持',
+      loanStatus: 'overdue',
+      accessories: ['呼吸机管路', '高压氧气连接软管', '电源线及适配器', '转运专用支架'],
+      handoverNotes: '急诊科出借交接，涡轮气密性及潮气量检测正常。'
+    },
+    loanHistory: [
+      {
+        id: 'LOAN-20260310-001',
+        equipmentId: '10196',
+        equipmentName: '电动涡轮急救转运呼吸机',
+        ownerDepartment: '急诊科',
+        borrowingDepartment: '呼吸内科',
+        borrowerName: '刘海波医生',
+        borrowerPhone: '13563388712',
+        lenderName: '王护士长',
+        borrowTime: '2026-03-10 08:30',
+        expectedReturnTime: '2026-03-15 17:00',
+        actualReturnTime: '2026-03-15 15:20',
+        borrowReason: '呼吸内科重症病房转运检查临时借用',
+        loanStatus: 'returned',
+        accessories: ['电源线', '转运支架'],
+        handoverNotes: '设备正常交接',
+        returnNotes: '外观完整，功能正常，附件齐全验收归还。',
+        returnReceiverName: '王护士长'
+      }
+    ],
     status: '正常运行',
     manager: '王护士长 / 急诊抢救室',
     purchasePrice: 180000,

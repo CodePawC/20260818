@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { EquipmentFilterState, SortField, SortOrder, ColumnVisibility, NmpaCategoryMasterItem, AuthUser } from '../types';
+import { EquipmentFilterState, SortField, SortOrder, ColumnVisibility, NmpaCategoryMasterItem, AuthUser, EquipmentViewMode, EquipmentQuickFilterKey } from '../types';
 import { DEPARTMENTS, CATEGORIES } from '../mockData';
 import { NMPA_22_MAIN_CATEGORIES } from '../utils/nmpaCategoryData';
 import { 
@@ -14,7 +14,12 @@ import {
   Upload,
   QrCode,
   FileSpreadsheet,
-  Building2
+  Building2,
+  ChevronDown,
+  Sparkles,
+  Table2,
+  LayoutGrid,
+  Images
 } from 'lucide-react';
 import { 
   canAddEquipment, 
@@ -23,6 +28,8 @@ import {
   isHeadNurse, 
   isClinicalStaff, 
   isHospitalWidePerspective,
+  canViewAllEquipment,
+  isDepartmentRestricted,
   getUserDepartment 
 } from '../utils/authUtils';
 
@@ -41,12 +48,16 @@ interface EquipmentFilterBarProps {
   onToggleColumn?: (key: keyof ColumnVisibility) => void;
   onResetColumnVisibility?: () => void;
   onSelectAllColumns?: (selectAll: boolean) => void;
+  // 视图模式切换 (紧凑表格 | 大卡片平铺 | 设备照片流)
+  viewMode?: EquipmentViewMode;
+  onChangeViewMode?: (mode: EquipmentViewMode) => void;
   // 台账专属操作动作
   currentUser?: AuthUser | null;
   onOpenAddModal?: () => void;
   onOpenImportModal?: () => void;
   onOpenQrModal?: () => void;
   onExportCsv?: () => void;
+  onOpenAiDimensionModal?: () => void;
 }
 
 export const EquipmentFilterBar: React.FC<EquipmentFilterBarProps> = ({
@@ -58,19 +69,23 @@ export const EquipmentFilterBar: React.FC<EquipmentFilterBarProps> = ({
   categoryMaster,
   density = 'default',
   onToggleDensity,
-  splitCategories = true,
+  splitCategories = false,
   onToggleSplitCategories,
   columnVisibility,
   onToggleColumn,
   onResetColumnVisibility,
   onSelectAllColumns,
+  viewMode = 'compact_table',
+  onChangeViewMode,
   currentUser,
   onOpenAddModal,
   onOpenImportModal,
   onOpenQrModal,
   onExportCsv,
+  onOpenAiDimensionModal,
 }) => {
   const [isColumnConfigOpen, setIsColumnConfigOpen] = useState(false);
+  const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
 
   const allowAdd = currentUser ? canAddEquipment(currentUser) : true;
   const allowImport = currentUser ? canImportData(currentUser) : true;
@@ -161,350 +176,336 @@ export const EquipmentFilterBar: React.FC<EquipmentFilterBarProps> = ({
     Boolean(filterState.category) ||
     Boolean(filterState.level1Category) ||
     Boolean(filterState.status) ||
+    Boolean(filterState.loanStatus) ||
     Boolean(filterState.validityRisk) ||
-    Boolean(filterState.calibrationStatus);
+    Boolean(filterState.overdueStatus) ||
+    Boolean(filterState.calibrationStatus) ||
+    Boolean(filterState.quickFilter && filterState.quickFilter !== 'all');
 
   return (
-    <div className="px-3.5 py-2 border-b border-slate-100 bg-white flex-none flex flex-col gap-2">
+    <div className="px-4 py-2.5 border-b border-slate-200/80 bg-white flex-none flex flex-col gap-2.5 shadow-2xs">
       
-      {/* 行 1: 台账核心业务工具栏 (台账专属按钮沉淀在此) */}
+      {/* 行 1: 台账核心业务工具栏 (大气、开阔、高频操作聚合) */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         {/* 左侧：搜索框与台账数量 */}
-        <div className="flex items-center gap-2.5 min-w-0">
+        <div className="flex items-center gap-3 min-w-0">
           <div className="relative shrink-0">
             <input
               type="text"
               value={filterState.keyword}
               onChange={(e) => handleChange('keyword', e.target.value)}
-              placeholder="查找设备名称、SN、出厂编号、负责人..."
-              className="pl-8 pr-2.5 py-1.5 bg-slate-100 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-lg text-xs w-60 lg:w-72 focus:ring-2 focus:ring-blue-100 text-slate-900 placeholder-slate-400 font-medium transition"
+              placeholder="按设备名称、内部编号、出厂SN搜索..."
+              className="pl-9 pr-8 py-2 bg-slate-50 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-xl text-xs sm:text-sm w-64 lg:w-80 focus:ring-2 focus:ring-blue-100 text-slate-900 placeholder-slate-400 font-medium transition shadow-2xs"
             />
-            <Search className="w-4 h-4 text-slate-400 absolute left-2.5 top-2.5 pointer-events-none" />
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5 pointer-events-none" />
             {filterState.keyword && (
               <button
                 type="button"
                 onClick={() => handleChange('keyword', '')}
-                className="absolute right-2.5 top-2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                className="absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer p-0.5"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
 
-          <span className="text-xs text-slate-500 font-medium whitespace-nowrap">
-            共筛选出 <strong className="text-blue-600 font-bold">{totalFilteredCount}</strong> 台设备
+          <span className="text-xs sm:text-sm text-slate-600 font-medium whitespace-nowrap">
+            共 <strong className="text-blue-600 font-bold font-mono text-sm sm:text-base">{totalFilteredCount}</strong> 台
           </span>
 
           {hasActiveFilters && (
             <button
               type="button"
               onClick={onReset}
-              className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md text-xs font-semibold transition flex items-center gap-1 cursor-pointer whitespace-nowrap"
+              className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer whitespace-nowrap shadow-2xs"
               title="重置所有筛选条件"
             >
-              <RotateCcw className="w-3 h-3 text-slate-500" />
-              重置筛选
+              <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
+              <span>清空筛选</span>
             </button>
           )}
         </div>
 
-        {/* 右侧：台账专属业务操作按钮组 */}
-        <div className="flex items-center gap-2 shrink-0">
-          {/* 视图排版切换 */}
-          <div className="flex items-center gap-1 bg-slate-100/80 p-0.5 rounded-lg border border-slate-200 text-xs">
-            {onToggleSplitCategories && (
-              <button
-                type="button"
-                onClick={onToggleSplitCategories}
-                className={`px-2 py-1 rounded-md text-xs font-medium transition flex items-center gap-1 cursor-pointer ${
-                  splitCategories
-                    ? 'bg-white text-blue-700 shadow-2xs font-semibold'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-                title={splitCategories ? '当前: 3列独立分列显示 (点击切换为1列合并)' : '当前: 1列合并显示 (点击切换为3列独立分列)'}
-              >
-                <Columns className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">{splitCategories ? '分类分列' : '分类合并'}</span>
-              </button>
-            )}
-
-            {onToggleDensity && (
-              <button
-                type="button"
-                onClick={onToggleDensity}
-                className={`px-2 py-1 rounded-md text-xs font-medium transition flex items-center gap-1 cursor-pointer ${
-                  density === 'compact'
-                    ? 'bg-white text-blue-700 shadow-2xs font-semibold'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-                title={density === 'compact' ? '当前: 紧凑行距 (点击切换标准)' : '当前: 标准行距 (点击切换紧凑)'}
-              >
-                <Layers className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">{density === 'compact' ? '紧凑' : '标准'}</span>
-              </button>
-            )}
-
-            {/* 列配置弹窗 */}
-            {columnVisibility && (
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setIsColumnConfigOpen(!isColumnConfigOpen)}
-                  className={`px-2 py-1 rounded-md text-xs font-medium transition flex items-center gap-1 cursor-pointer ${
-                    isColumnConfigOpen
-                      ? 'bg-blue-600 text-white shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                  title="自定义显隐列"
-                >
-                  <SlidersHorizontal className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">列配置</span>
-                </button>
-
-                {isColumnConfigOpen && (
-                  <>
-                    <div
-                      className="fixed inset-0 z-20 cursor-default"
-                      onClick={() => setIsColumnConfigOpen(false)}
-                    />
-                    <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-2xl border border-slate-200 p-3.5 z-30 text-xs animate-in fade-in zoom-in-95 duration-100">
-                      <div className="flex items-center justify-between pb-2 border-b border-slate-100 mb-2.5">
-                        <div className="flex items-center gap-1.5 font-bold text-slate-800">
-                          <SlidersHorizontal className="w-4 h-4 text-blue-600" />
-                          <span>表头列显示配置</span>
-                        </div>
-                        <div className="flex items-center gap-2 text-[11px]">
-                          {onSelectAllColumns && (
-                            <button
-                              type="button"
-                              onClick={() => onSelectAllColumns(true)}
-                              className="text-blue-600 hover:underline cursor-pointer font-medium"
-                            >
-                              全选
-                            </button>
-                          )}
-                          {onResetColumnVisibility && (
-                            <button
-                              type="button"
-                              onClick={onResetColumnVisibility}
-                              className="text-slate-500 hover:text-slate-800 cursor-pointer font-medium"
-                            >
-                              重置
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="space-y-3 max-h-[340px] overflow-y-auto pr-1">
-                        <div>
-                          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                            标识与编号
-                          </div>
-                          <div className="grid grid-cols-2 gap-1.5">
-                            <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-1 rounded transition select-none">
-                              <input
-                                type="checkbox"
-                                checked={columnVisibility.indexNumber}
-                                onChange={() => onToggleColumn?.('indexNumber')}
-                                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                              />
-                              <span className="text-slate-700 font-medium">序号 (数字)</span>
-                            </label>
-                            <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-1 rounded transition select-none">
-                              <input
-                                type="checkbox"
-                                checked={columnVisibility.id}
-                                onChange={() => onToggleColumn?.('id')}
-                                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                              />
-                              <span className="text-slate-700 font-medium">设备ID</span>
-                            </label>
-                            <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-1 rounded transition select-none">
-                              <input
-                                type="checkbox"
-                                checked={columnVisibility.sn}
-                                onChange={() => onToggleColumn?.('sn')}
-                                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                              />
-                              <span className="text-slate-700 font-medium">出厂编号 (SN)</span>
-                            </label>
-                            <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-1 rounded transition select-none">
-                              <input
-                                type="checkbox"
-                                checked={columnVisibility.manufacturer}
-                                onChange={() => onToggleColumn?.('manufacturer')}
-                                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                              />
-                              <span className="text-slate-700 font-medium">生产厂家</span>
-                            </label>
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                            分类结构
-                          </div>
-                          <div className="grid grid-cols-2 gap-1.5">
-                            <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-1 rounded transition select-none">
-                              <input
-                                type="checkbox"
-                                checked={columnVisibility.category}
-                                onChange={() => onToggleColumn?.('category')}
-                                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                              />
-                              <span className="text-slate-700 font-medium">大类分类</span>
-                            </label>
-                            <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-1 rounded transition select-none">
-                              <input
-                                type="checkbox"
-                                checked={columnVisibility.level1Category}
-                                onChange={() => onToggleColumn?.('level1Category')}
-                                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                              />
-                              <span className="text-slate-700 font-medium">一级分类</span>
-                            </label>
-                            <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-1 rounded transition select-none">
-                              <input
-                                type="checkbox"
-                                checked={columnVisibility.level2Category}
-                                onChange={() => onToggleColumn?.('level2Category')}
-                                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                              />
-                              <span className="text-slate-700 font-medium">二级分类</span>
-                            </label>
-                          </div>
-                        </div>
-
-                        <div>
-                          <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                            位置与资产
-                          </div>
-                          <div className="grid grid-cols-2 gap-1.5">
-                            <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-1 rounded transition select-none">
-                              <input
-                                type="checkbox"
-                                checked={columnVisibility.department}
-                                onChange={() => onToggleColumn?.('department')}
-                                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                              />
-                              <span className="text-slate-700 font-medium">使用科室</span>
-                            </label>
-                            <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-1 rounded transition select-none">
-                              <input
-                                type="checkbox"
-                                checked={columnVisibility.location}
-                                onChange={() => onToggleColumn?.('location')}
-                                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                              />
-                              <span className="text-slate-700 font-medium">楼号/楼层</span>
-                            </label>
-                            <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-1 rounded transition select-none">
-                              <input
-                                type="checkbox"
-                                checked={columnVisibility.manager}
-                                onChange={() => onToggleColumn?.('manager')}
-                                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                              />
-                              <span className="text-slate-700 font-medium">责任人</span>
-                            </label>
-                            <label className="flex items-center gap-2 cursor-pointer hover:bg-slate-50 p-1 rounded transition select-none">
-                              <input
-                                type="checkbox"
-                                checked={columnVisibility.purchasePrice}
-                                onChange={() => onToggleColumn?.('purchasePrice')}
-                                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                              />
-                              <span className="text-slate-700 font-medium">购置金额</span>
-                            </label>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="mt-3 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
-                        <span>偏好已自动同步至缓存</span>
-                        <button
-                          type="button"
-                          onClick={() => setIsColumnConfigOpen(false)}
-                          className="px-2.5 py-1 bg-blue-600 text-white rounded font-medium hover:bg-blue-700 cursor-pointer transition"
-                        >
-                          确定
-                        </button>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
+        {/* 右侧：台账操作功能菜单（集成业务操作、视图模式切换、分类排版与列配置） */}
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          {/* AI 交互式多维研判中心快捷入口 */}
+          {onOpenAiDimensionModal && (
+            <button
+              type="button"
+              onClick={() => onOpenAiDimensionModal()}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer select-none bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white"
+              title="AI 医疗设备多维度智能研判"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-indigo-200" />
+              <span>AI 多维研判</span>
+            </button>
+          )}
 
           <div className="h-4 w-px bg-slate-200 hidden sm:block"></div>
 
-          {/* 专属操作：批量导入 */}
-          {allowImport && onOpenImportModal && (
+          {/* 整合台账操作菜单：新增设备、批量导入、二维码、导出、视图模式、排版与列配置 */}
+          <div className="relative">
             <button
               type="button"
-              onClick={onOpenImportModal}
-              className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
-              title="上传或粘贴 Excel / CSV 批量导入设备台账"
+              onClick={() => setIsActionsMenuOpen(prev => !prev)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer select-none ${
+                isActionsMenuOpen
+                  ? 'bg-blue-700 text-white ring-2 ring-blue-300'
+                  : 'bg-blue-600 hover:bg-blue-700 active:scale-95 text-white'
+              }`}
+              title="台账操作菜单"
             >
-              <Upload className="w-3.5 h-3.5 text-blue-600" />
-              <span>批量导入</span>
+              <Plus className="w-3.5 h-3.5 shrink-0" />
+              <span>台账操作</span>
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isActionsMenuOpen ? 'rotate-180' : ''}`} />
             </button>
-          )}
 
-          {/* 专属操作：二维码标签 */}
-          {onOpenQrModal && (
-            <button
-              type="button"
-              onClick={onOpenQrModal}
-              className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
-              title="批量打印/生成设备条码与二维码标签"
-            >
-              <QrCode className="w-3.5 h-3.5 text-emerald-600" />
-              <span>二维码标签</span>
-            </button>
-          )}
+            {isActionsMenuOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-20 cursor-default"
+                  onClick={() => setIsActionsMenuOpen(false)}
+                />
+                <div className="absolute right-0 mt-1.5 w-60 bg-white rounded-xl shadow-2xl border border-slate-200 p-2 z-40 text-xs animate-in fade-in zoom-in-95 duration-100 overflow-hidden">
+                  <div className="flex flex-col gap-0.5">
+                    {/* 0. AI 多维智能研判 */}
+                    {onOpenAiDimensionModal && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsActionsMenuOpen(false);
+                          onOpenAiDimensionModal();
+                        }}
+                        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-indigo-50 active:bg-indigo-100 text-slate-800 transition-colors text-left cursor-pointer group"
+                      >
+                        <div className="w-6 h-6 rounded-md bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                          <Sparkles className="w-3.5 h-3.5" />
+                        </div>
+                        <span className="font-semibold text-xs text-slate-800 group-hover:text-indigo-600 transition-colors">AI 多维研判</span>
+                      </button>
+                    )}
 
-          {/* 专属操作：导出 */}
-          {allowExport && onExportCsv && (
-            <button
-              type="button"
-              onClick={onExportCsv}
-              className="px-2.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
-              title="导出当前台账为 CSV / Excel 报表"
-            >
-              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-              <span>导出台账</span>
-            </button>
-          )}
+                    {/* 1. 新增设备 */}
+                    {allowAdd && onOpenAddModal && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsActionsMenuOpen(false);
+                          onOpenAddModal();
+                        }}
+                        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-slate-50 active:bg-slate-100 text-slate-800 transition-colors text-left cursor-pointer group"
+                      >
+                        <div className="w-6 h-6 rounded-md bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                          <Plus className="w-3.5 h-3.5" />
+                        </div>
+                        <span className="font-semibold text-xs text-slate-800 group-hover:text-blue-600 transition-colors">新增设备建档</span>
+                      </button>
+                    )}
 
-          {/* 专属操作：新增设备 */}
-          {allowAdd && onOpenAddModal && (
-            <button
-              type="button"
-              onClick={onOpenAddModal}
-              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-lg text-xs font-semibold transition shadow-xs flex items-center gap-1.5 cursor-pointer"
-              title="建档登记新医疗设备"
-            >
-              <Plus className="w-4 h-4" />
-              <span>新增设备</span>
-            </button>
-          )}
+                    {/* 2. 批量导入 */}
+                    {allowImport && onOpenImportModal && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsActionsMenuOpen(false);
+                          onOpenImportModal();
+                        }}
+                        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-slate-50 active:bg-slate-100 text-slate-800 transition-colors text-left cursor-pointer group"
+                      >
+                        <div className="w-6 h-6 rounded-md bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                          <Upload className="w-3.5 h-3.5" />
+                        </div>
+                        <span className="font-semibold text-xs text-slate-800 group-hover:text-indigo-600 transition-colors">批量导入台账</span>
+                      </button>
+                    )}
+
+                    {/* 3. 二维码标签 */}
+                    {onOpenQrModal && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsActionsMenuOpen(false);
+                          onOpenQrModal();
+                        }}
+                        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-slate-50 active:bg-slate-100 text-slate-800 transition-colors text-left cursor-pointer group"
+                      >
+                        <div className="w-6 h-6 rounded-md bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0 group-hover:bg-emerald-600 group-hover:text-white transition-colors">
+                          <QrCode className="w-3.5 h-3.5" />
+                        </div>
+                        <span className="font-semibold text-xs text-slate-800 group-hover:text-emerald-600 transition-colors">二维码 / 标签</span>
+                      </button>
+                    )}
+
+                    {/* 4. 导出台账 */}
+                    {allowExport && onExportCsv && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsActionsMenuOpen(false);
+                          onExportCsv();
+                        }}
+                        className="w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg hover:bg-slate-50 active:bg-slate-100 text-slate-800 transition-colors text-left cursor-pointer group"
+                      >
+                        <div className="w-6 h-6 rounded-md bg-slate-100 text-slate-600 flex items-center justify-center shrink-0 group-hover:bg-slate-600 group-hover:text-white transition-colors">
+                          <FileSpreadsheet className="w-3.5 h-3.5" />
+                        </div>
+                        <span className="font-semibold text-xs text-slate-800 group-hover:text-slate-900 transition-colors">导出台账报表</span>
+                      </button>
+                    )}
+
+                    {/* 5. 视图模式切换（隐藏到台账操作中） */}
+                    {onChangeViewMode && (
+                      <div className="pt-2 mt-1.5 border-t border-slate-100">
+                        <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                          <span>视图模式</span>
+                          <span className="text-[10px] text-blue-600 font-semibold">
+                            {viewMode === 'card_grid' ? '卡片矩阵' : viewMode === 'photo_stream' ? '照片流' : '紧凑表格'}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-1 p-1 bg-slate-50 rounded-lg border border-slate-100 mt-0.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onChangeViewMode('compact_table');
+                              setIsActionsMenuOpen(false);
+                            }}
+                            className={`flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-md text-[11px] font-medium transition cursor-pointer ${
+                              viewMode === 'compact_table'
+                                ? 'bg-white text-blue-700 shadow-2xs font-bold ring-1 ring-blue-200'
+                                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                            }`}
+                            title="紧凑表格视图"
+                          >
+                            <Table2 className="w-3.5 h-3.5" />
+                            <span>表格</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onChangeViewMode('card_grid');
+                              setIsActionsMenuOpen(false);
+                            }}
+                            className={`flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-md text-[11px] font-medium transition cursor-pointer ${
+                              viewMode === 'card_grid'
+                                ? 'bg-white text-blue-700 shadow-2xs font-bold ring-1 ring-blue-200'
+                                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                            }`}
+                            title="卡片矩阵视图"
+                          >
+                            <LayoutGrid className="w-3.5 h-3.5" />
+                            <span>卡片</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onChangeViewMode('photo_stream');
+                              setIsActionsMenuOpen(false);
+                            }}
+                            className={`flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-md text-[11px] font-medium transition cursor-pointer ${
+                              viewMode === 'photo_stream'
+                                ? 'bg-white text-blue-700 shadow-2xs font-bold ring-1 ring-blue-200'
+                                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                            }`}
+                            title="实物照片流视图"
+                          >
+                            <Images className="w-3.5 h-3.5" />
+                            <span>照片流</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 6. 表格排版与显示设置（分类合并、紧凑、列配置） */}
+                    <div className="pt-2 mt-1.5 border-t border-slate-100 flex flex-col gap-0.5">
+                      <div className="px-2 py-0.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        表格排版与显示
+                      </div>
+
+                      {/* 分类分列 / 分类合并 */}
+                      {onToggleSplitCategories && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onToggleSplitCategories();
+                          }}
+                          className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-slate-50 active:bg-slate-100 text-slate-700 transition-colors text-left cursor-pointer"
+                          title={splitCategories ? '当前: 3列独立分列显示 (点击切换为1列合并)' : '当前: 1列合并显示 (点击切换为3列独立分列)'}
+                        >
+                          <div className="flex items-center gap-2">
+                            <Columns className="w-3.5 h-3.5 text-slate-500" />
+                            <span className="text-xs font-medium">分类显示</span>
+                          </div>
+                          <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded ${
+                            splitCategories ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-600'
+                          }`}>
+                            {splitCategories ? '分类分列' : '分类合并'}
+                          </span>
+                        </button>
+                      )}
+
+                      {/* 紧凑 / 标准行距 */}
+                      {onToggleDensity && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onToggleDensity();
+                          }}
+                          className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-slate-50 active:bg-slate-100 text-slate-700 transition-colors text-left cursor-pointer"
+                          title={density === 'compact' ? '当前: 紧凑行距 (点击切换标准)' : '当前: 标准行距 (点击切换紧凑)'}
+                        >
+                          <div className="flex items-center gap-2">
+                            <Layers className="w-3.5 h-3.5 text-slate-500" />
+                            <span className="text-xs font-medium">行距密度</span>
+                          </div>
+                          <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded ${
+                            density === 'compact' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-600'
+                          }`}>
+                            {density === 'compact' ? '紧凑' : '标准'}
+                          </span>
+                        </button>
+                      )}
+
+                      {/* 自定义表头列配置 */}
+                      {columnVisibility && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsActionsMenuOpen(false);
+                            setIsColumnConfigOpen(true);
+                          }}
+                          className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg hover:bg-slate-50 active:bg-slate-100 text-slate-700 transition-colors text-left cursor-pointer"
+                          title="自定义显隐列"
+                        >
+                          <div className="flex items-center gap-2">
+                            <SlidersHorizontal className="w-3.5 h-3.5 text-slate-500" />
+                            <span className="text-xs font-medium">自定义列配置</span>
+                          </div>
+                          <span className="text-[10px] text-blue-600 font-semibold flex items-center gap-0.5">
+                            设置 ➔
+                          </span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
       {/* 行 2: 细化多维度过滤选择器 (科室、分类、状态、计量、排序) */}
       <div className="flex items-center gap-1.5 md:gap-2 overflow-x-auto flex-nowrap whitespace-nowrap scrollbar-none py-0.5">
-        {/* Department select: 护士长仅展示所属科室（严格限定权限），其他角色可自由选择 */}
+        {/* 科室专属视角过滤 */}
         {(() => {
           const userDept = getUserDepartment(currentUser);
-          const isWide = isHospitalWidePerspective(currentUser);
+          const isRestricted = isDepartmentRestricted(currentUser);
 
-          if (isHeadNurse(currentUser) && userDept) {
+          if (isRestricted && userDept) {
             return (
-              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-rose-50/90 border border-rose-300 rounded-md text-xs font-bold text-rose-800 shrink-0">
-                <Building2 className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                <span>所属科室: {userDept} (专属台账)</span>
+              <div className="flex items-center gap-1 px-2 py-1 bg-blue-50/90 border border-blue-200/80 rounded-md text-xs font-semibold text-blue-800 shrink-0 shadow-2xs">
+                <Building2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                <span>科室: {userDept}</span>
               </div>
             );
           }
@@ -522,37 +523,20 @@ export const EquipmentFilterBar: React.FC<EquipmentFilterBarProps> = ({
               >
                 {departmentsList.map((dept) => (
                   <option key={dept} value={dept === '全部科室' ? '' : dept}>
-                    {dept === '全部科室' ? '全部科室 (全院视角)' : dept}
+                    {dept}
                   </option>
                 ))}
               </select>
 
-              {/* 如果是全院医工/管理角色，在筛选了具体科室时提供一键恢复全院视角按钮 */}
-              {isWide && filterState.department && (
+              {filterState.department && (
                 <button
                   type="button"
                   onClick={() => handleChange('department', '')}
                   className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-md text-xs font-bold transition cursor-pointer flex items-center gap-1 whitespace-nowrap shadow-2xs"
-                  title="点击立即恢复为全院所有设备台账视角"
+                  title="恢复全院视角"
                 >
                   <Building2 className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>恢复全院视角</span>
-                </button>
-              )}
-
-              {/* 如果是临床科室专属人员（非医疗设备科/医工），展示一键锁定自己科室/全院按钮 */}
-              {!isWide && userDept && (
-                <button
-                  type="button"
-                  onClick={() => handleChange('department', filterState.department === userDept ? '' : userDept)}
-                  className={`px-2 py-1 rounded-md text-xs font-bold transition cursor-pointer flex items-center gap-1 whitespace-nowrap ${
-                    filterState.department === userDept
-                      ? 'bg-blue-600 text-white shadow-2xs'
-                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200'
-                  }`}
-                  title={filterState.department === userDept ? '点击查看全院所有科室设备' : `点击快速锁定查看【${userDept}】台账`}
-                >
-                  <span>{filterState.department === userDept ? `已锁定${userDept}` : `仅看${userDept}`}</span>
+                  <span>全院</span>
                 </button>
               )}
             </div>
@@ -563,15 +547,18 @@ export const EquipmentFilterBar: React.FC<EquipmentFilterBarProps> = ({
         <select
           value={filterState.category}
           onChange={(e) => handleCategoryChange(e.target.value)}
-          className="px-2 py-1 bg-slate-100 border border-slate-200 hover:border-slate-300 rounded-md text-xs font-medium text-slate-800 focus:ring-2 focus:ring-blue-100 cursor-pointer max-w-[160px] truncate"
-          title="国家药监局 (NMPA) 22类医疗器械大类分类"
+          className="px-2 py-1 bg-slate-100 border border-slate-200 hover:border-slate-300 rounded-md text-xs font-medium text-slate-800 focus:ring-2 focus:ring-blue-100 cursor-pointer max-w-[150px] truncate"
+          title="国家药监局 (NMPA) 22类医疗器械分类"
         >
-          <option value="">全部分类 (22大类)</option>
-          {mainCategoriesList.map((cat) => (
-            <option key={cat.code} value={cat.name}>
-              {cat.code} {cat.name}
-            </option>
-          ))}
+          <option value="">全部分类 (22类)</option>
+          {mainCategoriesList.map((cat) => {
+            const displayName = cat.name.startsWith(cat.code) ? cat.name : `${cat.code} ${cat.name}`;
+            return (
+              <option key={cat.code} value={cat.name}>
+                {displayName}
+              </option>
+            );
+          })}
         </select>
 
         {/* Level 1 Subcategory */}
@@ -579,10 +566,10 @@ export const EquipmentFilterBar: React.FC<EquipmentFilterBarProps> = ({
           <select
             value={filterState.level1Category || ''}
             onChange={(e) => handleChange('level1Category', e.target.value)}
-            className="px-2 py-1 bg-blue-50/80 border border-blue-200 text-blue-800 rounded-md text-xs font-medium focus:ring-2 focus:ring-blue-100 cursor-pointer max-w-[160px] truncate animate-in fade-in duration-150"
-            title="选择当前大类下的一级子分类"
+            className="px-2 py-1 bg-blue-50/80 border border-blue-200 text-blue-800 rounded-md text-xs font-medium focus:ring-2 focus:ring-blue-100 cursor-pointer max-w-[150px] truncate animate-in fade-in duration-150"
+            title="选择一级子分类"
           >
-            <option value="">全部一级分类 ({availableLevel1Categories.length}项)</option>
+            <option value="">全部一级分类</option>
             {availableLevel1Categories.map((sub) => (
               <option key={sub.code} value={sub.name}>
                 {sub.name}
@@ -597,11 +584,29 @@ export const EquipmentFilterBar: React.FC<EquipmentFilterBarProps> = ({
           onChange={(e) => handleChange('status', e.target.value)}
           className="px-2 py-1 bg-slate-100 border border-slate-200 hover:border-slate-300 rounded-md text-xs font-medium text-slate-800 focus:ring-2 focus:ring-blue-100 cursor-pointer"
         >
-          <option value="">全部运行状态</option>
+          <option value="">全部状态</option>
           <option value="正常运行">🟢 正常运行</option>
           <option value="维护保养中">🟡 维护保养中</option>
           <option value="故障待修">🔴 故障待修</option>
           <option value="已报废">⚫ 已报废</option>
+        </select>
+
+        {/* Loan & Circulation Status */}
+        <select
+          value={filterState.loanStatus || ''}
+          onChange={(e) => handleChange('loanStatus', e.target.value)}
+          className={`px-2 py-1 border rounded-md text-xs font-medium focus:ring-2 focus:ring-blue-100 cursor-pointer ${
+            filterState.loanStatus
+              ? 'bg-amber-50 border-amber-300 text-amber-900 font-bold'
+              : 'bg-slate-100 border-slate-200 hover:border-slate-300 text-slate-800'
+          }`}
+          title="按科室流转状态过滤"
+        >
+          <option value="">全部流转</option>
+          <option value="self_use">🏠 本科室在库</option>
+          <option value="lent_out">🔄 跨科借出</option>
+          <option value="borrowed_in">📥 跨科借入</option>
+          <option value="overdue">🚨 借用超期</option>
         </select>
 
         {/* Metrology & Calibration Status */}
@@ -609,79 +614,503 @@ export const EquipmentFilterBar: React.FC<EquipmentFilterBarProps> = ({
           value={filterState.calibrationStatus || ''}
           onChange={(e) => handleChange('calibrationStatus', e.target.value)}
           className="px-2 py-1 bg-slate-100 border border-slate-200 hover:border-slate-300 rounded-md text-xs font-medium text-slate-800 focus:ring-2 focus:ring-blue-100 cursor-pointer"
-          title="按法定计量强检证书与周期定标合规状态过滤"
+          title="按计量定标状态过滤"
         >
-          <option value="">全部计量状态</option>
-          <option value="valid">⚖️ 强检合格 (有效)</option>
-          <option value="due_soon">⚖️ 临期待检 (需送检)</option>
-          <option value="overdue">🚨 强检脱检 (超期告警)</option>
-          <option value="warning">⚡ 计量异常 (脱检/临期)</option>
-          <option value="exempt">⚪ 免计量/非强检</option>
+          <option value="">全部计量</option>
+          <option value="valid">⚖️ 强检合格</option>
+          <option value="due_soon">⚖️ 临期待检</option>
+          <option value="overdue">🚨 强检脱检</option>
+          <option value="warning">⚡ 计量异常</option>
+          <option value="exempt">⚪ 非强检</option>
         </select>
+
+        {/* Overdue / Lifespan Status */}
+        <select
+          value={filterState.overdueStatus || ''}
+          onChange={(e) => handleChange('overdueStatus', e.target.value)}
+          className={`px-2 py-1 border rounded-md text-xs font-medium focus:ring-2 focus:ring-blue-100 cursor-pointer ${
+            filterState.overdueStatus
+              ? 'bg-amber-50 border-amber-300 text-amber-900 font-bold'
+              : 'bg-slate-100 border-slate-200 hover:border-slate-300 text-slate-800'
+          }`}
+          title="按服役寿命及备案状态过滤"
+        >
+          <option value="">全部寿命状态</option>
+          <option value="filed_permitted">🛡️ 超期特许准用</option>
+          <option value="unfiled_pending">⚠️ 超期待备案</option>
+          <option value="near_expiry">⏳ 寿命临期</option>
+          <option value="all_overdue">📜 全部超期设备</option>
+        </select>
+
+        {/* 快速筛选下拉框 (与排序位于同一行) */}
+        <div className="flex items-center gap-1 border-l border-slate-200 pl-2 shrink-0">
+          <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+          <span className="text-[11px] font-bold text-slate-400">快速筛选:</span>
+          <select
+            value={filterState.quickFilter || 'all'}
+            onChange={(e) => handleChange('quickFilter', e.target.value)}
+            className={`px-2 py-1 rounded-md text-xs font-medium focus:ring-2 focus:ring-blue-100 cursor-pointer ${
+              filterState.quickFilter && filterState.quickFilter !== 'all'
+                ? 'bg-amber-50 border border-amber-300 text-amber-900 font-bold'
+                : 'bg-slate-100 border border-slate-200 hover:border-slate-300 text-slate-800'
+            }`}
+            title="常用状态与特殊设备快速筛选"
+          >
+            <option value="all">⚡ 全部设备</option>
+            <option value="pending_repair">🔧 待维修 (故障/保养)</option>
+            <option value="high_value">💰 高价值设备 (≥50万)</option>
+            <option value="low_health">📉 健康预警 (&lt;80分)</option>
+            <option value="calibration_due">⚖️ 计量待校准/脱检</option>
+            <option value="overdue_service">⏳ 超期/近失效设备</option>
+            <option value="in_loan">🔄 跨科借调流转中</option>
+            <option value="with_real_photo">📷 有实物照片</option>
+          </select>
+        </div>
 
         {/* Sorting Dropdown */}
         <div className="flex items-center gap-1 border-l border-slate-200 pl-2 shrink-0">
           <ArrowUpDown className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-          <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">排序:</span>
+          <span className="text-[11px] font-bold text-slate-400">排序:</span>
           <select
             value={currentSortKey}
             onChange={(e) => handleSortSelect(e.target.value)}
             className="px-2 py-1 bg-blue-50/80 border border-blue-200 rounded-md text-xs font-medium text-blue-800 focus:ring-2 focus:ring-blue-100 cursor-pointer"
           >
-            <option value="categoryNo-asc">大类编号 升序 (03, 06...)</option>
-            <option value="categoryNo-desc">大类编号 降序</option>
-            <option value="level1No-asc">1级分类编号 升序</option>
-            <option value="level1No-desc">1级分类编号 降序</option>
+            <option value="categoryNo-asc">分类编号 (升序)</option>
+            <option value="categoryNo-desc">分类编号 (降序)</option>
+            <option value="level1No-asc">1级分类 (升序)</option>
+            <option value="level1No-desc">1级分类 (降序)</option>
             <option value="department-asc">使用科室 (A→Z)</option>
             <option value="department-desc">使用科室 (Z→A)</option>
-            <option value="id-asc">设备ID (小→大)</option>
-            <option value="id-desc">设备ID (大→小)</option>
+            <option value="id-asc">设备编号 (小→大)</option>
+            <option value="id-desc">设备编号 (大→小)</option>
             <option value="name-asc">设备名称 (A→Z)</option>
             <option value="sn-asc">SN 序列号 (A→Z)</option>
             <option value="purchasePrice-desc">购置金额 (高→低)</option>
             <option value="purchasePrice-asc">购置金额 (低→高)</option>
-            <option value="repairCount-desc">累计维修次数 (高→低)</option>
-            <option value="enableDate-desc">投用时间 (最新在前)</option>
+            <option value="repairCount-desc">维修次数 (高→低)</option>
+            <option value="enableDate-desc">投用时间 (最新)</option>
           </select>
         </div>
       </div>
 
-      {/* Active Filter Pills */}
+      {/* 单一整合的高效生效筛选气泡栏 */}
       {hasActiveFilters && (
-        <div className="flex items-center gap-2 flex-wrap text-xs pt-1 border-t border-slate-100">
-          <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">已设筛选:</span>
+        <div className="flex items-center gap-1.5 flex-wrap text-xs pt-1 border-t border-slate-100">
+          <span className="text-[11px] font-medium text-slate-400 shrink-0">生效筛选:</span>
           {filterState.keyword && (
-            <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 border border-blue-200/80 px-2 py-0.5 rounded-md text-[11px]">
-              搜索: <strong>{filterState.keyword}</strong>
-              <button type="button" onClick={() => handleChange('keyword', '')} className="hover:text-blue-900 cursor-pointer ml-0.5">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200 text-[11px]">
+              <span>关键词: {filterState.keyword}</span>
+              <button type="button" onClick={() => handleChange('keyword', '')} className="hover:text-blue-900 cursor-pointer p-0.5">
                 <X className="w-3 h-3" />
               </button>
             </span>
           )}
           {filterState.department && (
-            <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-700 border border-slate-200/80 px-2 py-0.5 rounded-md text-[11px]">
-              科室: <strong>{filterState.department}</strong>
-              <button type="button" onClick={() => handleChange('department', '')} className="hover:text-slate-900 cursor-pointer ml-0.5">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200 text-[11px]">
+              <span>科室: {filterState.department}</span>
+              <button type="button" onClick={() => handleChange('department', '')} className="hover:text-slate-900 cursor-pointer p-0.5">
                 <X className="w-3 h-3" />
               </button>
             </span>
           )}
           {filterState.category && (
-            <span className="inline-flex items-center gap-1 bg-slate-100 text-slate-700 border border-slate-200/80 px-2 py-0.5 rounded-md text-[11px]">
-              类别: <strong>{filterState.category}</strong>
-              <button type="button" onClick={() => handleChange('category', '')} className="hover:text-slate-900 cursor-pointer ml-0.5">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200 text-[11px]">
+              <span>分类: {filterState.category}</span>
+              <button type="button" onClick={() => handleCategoryChange('')} className="hover:text-indigo-900 cursor-pointer p-0.5">
+                <X className="w-3 h-3" />
+              </button>
+            </span>
+          )}
+          {filterState.level1Category && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200 text-[11px]">
+              <span>一级分类: {filterState.level1Category}</span>
+              <button type="button" onClick={() => handleChange('level1Category', '')} className="hover:text-indigo-900 cursor-pointer p-0.5">
                 <X className="w-3 h-3" />
               </button>
             </span>
           )}
           {filterState.status && (
-            <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 border border-amber-200/80 px-2 py-0.5 rounded-md text-[11px]">
-              状态: <strong>{filterState.status}</strong>
-              <button type="button" onClick={() => handleChange('status', '')} className="hover:text-amber-950 cursor-pointer ml-0.5">
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 text-[11px]">
+              <span>状态: {filterState.status}</span>
+              <button type="button" onClick={() => handleChange('status', '')} className="hover:text-emerald-900 cursor-pointer p-0.5">
                 <X className="w-3 h-3" />
               </button>
             </span>
           )}
+          {filterState.loanStatus && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 border border-amber-200 text-[11px]">
+              <span>流转: {filterState.loanStatus}</span>
+              <button type="button" onClick={() => handleChange('loanStatus', '')} className="hover:text-amber-900 cursor-pointer p-0.5">
+                <X className="w-3 h-3" />
+              </button>
+            </span>
+          )}
+          {filterState.calibrationStatus && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-50 text-purple-700 border border-purple-200 text-[11px]">
+              <span>计量: {filterState.calibrationStatus}</span>
+              <button type="button" onClick={() => handleChange('calibrationStatus', '')} className="hover:text-purple-900 cursor-pointer p-0.5">
+                <X className="w-3 h-3" />
+              </button>
+            </span>
+          )}
+          {filterState.overdueStatus && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 text-[11px]">
+              <span>寿命: {filterState.overdueStatus}</span>
+              <button type="button" onClick={() => handleChange('overdueStatus', '')} className="hover:text-amber-900 cursor-pointer p-0.5">
+                <X className="w-3 h-3" />
+              </button>
+            </span>
+          )}
+          {filterState.quickFilter && filterState.quickFilter !== 'all' && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 text-[11px] font-medium">
+              <span>
+                快速筛选:{' '}
+                {filterState.quickFilter === 'pending_repair'
+                  ? '待维修'
+                  : filterState.quickFilter === 'high_value'
+                  ? '高价值(≥50万)'
+                  : filterState.quickFilter === 'low_health'
+                  ? '健康评分预警'
+                  : filterState.quickFilter === 'calibration_due'
+                  ? '计量待校准'
+                  : filterState.quickFilter === 'overdue_service'
+                  ? '超期/近失效'
+                  : filterState.quickFilter === 'in_loan'
+                  ? '跨科借调'
+                  : filterState.quickFilter === 'with_real_photo'
+                  ? '有实物照片'
+                  : filterState.quickFilter}
+              </span>
+              <button type="button" onClick={() => handleChange('quickFilter', 'all')} className="hover:text-amber-900 cursor-pointer p-0.5">
+                <X className="w-3 h-3" />
+              </button>
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={onReset}
+            className="text-[11px] text-blue-600 hover:text-blue-800 font-medium ml-1 cursor-pointer underline underline-offset-2"
+          >
+            清空所有
+          </button>
+        </div>
+      )}
+
+      {/* 自定义表头列配置模态弹窗 (由台账操作菜单调起) */}
+      {isColumnConfigOpen && columnVisibility && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-xs animate-in fade-in duration-150">
+          <div
+            className="fixed inset-0 cursor-default"
+            onClick={() => setIsColumnConfigOpen(false)}
+          />
+          <div className="relative bg-white rounded-2xl shadow-2xl border border-slate-200 p-5 z-10 text-xs w-full max-w-xl max-h-[85vh] flex flex-col animate-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3.5 shrink-0">
+              <div className="flex items-center gap-2 font-bold text-slate-900 text-sm">
+                <SlidersHorizontal className="w-4 h-4 text-blue-600" />
+                <span>台账表头列自定义配置</span>
+              </div>
+              <div className="flex items-center gap-2.5 text-xs">
+                {onSelectAllColumns && (
+                  <button
+                    type="button"
+                    onClick={() => onSelectAllColumns(true)}
+                    className="text-blue-600 hover:text-blue-800 cursor-pointer font-semibold"
+                  >
+                    全选
+                  </button>
+                )}
+                <span className="text-slate-300">|</span>
+                {onResetColumnVisibility && (
+                  <button
+                    type="button"
+                    onClick={onResetColumnVisibility}
+                    className="text-slate-500 hover:text-slate-800 cursor-pointer font-medium"
+                  >
+                    恢复默认
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setIsColumnConfigOpen(false)}
+                  className="text-slate-400 hover:text-slate-600 cursor-pointer p-1 -mr-1"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-3.5 overflow-y-auto pr-1 flex-1">
+              {/* 分组 1: 核心基础与临床标识 */}
+              <div>
+                <div className="text-[11px] font-bold text-slate-500 mb-1.5 flex items-center gap-1">
+                  <span className="w-1.5 h-3 bg-blue-600 rounded-xs"></span>
+                  <span>核心基础与临床标识</span>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                  <label className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition select-none">
+                    <input
+                      type="checkbox"
+                      checked={columnVisibility.indexNumber}
+                      onChange={() => onToggleColumn?.('indexNumber')}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="text-slate-800 font-medium">序号 (行号)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition select-none">
+                    <input
+                      type="checkbox"
+                      checked={columnVisibility.id}
+                      onChange={() => onToggleColumn?.('id')}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="text-slate-800 font-medium">设备ID</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition select-none">
+                    <input
+                      type="checkbox"
+                      checked={columnVisibility.nameModel}
+                      onChange={() => onToggleColumn?.('nameModel')}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="text-slate-800 font-bold">设备名称 & 型号 (含内部编号)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition select-none">
+                    <input
+                      type="checkbox"
+                      checked={columnVisibility.status}
+                      onChange={() => onToggleColumn?.('status')}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="text-slate-800 font-bold">运行状态</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* 分组 2: 分类层级 */}
+              <div>
+                <div className="text-[11px] font-bold text-slate-500 mb-1.5 flex items-center gap-1">
+                  <span className="w-1.5 h-3 bg-indigo-600 rounded-xs"></span>
+                  <span>国家药监 (NMPA) 分类</span>
+                </div>
+                <div className="grid grid-cols-3 gap-1.5 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                  <label className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition select-none">
+                    <input
+                      type="checkbox"
+                      checked={columnVisibility.category}
+                      onChange={() => onToggleColumn?.('category')}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="text-slate-800 font-medium">大类</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition select-none">
+                    <input
+                      type="checkbox"
+                      checked={columnVisibility.level1Category}
+                      onChange={() => onToggleColumn?.('level1Category')}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="text-slate-800 font-medium">一级分类</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition select-none">
+                    <input
+                      type="checkbox"
+                      checked={columnVisibility.level2Category}
+                      onChange={() => onToggleColumn?.('level2Category')}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="text-slate-800 font-medium">二级分类</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* 分组 3: 制造与出厂信息 */}
+              <div>
+                <div className="text-[11px] font-bold text-slate-500 mb-1.5 flex items-center gap-1">
+                  <span className="w-1.5 h-3 bg-amber-600 rounded-xs"></span>
+                  <span>出厂与服役生命周期</span>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                  <label className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition select-none">
+                    <input
+                      type="checkbox"
+                      checked={columnVisibility.sn}
+                      onChange={() => onToggleColumn?.('sn')}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="text-slate-800 font-medium">出厂编号 (SN)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition select-none">
+                    <input
+                      type="checkbox"
+                      checked={columnVisibility.manufacturer}
+                      onChange={() => onToggleColumn?.('manufacturer')}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="text-slate-800 font-medium">生产厂家</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition select-none">
+                    <input
+                      type="checkbox"
+                      checked={columnVisibility.manufactureDate}
+                      onChange={() => onToggleColumn?.('manufactureDate')}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="text-slate-800 font-medium">生产日期 / 设计寿命</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition select-none">
+                    <input
+                      type="checkbox"
+                      checked={columnVisibility.enableDate}
+                      onChange={() => onToggleColumn?.('enableDate')}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="text-slate-800 font-medium">投用时间</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* 分组 4: 科室与使用场所 */}
+              <div>
+                <div className="text-[11px] font-bold text-slate-500 mb-1.5 flex items-center gap-1">
+                  <span className="w-1.5 h-3 bg-emerald-600 rounded-xs"></span>
+                  <span>使用科室与存放场所</span>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                  <label className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition select-none">
+                    <input
+                      type="checkbox"
+                      checked={columnVisibility.department}
+                      onChange={() => onToggleColumn?.('department')}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="text-slate-800 font-medium">使用科室</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition select-none">
+                    <input
+                      type="checkbox"
+                      checked={columnVisibility.usageLocation}
+                      onChange={() => onToggleColumn?.('usageLocation')}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="text-slate-800 font-medium">具体使用场所</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition select-none">
+                    <input
+                      type="checkbox"
+                      checked={columnVisibility.location}
+                      onChange={() => onToggleColumn?.('location')}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="text-slate-800 font-medium">存放位置 (楼宇/楼层)</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* 分组 5: 计量、维保与AI评估 */}
+              <div>
+                <div className="text-[11px] font-bold text-slate-500 mb-1.5 flex items-center gap-1">
+                  <span className="w-1.5 h-3 bg-cyan-600 rounded-xs"></span>
+                  <span>计量检定与智能运维</span>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                  <label className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition select-none">
+                    <input
+                      type="checkbox"
+                      checked={columnVisibility.calibration}
+                      onChange={() => onToggleColumn?.('calibration')}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="text-slate-800 font-medium">法定计量 / 周期检定</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition select-none">
+                    <input
+                      type="checkbox"
+                      checked={columnVisibility.repairStats}
+                      onChange={() => onToggleColumn?.('repairStats')}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="text-slate-800 font-medium">累计维保 / 支出费用</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition select-none">
+                    <input
+                      type="checkbox"
+                      checked={columnVisibility.healthScore}
+                      onChange={() => onToggleColumn?.('healthScore')}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="text-slate-800 font-medium">AI健康评分</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition select-none">
+                    <input
+                      type="checkbox"
+                      checked={columnVisibility.maintenanceNode}
+                      onChange={() => onToggleColumn?.('maintenanceNode')}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="text-slate-800 font-medium">保养节点 / 状态</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* 分组 6: 资产台账与追溯 (最右侧区) */}
+              <div>
+                <div className="text-[11px] font-bold text-slate-500 mb-1.5 flex items-center gap-1">
+                  <span className="w-1.5 h-3 bg-purple-600 rounded-xs"></span>
+                  <span>资产台账与溯源 (列表最右侧)</span>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5 bg-slate-50 p-2 rounded-lg border border-slate-100">
+                  <label className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition select-none">
+                    <input
+                      type="checkbox"
+                      checked={columnVisibility.purchasePrice}
+                      onChange={() => onToggleColumn?.('purchasePrice')}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="text-slate-800 font-medium">购置金额 (元)</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition select-none">
+                    <input
+                      type="checkbox"
+                      checked={columnVisibility.assetNo}
+                      onChange={() => onToggleColumn?.('assetNo')}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="text-slate-800 font-medium">资产编号</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition select-none">
+                    <input
+                      type="checkbox"
+                      checked={columnVisibility.assetOwnership}
+                      onChange={() => onToggleColumn?.('assetOwnership')}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="text-slate-800 font-medium">资产归属</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded transition select-none">
+                    <input
+                      type="checkbox"
+                      checked={columnVisibility.codeId}
+                      onChange={() => onToggleColumn?.('codeId')}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="text-slate-800 font-medium">code_id (溯源码)</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3.5 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500 shrink-0">
+              <span>自定义设置已自动即时保存</span>
+              <button
+                type="button"
+                onClick={() => setIsColumnConfigOpen(false)}
+                className="px-4 py-1.5 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 active:scale-95 cursor-pointer transition shadow-2xs"
+              >
+                完成
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -1,12 +1,14 @@
 import { MedicalEquipment, EquipmentStatus } from '../types';
 import { enrichEquipmentWithMasterData } from './masterData';
 import { matchEquipmentToNmpaCategory } from './nmpaCategoryData';
+import { generatePureNumericInternalNo } from './internalNoGenerator';
 
-export function parseEquipmentTsv(tsvText: string): MedicalEquipment[] {
+export function parseEquipmentTsv(tsvText: string, existingList: MedicalEquipment[] = []): MedicalEquipment[] {
   const rawLines = tsvText.trim().split('\n');
   if (rawLines.length === 0) return [];
 
   const results: MedicalEquipment[] = [];
+  const batchAllocatedMap = new Map<string, Set<number>>();
   
   // Detect separator (tab or comma)
   const firstLine = rawLines[0];
@@ -25,7 +27,17 @@ export function parseEquipmentTsv(tsvText: string): MedicalEquipment[] {
   if (isHeader) {
     headerCols.forEach((col, idx) => {
       const lower = col.toLowerCase();
-      if (col.includes('出厂日期') || col.includes('生产日期') || col.includes('制造日期') || lower.includes('manufacture')) {
+      if (col.includes('资产编号') || col.includes('资产卡号') || col.includes('资产代码') || col.includes('固定资产编号') || lower.includes('assetno') || lower.includes('asset_no') || lower.includes('assetcode')) {
+        headerMap['assetNo'] = idx;
+      } else if (col.includes('资产归属') || col.includes('资产所属') || col.includes('产权归属') || col.includes('产权属性') || (col.includes('归属') && !col.includes('科室')) || lower.includes('ownership')) {
+        headerMap['assetOwnership'] = idx;
+      } else if (col.includes('code_id') || col.includes('codeid') || lower === 'code_id' || lower === 'code' || col.includes('物资条码') || col.includes('条形码') || col.includes('追溯码') || col.includes('条码号') || col.includes('条码') || col.includes('物资编码')) {
+        headerMap['codeId'] = idx;
+      } else if (col.includes('科室内部编号') || col.includes('科室编号') || col.includes('内部编号') || col.includes('科室自编号') || col.includes('科内编号') || col.includes('课内编号') || col.includes('自编号') || col.includes('科内自编号') || col.includes('设备自编号') || col.includes('机房机号') || col.includes('机号') || lower.includes('internalno') || lower.includes('internal_no') || lower.includes('dept_no') || lower.includes('deptno')) {
+        headerMap['internalNo'] = idx;
+      } else if (col.includes('使用场所') || col.includes('安装场所') || col.includes('使用地点') || col.includes('安装地点') || col.includes('场地') || col.includes('存放场所') || lower.includes('usagelocation') || lower.includes('usage_location')) {
+        headerMap['usageLocation'] = idx;
+      } else if (col.includes('出厂日期') || col.includes('生产日期') || col.includes('制造日期') || lower.includes('manufacture')) {
         headerMap['manufactureDate'] = idx;
       } else if (col.includes('投用') || col.includes('启用日期') || lower.includes('enable')) {
         headerMap['enableDate'] = idx;
@@ -84,10 +96,15 @@ export function parseEquipmentTsv(tsvText: string): MedicalEquipment[] {
       if (headerMap[fieldKey] !== undefined && cols[headerMap[fieldKey]] !== undefined) {
         return cols[headerMap[fieldKey]] || fallback;
       }
-      return cols[defaultPos] !== undefined ? cols[defaultPos] : fallback;
+      return defaultPos >= 0 && cols[defaultPos] !== undefined ? cols[defaultPos] : fallback;
     };
 
     const id = getValue('id', 0) || `EQ-${10000 + i}`;
+    const assetNo = getValue('assetNo', -1, '');
+    const assetOwnership = getValue('assetOwnership', -1, '医院自有');
+    const codeId = getValue('codeId', -1, '');
+    const internalNo = getValue('internalNo', -1, '');
+    const usageLocation = getValue('usageLocation', -1, '');
     const categoryNo = getValue('categoryNo', 1, '');
     const category = getValue('category', 2, '');
     const level1No = getValue('level1No', 3, '');
@@ -141,17 +158,38 @@ export function parseEquipmentTsv(tsvText: string): MedicalEquipment[] {
       }
     }
 
-    // Sanitize if name was populated with manufacturer company name
-    const isCompanySuffix = /公司|厂|有限|制药|系统|电子|仪器|设备厂|集团|社|Inc|Corp|Ltd|GmbH|Co\.|LLC/i.test(name);
-    if ((isCompanySuffix || name === manufacturer || name === '未命名设备') && (finalLevel2Category || finalCategory)) {
-      if (name !== '未命名设备' && (!manufacturer || manufacturer === '-' || manufacturer === '国产/进口医疗器械')) {
-        manufacturer = name;
-      }
-      name = finalLevel2Category || finalCategory;
+    // Ensure user-supplied name is strictly preserved
+    if (!name || name.trim() === '') {
+      name = finalLevel2Category || finalCategory || '未命名设备';
+    }
+
+    // 如果用户未提供科室内部编号，按【科室 + 二级品目】规则自动生成纯数字顺序自增编号 (1, 2, 3...)
+    let finalInternalNo = (internalNo || '').trim();
+    if (!finalInternalNo) {
+      finalInternalNo = generatePureNumericInternalNo(
+        {
+          id,
+          department,
+          categoryNo: finalCategoryNo,
+          category: finalCategory,
+          level1No: finalLevel1No,
+          level1Category: finalLevel1Category,
+          level2No: finalLevel2No,
+          level2Category: finalLevel2Category,
+          name
+        },
+        existingList,
+        batchAllocatedMap
+      );
     }
 
     const rawItem: MedicalEquipment = {
       id,
+      assetNo: assetNo || `ZC-2023-${id.replace(/\D/g, '').padStart(5, '0') || id}`,
+      assetOwnership: assetOwnership || '医院自有',
+      codeId: codeId || `COD-${id}`,
+      internalNo: finalInternalNo,
+      usageLocation: usageLocation || '',
       categoryNo: finalCategoryNo,
       category: finalCategory,
       level1No: finalLevel1No,
@@ -178,7 +216,7 @@ export function parseEquipmentTsv(tsvText: string): MedicalEquipment[] {
       statusLogs: []
     };
 
-    // Auto-enrich phone, building and floor from Department Master Data
+    // Auto-enrich phone, building, floor and usageLocation from Department Master Data
     const enrichedItem = enrichEquipmentWithMasterData(rawItem);
     results.push(enrichedItem);
   }

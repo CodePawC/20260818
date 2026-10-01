@@ -1,4 +1,4 @@
-import { MedicalEquipment } from '../types';
+import { MedicalEquipment, OverdueFilingRecord } from '../types';
 
 export type RiskLevel = 'high' | 'medium' | 'low' | 'unknown';
 
@@ -13,8 +13,21 @@ export interface ValidityInfo {
   monthsPast: number | null; // if past, how many months
   yearsPast: string | null; // e.g. "2.3"
   riskLevel: RiskLevel;
-  riskLabel: string; // "超龄服役 (已超期)" | "寿命临期 (即将届满)" | "服役正常" | "未登记寿命"
+  riskLabel: string; // "超龄服役 (已超期)" | "寿命临期 (即将届满)" | "服役正常" | "未登记寿命" | "超期准用 (备案受控)"
   riskDescription: string;
+  // 超期服役整修与稳定性备案受控扩展字段
+  hasOverdueFiling: boolean;
+  overdueFiling?: OverdueFilingRecord;
+  isFilingActive: boolean;
+  filingValidUntil?: string;
+  filingDaysRemaining?: number | null;
+  isFilingExpiringSoon?: boolean; // 备案期不足30天
+  dualBadge?: {
+    overdueText: string;     // e.g. "超期服役 (+2.3年)"
+    complianceText: string;  // e.g. "整修质控合格 (至2027-05)"
+    filingNo: string;        // e.g. "EXT-2026-0518"
+    validUntil: string;
+  };
 }
 
 export function parseValidityDate(dateStr?: string): Date | null {
@@ -41,6 +54,7 @@ export function getEquipmentValidityInfo(equipment: Partial<MedicalEquipment>): 
   const years = equipment.productValidity ? parseFloat(equipment.productValidity) : null;
 
   if (!mDate || !years || isNaN(years)) {
+    const hasFiling = !!equipment.overdueFiling;
     return {
       manufactureDateStr: mDateStr || '-',
       validityYears: years,
@@ -54,6 +68,12 @@ export function getEquipmentValidityInfo(equipment: Partial<MedicalEquipment>): 
       riskLevel: 'unknown',
       riskLabel: '未标年限',
       riskDescription: '设备未登记出厂生产日期或标称设计使用年限。',
+      hasOverdueFiling: hasFiling,
+      overdueFiling: equipment.overdueFiling,
+      isFilingActive: hasFiling && equipment.overdueFiling?.filingStatus === 'ACTIVE',
+      filingValidUntil: equipment.overdueFiling?.validUntil,
+      filingDaysRemaining: null,
+      isFilingExpiringSoon: false
     };
   }
 
@@ -100,6 +120,46 @@ export function getEquipmentValidityInfo(equipment: Partial<MedicalEquipment>): 
     riskDescription = `⏳【设计寿命临期】设备将于 ${daysRemaining} 天后（${expirationDateStr}）达到厂家标称的出厂使用年限，请提前准备老旧机况评估或新购替换预算计划。`;
   }
 
+  // 计算超期备案与稳定性检测准用状态
+  const overdueFiling = equipment.overdueFiling;
+  const hasOverdueFiling = !!overdueFiling;
+  let isFilingActive = false;
+  let filingDaysRemaining: number | null = null;
+  let isFilingExpiringSoon = false;
+  let dualBadge: ValidityInfo['dualBadge'] = undefined;
+
+  if (overdueFiling) {
+    const filingExpDate = parseValidityDate(overdueFiling.validUntil);
+    if (filingExpDate) {
+      const fDiff = filingExpDate.getTime() - now.getTime();
+      filingDaysRemaining = Math.ceil(fDiff / (1000 * 60 * 60 * 24));
+    }
+    isFilingActive = overdueFiling.filingStatus === 'ACTIVE' && (filingDaysRemaining === null || filingDaysRemaining >= 0);
+    isFilingExpiringSoon = isFilingActive && filingDaysRemaining !== null && filingDaysRemaining <= 30;
+
+    if (isExpired) {
+      if (isFilingActive) {
+        riskLevel = isFilingExpiringSoon ? 'medium' : 'low';
+        riskLabel = isFilingExpiringSoon 
+          ? `超期在用 · 备案临期 (剩${filingDaysRemaining}天)` 
+          : `超期在用 · 稳定性合格 (至${overdueFiling.validUntil})`;
+        
+        riskDescription = `🛡️【超期准用受控设备】该设备虽已超过出厂标称设计使用寿命（超期 ${yearsPastStr} 年），但已于 ${overdueFiling.refurbishDate} 完成深度整修与关键备件换新，并通过了 ${overdueFiling.stabilityTestAgency} 的 72小时连续工况稳定性与 GB 9706.1 电气安全合格检测（质控报告：${overdueFiling.stabilityTestReportNo}）。经医学装备管理委员会论证通过特许准用备案（备案号：${overdueFiling.filingNo}，公文号：${overdueFiling.approvalDocNo}），特许延期准用至 ${overdueFiling.validUntil}。已纳入【${overdueFiling.monitoringFrequency === 'BIWEEKLY' ? '双周' : '按月'}重点巡检】受控运行。`;
+
+        dualBadge = {
+          overdueText: `超期服役 (+${yearsPastStr || '1.0'}年)`,
+          complianceText: `整修稳定性合格 (至${overdueFiling.validUntil})`,
+          filingNo: overdueFiling.filingNo,
+          validUntil: overdueFiling.validUntil
+        };
+      } else {
+        riskLevel = 'high';
+        riskLabel = `超期在用 · 备案已到期需复核`;
+        riskDescription = `⚠️【超期备案已届满】该设备的超期特许准用备案已于 ${overdueFiling.validUntil} 到期，按《医疗器械监督管理条例》要求，必须立即组织新一轮稳定性检测复审，或下线停机申报报废！`;
+      }
+    }
+  }
+
   return {
     manufactureDateStr: mDateStr,
     validityYears: years,
@@ -113,5 +173,12 @@ export function getEquipmentValidityInfo(equipment: Partial<MedicalEquipment>): 
     riskLevel,
     riskLabel,
     riskDescription,
+    hasOverdueFiling,
+    overdueFiling,
+    isFilingActive,
+    filingValidUntil: overdueFiling?.validUntil,
+    filingDaysRemaining,
+    isFilingExpiringSoon,
+    dualBadge
   };
 }

@@ -1,7 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { MedicalEquipment, AuthUser } from '../types';
-import { Calendar, Wrench, ShieldCheck, Clock, CheckCircle, Search } from 'lucide-react';
+import { Calendar, Wrench, Search } from 'lucide-react';
 import { getUserDepartment, isHeadNurse, isClinicalStaff } from '../utils/authUtils';
+import { Pagination } from './Pagination';
 
 interface MaintenancePlansViewProps {
   equipmentList: MedicalEquipment[];
@@ -18,6 +19,8 @@ export const MaintenancePlansView: React.FC<MaintenancePlansViewProps> = ({
   const isNurse = isHeadNurse(currentUser) || isClinicalStaff(currentUser);
   const [deptFilter, setDeptFilter] = useState<string>(() => (isNurse && userDept ? userDept : ''));
   const [searchKey, setSearchKey] = useState<string>('');
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [pageSize, setPageSize] = useState<number>(10);
 
   const departmentsList = useMemo(() => {
     const set = new Set<string>();
@@ -43,20 +46,29 @@ export const MaintenancePlansView: React.FC<MaintenancePlansViewProps> = ({
     });
   }, [equipmentList, deptFilter, searchKey]);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [deptFilter, searchKey]);
+
+  const paginatedList = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredList.slice(start, start + pageSize);
+  }, [filteredList, currentPage, pageSize]);
+
   return (
-    <div className="bg-white rounded-md border border-slate-200 flex-1 flex flex-col overflow-hidden shadow-xs">
-      <div className="p-4 border-b border-slate-100 bg-white flex flex-col md:flex-row md:items-center justify-between flex-none gap-3">
+    <div className="bg-white rounded-md border border-slate-200 h-full flex flex-col min-h-0 overflow-hidden shadow-xs">
+      <div className="p-3 border-b border-slate-100 bg-white flex flex-col md:flex-row md:items-center justify-between flex-none gap-2.5">
         <div>
-          <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
-            <Calendar className="w-5 h-5 text-blue-600" />
+          <h2 className="text-sm md:text-base font-bold text-slate-800 flex items-center gap-2">
+            <Calendar className="w-4 h-4 md:w-5 md:h-5 text-blue-600" />
             预防性维保(PM)与计量校准计划表 Maintenance Plans
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5 font-medium">
+          <p className="text-[11px] text-slate-500 mt-0.5 font-medium">
             按季度定期对全院生命支持类与急救设备执行例行清洁、定标与安全检测
           </p>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
           {/* Department filter */}
           <div className="flex items-center gap-1">
             <select
@@ -97,21 +109,21 @@ export const MaintenancePlansView: React.FC<MaintenancePlansViewProps> = ({
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto">
-        <table className="w-full text-left border-collapse text-sm">
-          <thead className="sticky top-0 bg-white z-10">
-            <tr className="text-slate-400 text-xs font-bold uppercase tracking-wider border-b border-slate-100">
-              <th className="px-6 py-4">Asset ID / 编号</th>
-              <th className="px-6 py-4">Asset Name / 设备名称</th>
-              <th className="px-6 py-4">Dept / 科室</th>
-              <th className="px-6 py-4">Manager / 负责人</th>
-              <th className="px-6 py-4">Last PM / 上次维保</th>
-              <th className="px-6 py-4">Next PM / 预计下次</th>
-              <th className="px-6 py-4">Cycle Status / 周期状态</th>
-              <th className="px-6 py-4 text-right">Action / 操作</th>
+      <div className="flex-1 min-h-0 overflow-auto">
+        <table className="w-full text-left border-collapse text-xs">
+          <thead className="sticky top-0 bg-slate-50 z-10 shadow-2xs border-b border-slate-200">
+            <tr className="text-slate-600 text-xs font-bold uppercase tracking-wider">
+              <th className="px-4 py-2.5">Asset ID / 编号</th>
+              <th className="px-4 py-2.5">Asset Name / 设备名称</th>
+              <th className="px-4 py-2.5">Dept / 科室</th>
+              <th className="px-4 py-2.5">Manager / 负责人</th>
+              <th className="px-4 py-2.5">Last PM / 上次维保</th>
+              <th className="px-4 py-2.5">Next PM / 预计下次</th>
+              <th className="px-4 py-2.5">Cycle Status / 周期状态</th>
+              <th className="px-4 py-2.5 text-right">Action / 操作</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-50 text-slate-700">
+          <tbody className="divide-y divide-slate-100 text-slate-700">
             {filteredList.length === 0 ? (
               <tr>
                 <td colSpan={8} className="p-8 text-center text-slate-400 text-sm">
@@ -119,36 +131,36 @@ export const MaintenancePlansView: React.FC<MaintenancePlansViewProps> = ({
                 </td>
               </tr>
             ) : (
-              filteredList.map((item) => (
+              paginatedList.map((item) => (
                 <tr key={item.id} className="hover:bg-slate-50/80 transition">
-                  <td className="px-6 py-4 font-mono text-xs text-slate-600 font-medium">
+                  <td className="px-4 py-2.5 font-mono text-slate-600 font-medium whitespace-nowrap">
                     {item.sn}
                   </td>
-                  <td className="px-6 py-4 font-medium text-slate-800">
-                    {item.name}
-                    <span className="block text-xs text-slate-400 font-normal">{item.model}</span>
+                  <td className="px-4 py-2.5 font-medium text-slate-800">
+                    <div className="font-bold text-slate-900">{item.name}</div>
+                    <span className="block text-[11px] text-slate-400 font-normal">{item.model}</span>
                   </td>
-                  <td className="px-6 py-4 font-medium text-slate-700">{item.department}</td>
-                  <td className="px-6 py-4">{item.manager}</td>
-                  <td className="px-6 py-4 font-mono text-xs text-slate-500">{item.lastMaintenanceDate || '未记录'}</td>
-                  <td className="px-6 py-4 font-mono text-xs font-bold text-blue-600">
+                  <td className="px-4 py-2.5 font-medium text-slate-700 whitespace-nowrap">{item.department}</td>
+                  <td className="px-4 py-2.5 whitespace-nowrap">{item.manager}</td>
+                  <td className="px-4 py-2.5 font-mono text-slate-500 whitespace-nowrap">{item.lastMaintenanceDate || '未记录'}</td>
+                  <td className="px-4 py-2.5 font-mono font-bold text-blue-600 whitespace-nowrap">
                     {item.nextMaintenanceDate || '2026-12-31'}
                   </td>
-                  <td className="px-6 py-4">
+                  <td className="px-4 py-2.5 whitespace-nowrap">
                     {item.status === '维护保养中' ? (
-                      <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-700 inline-flex items-center gap-1">
+                      <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-700 inline-flex items-center gap-1">
                         MAINTENANCE
                       </span>
                     ) : (
-                      <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-700 inline-flex items-center gap-1">
+                      <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-700 inline-flex items-center gap-1">
                         REGULAR
                       </span>
                     )}
                   </td>
-                  <td className="px-6 py-4 text-right">
+                  <td className="px-4 py-2.5 text-right whitespace-nowrap">
                     <button
                       onClick={() => onOpenRepairModalForDevice(item)}
-                      className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition shadow-xs inline-flex items-center gap-1.5 cursor-pointer ml-auto"
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1 rounded-lg text-xs font-semibold transition shadow-xs inline-flex items-center gap-1.5 cursor-pointer ml-auto"
                     >
                       <Wrench className="w-3.5 h-3.5" />
                       发起例行PM保养
@@ -160,6 +172,18 @@ export const MaintenancePlansView: React.FC<MaintenancePlansViewProps> = ({
           </tbody>
         </table>
       </div>
+
+      {/* Fixed Footer Pagination */}
+      <Pagination
+        currentPage={currentPage}
+        pageSize={pageSize}
+        totalCount={filteredList.length}
+        onPageChange={setCurrentPage}
+        onPageSizeChange={(sz) => {
+          setPageSize(sz);
+          setCurrentPage(1);
+        }}
+      />
     </div>
   );
 };

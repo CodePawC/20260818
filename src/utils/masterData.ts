@@ -2035,574 +2035,8 @@ export const DEFAULT_DEPARTMENTS: DepartmentMaster[] = [
 ];
 
 // ==================== 4. 默认全域设备干系人与工程师主数据 (5大干系人集群) ====================
-export const DEFAULT_STAFF: StaffPersonMaster[] = [
-  // --- A. 院内医学工程保障集群 ---
-  {
-    id: 'STAFF-01',
-    employeeNo: 'EMP-7001',
-    name: '崔伟',
-    stakeholderCategory: 'hospital_engineering',
-    organization: '五莲县人民医院',
-    departmentId: '303',
-    departmentName: '医疗设备科',
-    role: '维修工程师',
-    phone: '7991237',
-    email: 'cuiwei@hospital.wl.cn',
-    title: '主管工程师 / 大型设备专管工程师',
-    isPrimaryContact: true,
-    specialties: ['放射影像 (CT/MRI/DR/DSA)', '放疗与核医学 (直线加速器/SPECT)'],
-    serviceScope: '全院放射影像与核医学设备、DSA血管机维保调配',
-    emergencyTier: 'L2',
-    certifications: ['大型医用设备上岗证 (CT/MRI/DSA)', '辐射安全与防护培训合格证', '临床工程技师/主管技师职称'],
-    credentials: [
-      { certName: '大型医用设备上岗证 (CT/MRI/DSA)', certNo: 'SD-RAD-2023-0188', issuer: '国家卫健委能力建设中心', expireDate: '2027-12-31' },
-      { certName: '辐射安全与防护培训合格证', certNo: 'ECO-FS-2024-099', issuer: '生态环境部核与辐射安全中心', expireDate: '2028-06-30' }
-    ],
-    status: 'active',
-    notes: '分管1号楼影像中心、核医学科与急诊放射设备。'
-  },
-  {
-    id: 'STAFF-02',
-    employeeNo: 'EMP-7002',
-    name: '孙志强',
-    stakeholderCategory: 'hospital_engineering',
-    organization: '五莲县人民医院',
-    departmentId: '303',
-    departmentName: '医疗设备科',
-    role: '维修工程师',
-    phone: '7991237',
-    email: 'sunzhiqiang@hospital.wl.cn',
-    title: '临床工程主管 / 抢修响应责任工程师',
-    isPrimaryContact: true,
-    specialties: ['急救生命支持 (呼吸机/除颤仪/监护仪)', '手术麻醉 (麻醉机/腔镜/高频电刀)', '血液净化 (血透机/CRRT/水处理系统)'],
-    serviceScope: 'ICU/急诊/手术室急救生命支持类设备抢修与日常巡检',
-    emergencyTier: 'L1',
-    certifications: ['国家特种设备作业人员证 (压力容器)', '低压/高压电工特种作业操作证', '临床工程技师/主管技师职称'],
-    credentials: [
-      { certName: '特种设备安全管理与作业人员证', certNo: 'TS-SD-2022-8812', issuer: '市场监督管理局', expireDate: '2026-11-20' },
-      { certName: '低压电工特种作业操作证', certNo: 'EM-LOW-9912', issuer: '应急管理局', expireDate: '2027-05-15' }
-    ],
-    status: 'active',
-    notes: '24小时急救生命支持设备抢修第一联络人。'
-  },
-  {
-    id: 'STAFF-03',
-    employeeNo: 'EMP-7003',
-    name: '赵敏',
-    stakeholderCategory: 'hospital_engineering',
-    organization: '五莲县人民医院',
-    departmentId: '303',
-    departmentName: '医疗设备科',
-    role: '计量管理员',
-    phone: '7991237',
-    email: 'zhaomin@hospital.wl.cn',
-    title: '法定计量专员 / 质量安全工程师',
-    isPrimaryContact: true,
-    specialties: ['急救生命支持 (呼吸机/除颤仪/监护仪)', '消毒供应与感控 (高压灭菌器/清洗机)'],
-    serviceScope: '全院强检目录政策对标、法定计量器具定级复核与外部送检联络',
-    emergencyTier: 'L2',
-    certifications: ['注册计量检定员证 (医疗计量)', '临床工程技师/主管技师职称'],
-    credentials: [
-      { certName: '国家注册计量师职业资格证书 (二级)', certNo: 'MET-2023-0471', issuer: '人力资源社会保障部/市场监管总局', expireDate: '2028-09-30' }
-    ],
-    status: 'active'
-  },
-  {
-    id: 'STAFF-04',
-    employeeNo: 'EMP-7004',
-    name: '李主任',
-    stakeholderCategory: 'hospital_engineering',
-    organization: '五莲县人民医院',
-    departmentId: '303',
-    departmentName: '医疗设备科',
-    role: '质控主管',
-    phone: '7991237',
-    email: 'sbk@hospital.wl.cn',
-    title: '医疗设备科主任 / 高级工程师',
-    isPrimaryContact: true,
-    specialties: ['放射影像 (CT/MRI/DR/DSA)', '手术麻醉 (麻醉机/腔镜/高频电刀)'],
-    serviceScope: '全院医疗装备规划、立项论证审核与大型设备报废鉴定',
-    emergencyTier: 'L2',
-    certifications: ['临床工程技师/主管技师职称'],
-    status: 'active'
-  },
-  {
-    id: 'STAFF-05',
-    employeeNo: 'EMP-7005',
-    name: '李强',
-    stakeholderCategory: 'hospital_engineering',
-    organization: '五莲县人民医院',
-    departmentId: '303',
-    departmentName: '医疗设备科',
-    role: '库管员',
-    phone: '7991237',
-    email: 'liqiang@hospital.wl.cn',
-    title: '应急周转库管员 / 备品备件专员',
-    isPrimaryContact: false,
-    specialties: ['急救生命支持 (呼吸机/除颤仪/监护仪)', '病房基础护理 (输液泵/微量泵/防压疮床)'],
-    serviceScope: '全院应急备用机出入库调配、周转机维护与维修备件进销存',
-    emergencyTier: 'L1',
-    status: 'active'
-  },
-
-  // --- B. 院内临床与医护应用集群 ---
-  {
-    id: 'STAFF-06',
-    employeeNo: 'EMP-8001',
-    name: '王建国',
-    stakeholderCategory: 'hospital_clinical',
-    organization: '五莲县人民医院',
-    departmentId: '269',
-    departmentName: '重症医学科',
-    role: '科室主任',
-    phone: '7991278',
-    title: '主任医师 / 重症医学科科主任',
-    email: 'wangjianguo@hospital.wl.cn',
-    isPrimaryContact: true,
-    specialties: ['急救生命支持 (呼吸机/除颤仪/监护仪)', '血液净化 (血透机/CRRT/水处理系统)'],
-    emergencyTier: 'L1',
-    status: 'active',
-    notes: '分管ICU重症监护设备临床安全使用与立项采购。'
-  },
-  {
-    id: 'STAFF-07',
-    employeeNo: 'EMP-8002',
-    name: '张敏敏',
-    stakeholderCategory: 'hospital_clinical',
-    organization: '五莲县人民医院',
-    departmentId: '269',
-    departmentName: '重症医学科',
-    role: '护士长',
-    phone: '7991278',
-    title: '副主任护师 / ICU护士长',
-    isPrimaryContact: true,
-    specialties: ['急救生命支持 (呼吸机/除颤仪/监护仪)', '病房基础护理 (输液泵/微量泵/防压疮床)'],
-    emergencyTier: 'L1',
-    status: 'active',
-    notes: 'ICU急救生命支持设备日常交接班保管与紧急报修责任人。'
-  },
-  {
-    id: 'STAFF-08',
-    employeeNo: 'EMP-8003',
-    name: '宋文华',
-    stakeholderCategory: 'hospital_clinical',
-    organization: '五莲县人民医院',
-    departmentId: '288',
-    departmentName: '影像科',
-    role: '科室主任',
-    phone: '7991020',
-    title: '主任医师 / 影像科科主任',
-    isPrimaryContact: true,
-    specialties: ['放射影像 (CT/MRI/DR/DSA)'],
-    emergencyTier: 'L2',
-    certifications: ['大型医用设备上岗证 (CT/MRI/DSA)', '辐射安全与防护培训合格证'],
-    status: 'active'
-  },
-  {
-    id: 'STAFF-09',
-    employeeNo: 'EMP-8004',
-    name: '孙海燕',
-    stakeholderCategory: 'hospital_clinical',
-    organization: '五莲县人民医院',
-    departmentId: '288',
-    departmentName: '影像科',
-    role: '设备管理员',
-    phone: '7991020',
-    title: '主管技师 / 影像科技师长',
-    isPrimaryContact: true,
-    specialties: ['放射影像 (CT/MRI/DR/DSA)'],
-    serviceScope: 'CT/MRI/DR机房设备台账管理、日常开机质控校准与故障首报',
-    emergencyTier: 'L1',
-    certifications: ['大型医用设备上岗证 (CT/MRI/DSA)', '辐射安全与防护培训合格证'],
-    credentials: [
-      { certName: '大型医用设备上岗合格证 (CT技师)', certNo: 'SD-MED-2022-772', issuer: '中华医学会影像技术分会', expireDate: '2027-10-31' }
-    ],
-    status: 'active'
-  },
-  {
-    id: 'STAFF-10',
-    employeeNo: 'EMP-8005',
-    name: '王护士长',
-    stakeholderCategory: 'hospital_clinical',
-    organization: '五莲县人民医院',
-    departmentId: '286',
-    departmentName: '急诊科',
-    role: '护士长',
-    phone: '7991065',
-    title: '急诊科主管护师',
-    isPrimaryContact: true,
-    specialties: ['急救生命支持 (呼吸机/除颤仪/监护仪)'],
-    emergencyTier: 'L1',
-    status: 'active'
-  },
-  {
-    id: 'STAFF-10B',
-    employeeNo: 'EMP-8007',
-    name: '赵秀兰',
-    stakeholderCategory: 'hospital_clinical',
-    organization: '五莲县人民医院',
-    departmentId: '290',
-    departmentName: '麻醉手术科',
-    role: '护士长',
-    phone: '7991103',
-    title: '麻醉手术科护士长 / 副主任护师',
-    isPrimaryContact: true,
-    specialties: ['手术麻醉 (麻醉机/腔镜/高频电刀)'],
-    emergencyTier: 'L1',
-    status: 'active'
-  },
-  {
-    id: 'STAFF-10C',
-    employeeNo: 'EMP-8008',
-    name: '张雪梅',
-    stakeholderCategory: 'hospital_clinical',
-    organization: '五莲县人民医院',
-    departmentId: '289',
-    departmentName: '重症医学科',
-    role: '护士长',
-    phone: '7991278',
-    title: 'ICU护士长 / 重症专科主管护师',
-    isPrimaryContact: true,
-    specialties: ['急救生命支持 (呼吸机/除颤仪/监护仪)', '输液与推注设备'],
-    emergencyTier: 'L1',
-    status: 'active'
-  },
-  {
-    id: 'STAFF-10D',
-    employeeNo: 'EMP-8009',
-    name: '林护士长',
-    stakeholderCategory: 'hospital_clinical',
-    organization: '五莲县人民医院',
-    departmentId: '292',
-    departmentName: '妇科',
-    role: '护士长',
-    phone: '7991089',
-    title: '妇产科病区护士长',
-    isPrimaryContact: true,
-    specialties: ['妇产科与基础监护'],
-    emergencyTier: 'L1',
-    status: 'active'
-  },
-  {
-    id: 'STAFF-11',
-    employeeNo: 'EMP-8006',
-    name: '刘欣',
-    stakeholderCategory: 'hospital_clinical',
-    organization: '五莲县人民医院',
-    departmentId: '290',
-    departmentName: '麻醉手术科',
-    role: '设备管理员',
-    phone: '7991040',
-    title: '副主任医师 / 手术室设备专管员',
-    isPrimaryContact: true,
-    specialties: ['手术麻醉 (麻醉机/腔镜/高频电刀)'],
-    emergencyTier: 'L1',
-    status: 'active'
-  },
-
-  // --- C. 院内行政与职能监管集群 (医务/护理/院感/财务/招标/保卫/信息/医保/审计等) ---
-  {
-    id: 'STAFF-ADM-01',
-    employeeNo: 'EMP-ADM-01',
-    name: '李科长',
-    stakeholderCategory: 'hospital_administration',
-    organization: '五莲县人民医院',
-    departmentId: '331',
-    departmentName: '医务科',
-    role: '医务质控专员',
-    phone: '7991112',
-    email: 'ywk@hospital.wl.cn',
-    title: '医务科科长 / 质控委员会副主任',
-    isPrimaryContact: true,
-    specialties: ['医务质控与临床新技术准入'],
-    serviceScope: '全院大型医疗设备与新技术临床准入前置评估、医疗安全与不良事件多学科会审',
-    emergencyTier: 'L1',
-    status: 'active',
-    notes: '医疗安全与临床应急保障第一行政召集人。'
-  },
-  {
-    id: 'STAFF-ADM-02',
-    employeeNo: 'EMP-ADM-02',
-    name: '高主任',
-    stakeholderCategory: 'hospital_administration',
-    organization: '五莲县人民医院',
-    departmentId: '321',
-    departmentName: '感染管理科',
-    role: '院感监测专员',
-    phone: '7991215',
-    email: 'ygk@hospital.wl.cn',
-    title: '院感科主任 / 院感质控组长',
-    isPrimaryContact: true,
-    specialties: ['院感洗消与灭菌过程监测', '消毒供应与感控 (高压灭菌器/清洗机)'],
-    serviceScope: '消毒供应中心灭菌锅生物监测、软式内窥镜洗消质控及全院感控合规巡查',
-    emergencyTier: 'L2',
-    certifications: ['医院感染管理专职人员培训合格证'],
-    status: 'active'
-  },
-  {
-    id: 'STAFF-ADM-03',
-    employeeNo: 'EMP-ADM-03',
-    name: '周会计',
-    stakeholderCategory: 'hospital_administration',
-    organization: '五莲县人民医院',
-    departmentId: '319',
-    departmentName: '财务科',
-    role: '财务资产管理员',
-    phone: '7991025',
-    email: 'cwk@hospital.wl.cn',
-    title: '资产会计主管 / 注册会计师',
-    isPrimaryContact: true,
-    specialties: ['固定资产账务、折旧与清查'],
-    serviceScope: '全院医疗设备固定资产财务卡片建档、月度折旧计提、年度资产大清查与报废净值核销',
-    emergencyTier: 'none',
-    certifications: ['注册会计师/高级会计师资格证'],
-    status: 'active'
-  },
-  {
-    id: 'STAFF-ADM-04',
-    employeeNo: 'EMP-ADM-04',
-    name: '吴主管',
-    stakeholderCategory: 'hospital_administration',
-    organization: '五莲县人民医院',
-    departmentId: '339',
-    departmentName: '招标采购科',
-    role: '招标采购主管',
-    phone: '7991396',
-    email: 'zbb@hospital.wl.cn',
-    title: '采购办主任 / 招标师',
-    isPrimaryContact: true,
-    specialties: ['医疗设备招投标与采购商务'],
-    serviceScope: '全院医疗装备政府采购公开招投标、供应商准入资信审查及设备买卖商务合同履约',
-    emergencyTier: 'none',
-    certifications: ['招标师/招投标采购职业能力等级证书'],
-    status: 'active'
-  },
-  {
-    id: 'STAFF-ADM-05',
-    employeeNo: 'EMP-ADM-05',
-    name: '刘工',
-    stakeholderCategory: 'hospital_administration',
-    organization: '五莲县人民医院',
-    departmentId: '325',
-    departmentName: '信息网络中心',
-    role: '信息网络安全员',
-    phone: '7991230',
-    email: 'xxk@hospital.wl.cn',
-    title: '高级网络安全工程师 / PACS管理员',
-    isPrimaryContact: true,
-    specialties: ['医疗物联网安全与PACS/DICOM接口'],
-    serviceScope: '影像设备DICOM网络准入接入、医用物联网(IoMT)边界安全防护与HIS/PACS接口互联',
-    emergencyTier: 'L2',
-    certifications: ['注册信息安全专业人员(CISP/CISAW)'],
-    status: 'active'
-  },
-  {
-    id: 'STAFF-ADM-06',
-    employeeNo: 'EMP-ADM-06',
-    name: '孙队长',
-    stakeholderCategory: 'hospital_administration',
-    organization: '五莲县人民医院',
-    departmentId: '322',
-    departmentName: '保卫科',
-    role: '消防安保负责人',
-    phone: '7991110',
-    email: 'bwk@hospital.wl.cn',
-    title: '保卫科消防主管 / 注册消防工程师',
-    isPrimaryContact: true,
-    specialties: ['消防安保与放射源安全管理'],
-    serviceScope: '高压氧舱、医用气体汇流排机房、直线加速器放射源库安防与消防联动定期演练',
-    emergencyTier: 'L1',
-    certifications: ['消防设施操作员/注册消防工程师'],
-    status: 'active'
-  },
-  {
-    id: 'STAFF-ADM-07',
-    employeeNo: 'EMP-ADM-07',
-    name: '钱督导',
-    stakeholderCategory: 'hospital_administration',
-    organization: '五莲县人民医院',
-    departmentId: '323',
-    departmentName: '护理部',
-    role: '护理部专管员',
-    phone: '7991406',
-    email: 'hlb@hospital.wl.cn',
-    title: '护理部副主任 / 主任护师',
-    isPrimaryContact: true,
-    specialties: ['护理急救设备全院督导与调配', '急救生命支持 (呼吸机/除颤仪/监护仪)'],
-    serviceScope: '全院各护理单元抢救车设备日常完好率督查、护士除颤/呼吸机标准化操作考核与应急跨科借调',
-    emergencyTier: 'L1',
-    status: 'active'
-  },
-
-  // --- D. 生产厂家售后与销售集群 ---
-  {
-    id: 'STAFF-12',
-    employeeNo: 'OEM-GE-01',
-    name: '杜工',
-    stakeholderCategory: 'oem_vendor',
-    organization: '通用电气医疗系统 (GE Healthcare)',
-    departmentId: '303',
-    departmentName: '医疗设备科',
-    role: '驻场原厂工程师',
-    phone: '138-5321-8899',
-    email: 'du.engineer@gehealthcare.com',
-    title: '高级现场服务工程师 (FSE-Level 4)',
-    isPrimaryContact: true,
-    specialties: ['放射影像 (CT/MRI/DR/DSA)'],
-    serviceScope: 'GE Revolution CT、Optima 1.5T MR 深度维保、大修调试与核心固件升级',
-    emergencyTier: 'L3',
-    certifications: ['原厂维修认证工程师证书 (Level 3/4)', '辐射安全与防护培训合格证'],
-    credentials: [
-      { certName: 'GE Healthcare Global CT/MR Level 4 Certified', certNo: 'GE-FSE-CN-2023-902', issuer: 'GE Healthcare Training Institute', expireDate: '2028-12-31' }
-    ],
-    serviceContractNo: 'HT-2025-GE-001',
-    status: 'active',
-    notes: '负责GE CT与MRI保内/保外深度维保与远程TAC诊断支持。'
-  },
-  {
-    id: 'STAFF-13',
-    employeeNo: 'OEM-GE-02',
-    name: '陈经理',
-    stakeholderCategory: 'oem_vendor',
-    organization: '通用电气医疗系统 (GE Healthcare)',
-    departmentId: '303',
-    departmentName: '医疗设备科',
-    role: '原厂售后/销售专员',
-    phone: '139-6420-5566',
-    email: 'chen.manager@gehealthcare.com',
-    title: '鲁东大区售后服务经理 (CSM) / 商务专员',
-    isPrimaryContact: false,
-    specialties: ['放射影像 (CT/MRI/DR/DSA)'],
-    serviceScope: 'GE全线设备维保合同续约、原厂配件现货调配、保修方案定制',
-    emergencyTier: 'none',
-    serviceContractNo: 'HT-2025-GE-001',
-    status: 'active'
-  },
-  {
-    id: 'STAFF-14',
-    employeeNo: 'OEM-MR-01',
-    name: '郑工',
-    stakeholderCategory: 'oem_vendor',
-    organization: '深圳迈瑞生物医疗电子股份有限公司',
-    departmentId: '303',
-    departmentName: '医疗设备科',
-    role: '驻场原厂工程师',
-    phone: '186-6988-1234',
-    email: 'zheng.engineer@mindray.com',
-    title: '驻点技术工程师 (FSE)',
-    isPrimaryContact: true,
-    specialties: ['急救生命支持 (呼吸机/除颤仪/监护仪)', '超声诊断 (彩超/超声刀/探头)'],
-    serviceScope: '全院迈瑞监护仪、除颤监护仪、呼吸机、麻醉机专机维保与备件支持',
-    emergencyTier: 'L3',
-    certifications: ['原厂维修认证工程师证书 (Level 3/4)'],
-    serviceContractNo: 'HT-2025-MINDRAY-002',
-    status: 'active'
-  },
-  {
-    id: 'STAFF-15',
-    employeeNo: 'OEM-MR-02',
-    name: '周敏',
-    stakeholderCategory: 'oem_vendor',
-    organization: '深圳迈瑞生物医疗电子股份有限公司',
-    departmentId: '269',
-    departmentName: '重症医学科',
-    role: '临床应用培训专家(FAS)',
-    phone: '185-6177-3344',
-    email: 'zhou.fas@mindray.com',
-    title: '临床应用培训专家 (FAS)',
-    isPrimaryContact: false,
-    specialties: ['急救生命支持 (呼吸机/除颤仪/监护仪)', '手术麻醉 (麻醉机/腔镜/高频电刀)'],
-    serviceScope: '迈瑞高端呼吸机智能通气模式培训、心电监护高级参数设定与临床考核',
-    emergencyTier: 'none',
-    status: 'active'
-  },
-
-  // --- D. 第三方维保托管服务商集群 ---
-  {
-    id: 'STAFF-16',
-    employeeNo: 'EXT-GY-01',
-    name: '钱经理',
-    stakeholderCategory: 'third_party_service',
-    organization: '国药集团医疗器械托管服务部',
-    departmentId: '303',
-    departmentName: '医疗设备科',
-    role: '三方维保工程师',
-    phone: '137-0532-6688',
-    email: 'qian.pm@sinopharm-med.cn',
-    title: '驻场项目经理 / 维保调度主管',
-    isPrimaryContact: true,
-    specialties: ['病房基础护理 (输液泵/微量泵/防压疮床)', '消毒供应与感控 (高压灭菌器/清洗机)', '康复与物理治疗 (理疗仪/牵引床/水疗)'],
-    serviceScope: '全院常规类、基础护理类设备预防性维护(PM)、定期巡检与应急周转调度',
-    emergencyTier: 'L2',
-    serviceContractNo: 'HT-2025-SINOPHARM-ALL',
-    status: 'active'
-  },
-  {
-    id: 'STAFF-17',
-    employeeNo: 'EXT-GY-02',
-    name: '冯工',
-    stakeholderCategory: 'third_party_service',
-    organization: '国药集团医疗器械托管服务部',
-    departmentId: '303',
-    departmentName: '医疗设备科',
-    role: '三方维保工程师',
-    phone: '136-1234-5678',
-    title: '资深电子医疗设备工程师',
-    isPrimaryContact: false,
-    specialties: ['超声诊断 (彩超/超声刀/探头)', '内窥镜系统 (胃肠镜/支气管镜/洗消)'],
-    serviceScope: '软性内窥镜气密性检测、超声探头阻抗测试与电源模块芯片级维修',
-    emergencyTier: 'L2',
-    certifications: ['低压/高压电工特种作业操作证'],
-    serviceContractNo: 'HT-2025-SINOPHARM-ALL',
-    status: 'active'
-  },
-
-  // --- E. 法定计量与特种监督检测机构集群 ---
-  {
-    id: 'STAFF-18',
-    employeeNo: 'REG-JL-01',
-    name: '严工',
-    stakeholderCategory: 'metrology_regulatory',
-    organization: '日照市质量技术监督评价所 (法定计量检定所)',
-    departmentId: '303',
-    departmentName: '医疗设备科',
-    role: '法定计量检定专员',
-    phone: '0633-8772155',
-    email: 'yan.metrology@rz-quality.gov.cn',
-    title: '副主任计量师 / 医疗强检主任检定员',
-    isPrimaryContact: true,
-    specialties: ['急救生命支持 (呼吸机/除颤仪/监护仪)', '放射影像 (CT/MRI/DR/DSA)'],
-    serviceScope: '全院心电图机、多参数监护仪、脑电图机、除颤仪、医用注射泵法定强制检定',
-    emergencyTier: 'none',
-    certifications: ['注册计量检定员证 (医疗计量)'],
-    credentials: [
-      { certName: '国家一级注册计量师证书', certNo: 'MET-1ST-2021-0092', issuer: '国家市场监督管理总局', expireDate: '2029-04-30' }
-    ],
-    status: 'active',
-    notes: '每年春季/秋季全院医疗器具强检主检工程师。'
-  },
-  {
-    id: 'STAFF-19',
-    employeeNo: 'REG-TJ-01',
-    name: '贾工',
-    stakeholderCategory: 'metrology_regulatory',
-    organization: '山东省特种设备检验研究院 (特检院)',
-    departmentId: '303',
-    departmentName: '医疗设备科',
-    role: '特种设备检验员',
-    phone: '0531-88123344',
-    title: '特种设备检验师 (压力容器类)',
-    isPrimaryContact: true,
-    specialties: ['消毒供应与感控 (高压灭菌器/清洗机)'],
-    serviceScope: '消毒供应中心高压蒸汽灭菌器、医用氧舱、高压储气罐法定年度定期检验与安全附件校验',
-    emergencyTier: 'none',
-    certifications: ['国家特种设备作业人员证 (压力容器)'],
-    credentials: [
-      { certName: '特种设备检验人员证 (RD-2检验师)', certNo: 'SEI-SD-2022-331', issuer: '中国特种设备检验协会', expireDate: '2027-08-31' }
-    ],
-    status: 'active'
-  }
-];
+import { DEFAULT_STAFF } from './defaultStaffData';
+export { DEFAULT_STAFF };
 
 // ==================== 5. 默认空间与具体工作场所主数据 (Workplaces & Rooms) ====================
 export const DEFAULT_ROOMS: LocationRoomMaster[] = DEFAULT_WORKPLACES;
@@ -2658,11 +2092,87 @@ export function saveMasterData(
 }
 
 /**
+ * 常见科室口语化别名与主数据标准科室名称映射字典
+ */
+export const DEPARTMENT_ALIAS_MAP: Record<string, string> = {
+  '手术室': '麻醉手术科',
+  '彩超室': '超声科',
+  '彩超科': '超声科',
+  '超声室': '超声科',
+  '急诊监护室': '重症医学科',
+  '动力设备层': '公用设施',
+  '动力科': '公用设施',
+  '后勤动力科': '公用设施',
+  '动力设备班': '公用设施',
+  '气体动力科': '公用设施',
+  '医用气站': '公用设施',
+  '气站': '公用设施',
+  '高压氧舱': '理疗科',
+  '高压氧科': '理疗科',
+  '作风办': '作风办公室',
+  '内分泌科': '内分泌风湿肾病科',
+  '妇产科': '妇科',
+  '康复科': '康复医学科',
+  '腔镜中心': '内镜室',
+  '神外专科': '神经外科',
+};
+
+/**
+ * 智能解析并精准匹配主数据科室（优先全字匹配、代码匹配、别名映射与规范化模糊匹配）
+ */
+export function resolveMasterDepartment(deptName: string, deptList: DepartmentMaster[]): DepartmentMaster | undefined {
+  if (!deptName || !deptList || deptList.length === 0) return undefined;
+  const clean = deptName.trim();
+  
+  // 1. 精确名称、代码或ID匹配
+  const exact = deptList.find(d => d.name === clean || d.code === clean || d.id === clean);
+  if (exact) return exact;
+
+  // 2. 别名字典映射匹配
+  const aliasTarget = DEPARTMENT_ALIAS_MAP[clean];
+  if (aliasTarget) {
+    const aliasMatched = deptList.find(d => d.name === aliasTarget);
+    if (aliasMatched) return aliasMatched;
+  }
+
+  // 3. 剥离“室/科/中心/病区/部”等后缀后的核心词匹配
+  const stripped = clean.replace(/(科室|中心|病区|病房|门诊|科|室|部)$/g, '');
+  if (stripped.length >= 2) {
+    const coreMatched = deptList.find(d => d.name.includes(stripped) || stripped.includes(d.name.replace(/(科室|中心|病区|病房|门诊|科|室|部)$/g, '')));
+    if (coreMatched) return coreMatched;
+  }
+
+  // 4. 包含式宽松匹配
+  return deptList.find(d => d.name.includes(clean) || clean.includes(d.name));
+}
+
+/**
+ * 统一科室匹配函数，支持别名与主数据归一化（如“手术室”自动匹配“麻醉手术科”）
+ */
+export function matchesDepartment(recordDept?: string, targetDept?: string, deptList: DepartmentMaster[] = DEFAULT_DEPARTMENTS): boolean {
+  if (!targetDept || targetDept === 'ALL' || targetDept === '') return true;
+  if (!recordDept) return false;
+  const d1 = recordDept.trim();
+  const d2 = targetDept.trim();
+  if (d1 === d2) return true;
+  if (d1.includes(d2) || d2.includes(d1)) return true;
+
+  const normalized1 = (d1 === '手术室' || d1 === '手术科' || d1 === '麻醉科' || d1 === '手术麻醉科') ? '麻醉手术科' : d1;
+  const normalized2 = (d2 === '手术室' || d2 === '手术科' || d2 === '麻醉科' || d2 === '手术麻醉科') ? '麻醉手术科' : d2;
+  if (normalized1 === normalized2) return true;
+
+  const m1 = resolveMasterDepartment(normalized1, deptList);
+  const m2 = resolveMasterDepartment(normalized2, deptList);
+  if (m1 && m2 && (m1.id === m2.id || m1.name === m2.name || m1.code === m2.code)) return true;
+
+  return false;
+}
+
+/**
  * 根据科室名称获取匹配的标准科室配置（带电话、默认楼宇、责任人）
  */
 export function getDepartmentProfile(deptName: string, deptList: DepartmentMaster[]): DepartmentMaster | undefined {
-  if (!deptName) return undefined;
-  return deptList.find(d => d.name === deptName || deptName.includes(d.name) || d.name.includes(deptName));
+  return resolveMasterDepartment(deptName, deptList);
 }
 
 /**
@@ -2712,13 +2222,14 @@ export function getDepartmentMasterInfo(
 
   const raw = deptName.trim();
   const clean = raw.replace(/^(五莲县人民医院|五莲县皮肤病医院|总院|分院)/, '').trim();
+  const baseName = clean.replace(/[\(（\[【].*?[\)）\]】]/g, '').trim();
 
   // 1. Exact match by name
-  let found = depts.find(d => d.name === raw || d.name === clean);
+  let found = depts.find(d => d.name === raw || d.name === clean || (baseName && d.name === baseName));
 
   // 2. Exact match by code or ID
   if (!found) {
-    found = depts.find(d => d.code === raw || d.id === raw);
+    found = depts.find(d => d.code === raw || d.id === raw || (baseName && (d.code === baseName || d.id === baseName)));
   }
 
   // 3. Known Aliases / Common Clinical Names
@@ -2732,9 +2243,11 @@ export function getDepartmentMasterInfo(
       '放射影像科': '影像科',
       '医学影像科': '影像科',
       '超声': '超声科',
+      '超声医学科': '超声科',
       '彩超室': '超声科',
       'B超室': '超声科',
       'B超': '超声科',
+      '心功能室': '功能检查科',
       'ICU': '重症医学科',
       '重症监护室': '重症医学科',
       '重症监护': '重症医学科',
@@ -2762,6 +2275,11 @@ export function getDepartmentMasterInfo(
       '呼吸科': '呼吸与危重症医学科',
       '消化内科': '消化保健科',
       '消化科': '消化保健科',
+      '消化内镜中心': '内镜室',
+      '内镜中心': '内镜室',
+      '胃镜室': '内镜室',
+      '肠镜室': '内镜室',
+      '消化内镜室': '内镜室',
       '内分泌科': '内分泌风湿肾病科',
       '肾内科': '内分泌风湿肾病科',
       '风湿免疫科': '内分泌风湿肾病科',
@@ -2777,6 +2295,10 @@ export function getDepartmentMasterInfo(
       '耳鼻喉科': '眼耳鼻喉科',
       '检验': '检验科',
       '化验室': '检验科',
+      '医学检验科': '检验科',
+      '检验医学科': '检验科',
+      '导管室': '介入放射科',
+      '介入导管室': '介入放射科',
       '妇产科': '产科',
       '产房': '产科',
       '儿科病区': '儿科',
@@ -2789,7 +2311,7 @@ export function getDepartmentMasterInfo(
       '皮肤科': '皮肤病门诊'
     };
 
-    const targetName = aliasMap[raw] || aliasMap[clean];
+    const targetName = aliasMap[raw] || aliasMap[clean] || (baseName ? aliasMap[baseName] : undefined);
     if (targetName) {
       found = depts.find(d => d.name === targetName);
     }
@@ -2797,7 +2319,13 @@ export function getDepartmentMasterInfo(
 
   // 4. Substring / Includes matching
   if (!found) {
-    found = depts.find(d => raw.includes(d.name) || d.name.includes(raw) || clean.includes(d.name) || d.name.includes(clean));
+    found = depts.find(d => 
+      raw.includes(d.name) || 
+      d.name.includes(raw) || 
+      clean.includes(d.name) || 
+      d.name.includes(clean) ||
+      (baseName && (baseName.includes(d.name) || d.name.includes(baseName)))
+    );
   }
 
   if (found) {
@@ -2836,8 +2364,30 @@ export function enrichEquipmentWithMasterData(
   const shouldUpdateBuilding = forceSyncAll || !equipment.building || equipment.building.trim() === '' || equipment.building === '-';
   const shouldUpdateFloor = forceSyncAll || !equipment.floor || equipment.floor.trim() === '' || equipment.floor === '-';
 
+  const defaultAssetNo = equipment.assetNo || `ZC-2023-${(equipment.id || '').replace(/\D/g, '').padStart(5, '0') || '10001'}`;
+  const defaultOwnership = equipment.assetOwnership || '医院自有';
+  const defaultCodeId = equipment.codeId || `COD-${equipment.id || '10001'}`;
+  
+  // 纯数字科室内部编号生成（若未指定或为空）
+  let defaultInternalNo = (equipment.internalNo || '').trim();
+  if (!defaultInternalNo) {
+    // 纯数字默认：提取ID后几位数字或从1开始的纯数字
+    const rawDigits = (equipment.id || '').replace(/\D/g, '');
+    const numVal = parseInt(rawDigits.slice(-2), 10);
+    defaultInternalNo = String(numVal && !isNaN(numVal) && numVal > 0 ? numVal : '1');
+  }
+  
+  const buildingText = equipment.building || info.building || '1号楼 综合楼';
+  const floorText = equipment.floor || info.floor ? `${equipment.floor || info.floor}F ` : '';
+  const defaultUsageLocation = equipment.usageLocation || equipment.location || `${buildingText} ${floorText}${equipment.department}在用区`;
+
   return {
     ...equipment,
+    assetNo: defaultAssetNo,
+    assetOwnership: defaultOwnership,
+    codeId: defaultCodeId,
+    internalNo: defaultInternalNo,
+    usageLocation: defaultUsageLocation,
     nursePhone: shouldUpdatePhone ? info.nursePhone : equipment.nursePhone,
     building: shouldUpdateBuilding ? info.building : equipment.building,
     floor: shouldUpdateFloor ? info.floor : equipment.floor,

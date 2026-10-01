@@ -531,6 +531,49 @@ export const INITIAL_EMERGENCY_LOANS: EmergencyLoanRecord[] = [
     notes: '已完成终末消毒与机内核检，已回库充电备用。'
   },
   {
+    id: 'LOAN-20260812-007',
+    equipmentId: 'EMG-1006',
+    equipmentName: '双通道智能微量注射泵',
+    equipmentModel: 'BeneFusion SP5 TGA',
+    equipmentSn: 'MR-SP5-230720',
+    category: '注输、护理和防护器械',
+    borrowingDepartment: '内分泌风湿肾病科',
+    borrowerName: '林瑞芳 (护士长)',
+    borrowerPhone: '13863371002',
+    borrowReason: '内分泌病区重症糖尿病酮症酸中毒 (DKA) 及高渗高血糖状态患者小剂量胰岛素持续微量泵入精准控糖',
+    borrowTime: '2026-08-12 10:15',
+    expectedReturnTime: '2026-08-19 18:00',
+    status: 'borrowed',
+    approver: '李强 (库管员)',
+    dispatchLocation: '应急周转库C-01区',
+    accessoriesIncluded: ['双通道固定架x1', '专用电源线x1', '微量泵连接管卡扣x2'],
+    qualityCheckPassed: true,
+    notes: '内分泌风湿肾病科重症病患胰岛素持续恒速输注在用，运行良好。'
+  },
+  {
+    id: 'LOAN-20260715-010',
+    equipmentId: 'EMG-1005',
+    equipmentName: '便携转运多参数监护仪',
+    equipmentModel: 'BeneVision N1',
+    equipmentSn: 'MR-N1-20240110',
+    category: '医用诊察和监护器械',
+    borrowingDepartment: '内分泌风湿肾病科',
+    borrowerName: '林瑞芳 (护士长)',
+    borrowerPhone: '13863371002',
+    borrowReason: '风湿免疫重症狼疮脑病伴多脏器功能损伤危重患者床旁生命体征连续监护',
+    borrowTime: '2026-07-15 08:30',
+    expectedReturnTime: '2026-07-22 18:00',
+    actualReturnTime: '2026-07-22 16:40',
+    status: 'returned',
+    approver: '李强 (库管员)',
+    dispatchLocation: '应急周转库B-03区',
+    accessoriesIncluded: ['5导联心电电缆x1', '血氧指夹探头x1', '无创血压袖带x1', '电源线x1'],
+    qualityCheckPassed: true,
+    returnInspector: '崔工 (维修工程师)',
+    returnCondition: 'intact',
+    notes: '已完好归还入库，自检与终末消毒合格。'
+  },
+  {
     id: 'LOAN-20260720-009',
     equipmentId: 'EMG-1004',
     equipmentName: '高精度遥测多参数患者监护仪',
@@ -562,7 +605,17 @@ export function loadEmergencyLoans(): EmergencyLoanRecord[] {
     const saved = localStorage.getItem(EMERGENCY_LOAN_STORAGE_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        // 自动补充合并科室借调样例
+        const existingIds = new Set(parsed.map(r => r.id));
+        const missing = INITIAL_EMERGENCY_LOANS.filter(r => !existingIds.has(r.id));
+        if (missing.length > 0) {
+          const merged = [...missing, ...parsed];
+          saveEmergencyLoans(merged);
+          return merged;
+        }
+        return parsed;
+      }
     }
   } catch (err) {
     console.warn('Failed to load emergency loans from localStorage', err);

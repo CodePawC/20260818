@@ -1,6 +1,7 @@
 import React, { useRef } from 'react';
-import { X, Printer, QrCode, Building, Tag, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { X, Printer, QrCode, Building, Tag, ShieldCheck, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { MedicalEquipment } from '../types';
+import { getEquipmentValidityInfo } from '../utils/validityUtils';
 
 interface QrLabelModalProps {
   isOpen: boolean;
@@ -46,6 +47,9 @@ export const QrLabelModal: React.FC<QrLabelModalProps> = ({
               box-sizing: border-box;
               background: #ffffff;
             }
+            .label-card.certified-border {
+              border: 2.5px solid #065f46 !important;
+            }
             .label-header {
               border-bottom: 2px solid #0f172a;
               padding-bottom: 6px;
@@ -53,6 +57,9 @@ export const QrLabelModal: React.FC<QrLabelModalProps> = ({
               display: flex;
               align-items: center;
               justify-content: space-between;
+            }
+            .label-header.certified-header {
+              border-bottom: 2px solid #065f46 !important;
             }
             .hospital-title {
               font-size: 13px;
@@ -67,6 +74,23 @@ export const QrLabelModal: React.FC<QrLabelModalProps> = ({
               color: #fff;
               padding: 2px 5px;
               border-radius: 3px;
+            }
+            .tag-type.certified {
+              background: #065f46 !important;
+              color: #ffffff !important;
+            }
+            .overdue-strip {
+              background: #ecfdf5;
+              border: 1px solid #10b981;
+              color: #064e3b;
+              font-size: 9px;
+              font-weight: 700;
+              padding: 3px 6px;
+              border-radius: 4px;
+              margin-bottom: 8px;
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
             }
             .label-body {
               display: flex;
@@ -186,67 +210,110 @@ export const QrLabelModal: React.FC<QrLabelModalProps> = ({
               // Generate mock QR code SVG url
               const qrText = encodeURIComponent(`ID:${eq.id}|SN:${eq.sn}|DEPT:${eq.department}`);
               const qrSvgUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${qrText}`;
+              const vInfo = getEquipmentValidityInfo(eq);
+              const isCertifiedOverdue = Boolean(vInfo.dualBadge && vInfo.isFilingActive && eq.overdueFiling);
 
               return (
                 <div
                   key={eq.id}
-                  className="bg-white border-2 border-slate-900 rounded-lg p-3.5 w-full max-w-[340px] shadow-sm flex flex-col justify-between hover:border-blue-600 transition"
+                  className={`label-card bg-white border-2 ${
+                    isCertifiedOverdue ? 'border-emerald-800 certified-border ring-1 ring-emerald-600/30' : 'border-slate-900'
+                  } rounded-lg p-3.5 w-full max-w-[340px] shadow-sm flex flex-col justify-between hover:border-blue-600 transition`}
                 >
                   {/* Label Header */}
-                  <div className="border-b-2 border-slate-900 pb-2 mb-2 flex items-center justify-between">
+                  <div className={`label-header border-b-2 ${
+                    isCertifiedOverdue ? 'border-emerald-800 certified-header' : 'border-slate-900'
+                  } pb-2 mb-2 flex items-center justify-between`}>
                     <div className="flex items-center gap-1.5">
                       <Building className="w-4 h-4 text-slate-800 shrink-0" />
-                      <span className="font-extrabold text-xs tracking-tight text-slate-900">三甲综合医院 • 资产装备处</span>
+                      <span className="hospital-title font-extrabold text-xs tracking-tight text-slate-900">三甲综合医院 • 资产装备处</span>
                     </div>
-                    <span className="text-[10px] font-bold bg-slate-900 text-white px-1.5 py-0.5 rounded">
-                      医疗设备标识卡
-                    </span>
+                    {isCertifiedOverdue ? (
+                      <span className="tag-type certified text-[10px] font-bold bg-emerald-800 text-white px-1.5 py-0.5 rounded flex items-center gap-1">
+                        <ShieldCheck className="w-3 h-3 text-emerald-200" />
+                        超期整修·准用合格
+                      </span>
+                    ) : (
+                      <span className="tag-type text-[10px] font-bold bg-slate-900 text-white px-1.5 py-0.5 rounded">
+                        医疗设备标识卡
+                      </span>
+                    )}
                   </div>
 
+                  {/* 特许准用与稳定性合格声明横条 (超期备案专用) */}
+                  {isCertifiedOverdue && eq.overdueFiling && (
+                    <div className="overdue-strip mb-2 px-2 py-1 bg-emerald-50 border border-emerald-300 rounded text-[9.5px] text-emerald-950 font-semibold flex items-center justify-between">
+                      <span className="flex items-center gap-1 truncate">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-700 shrink-0" />
+                        <span>72h稳定性合格·备案:{eq.overdueFiling.filingNo}</span>
+                      </span>
+                      <span className="font-mono font-bold text-emerald-800 shrink-0 ml-1">
+                        至 {eq.overdueFiling.validUntil}
+                      </span>
+                    </div>
+                  )}
+
                   {/* Label Body */}
-                  <div className="flex gap-3 items-center">
+                  <div className="label-body flex gap-3 items-center">
                     {/* QR code */}
-                    <div className="shrink-0 flex flex-col items-center justify-center p-1 bg-slate-50 border border-slate-300 rounded text-center">
+                    <div className="qr-placeholder shrink-0 flex flex-col items-center justify-center p-1 bg-slate-50 border border-slate-300 rounded text-center">
                       <img
                         src={qrSvgUrl}
                         alt="QR Code"
-                        className="w-16 h-16 object-contain"
+                        className="qr-code-img w-16 h-16 object-contain"
                         loading="lazy"
                       />
                       <span className="text-[9px] font-mono font-bold text-slate-700 mt-1">扫码报修/查验</span>
                     </div>
 
                     {/* Field Specs */}
-                    <div className="flex-1 min-w-0 text-[11px] leading-tight space-y-1">
-                      <div className="flex items-baseline gap-1">
-                        <span className="font-bold text-slate-500 shrink-0">设备名称:</span>
-                        <span className="font-bold text-slate-900 truncate" title={eq.name}>{eq.name}</span>
+                    <div className="info-grid flex-1 min-w-0 text-[11px] leading-tight space-y-1">
+                      <div className="info-row flex items-baseline gap-1">
+                        <span className="info-label font-bold text-slate-500 shrink-0">设备名称:</span>
+                        <span className="info-value font-bold text-slate-900 truncate" title={eq.name}>{eq.name}</span>
                       </div>
-                      <div className="flex items-baseline gap-1">
-                        <span className="font-bold text-slate-500 shrink-0">资产编号:</span>
-                        <span className="font-mono font-extrabold text-blue-700">{eq.id}</span>
+                      <div className="info-row flex items-baseline gap-1">
+                        <span className="info-label font-bold text-slate-500 shrink-0">资产编号:</span>
+                        <span className="info-value font-mono font-extrabold text-blue-700">{eq.assetNo || eq.id}</span>
                       </div>
-                      <div className="flex items-baseline gap-1">
-                        <span className="font-bold text-slate-500 shrink-0">规格型号:</span>
-                        <span className="font-mono text-slate-800 truncate">{eq.model || '-'}</span>
+                      {eq.internalNo && (
+                        <div className="info-row flex items-baseline gap-1">
+                          <span className="info-label font-bold text-amber-800 shrink-0">科室内部号:</span>
+                          <span className="info-value font-mono font-bold text-amber-900 bg-amber-50 px-1 rounded border border-amber-200 text-[10.5px]">
+                            {eq.internalNo}
+                          </span>
+                        </div>
+                      )}
+                      <div className="info-row flex items-baseline gap-1">
+                        <span className="info-label font-bold text-slate-500 shrink-0">规格型号:</span>
+                        <span className="info-value font-mono text-slate-800 truncate">{eq.model || '-'}</span>
                       </div>
-                      <div className="flex items-baseline gap-1">
-                        <span className="font-bold text-slate-500 shrink-0">使用科室:</span>
-                        <span className="font-bold text-slate-800 truncate">{eq.department}</span>
+                      <div className="info-row flex items-baseline gap-1">
+                        <span className="info-label font-bold text-slate-500 shrink-0">使用科室:</span>
+                        <span className="info-value font-bold text-slate-800 truncate">{eq.department}</span>
                       </div>
-                      <div className="flex items-baseline gap-1">
-                        <span className="font-bold text-slate-500 shrink-0">出厂编号:</span>
-                        <span className="font-mono text-slate-700 truncate">{eq.sn || '-'}</span>
+                      <div className="info-row flex items-baseline gap-1">
+                        <span className="info-label font-bold text-slate-500 shrink-0">出厂编号:</span>
+                        <span className="info-value font-mono text-slate-700 truncate">{eq.sn || '-'}</span>
                       </div>
                     </div>
                   </div>
 
                   {/* Label Footer */}
-                  <div className="mt-2.5 pt-1.5 border-t border-dashed border-slate-300 text-[9px] text-slate-500 flex items-center justify-between">
+                  <div className="label-footer mt-2.5 pt-1.5 border-t border-dashed border-slate-300 text-[9px] text-slate-500 flex items-center justify-between">
                     <span>启用日期: {eq.enableDate || '-'}</span>
                     <span className="flex items-center gap-1 font-semibold text-slate-700">
-                      <ShieldCheck className="w-3 h-3 text-emerald-600" />
-                      计量校准: {eq.calibration === 'Yes' ? '已校准(有效)' : '常规校准'}
+                      {isCertifiedOverdue ? (
+                        <span className="text-emerald-800 font-bold flex items-center gap-0.5">
+                          <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                          特许准用中
+                        </span>
+                      ) : (
+                        <>
+                          <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                          计量校准: {eq.calibration === 'Yes' ? '已校准(有效)' : '常规校准'}
+                        </>
+                      )}
                     </span>
                   </div>
                 </div>

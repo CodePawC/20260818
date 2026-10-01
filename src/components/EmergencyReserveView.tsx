@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Boxes, 
   Search, 
@@ -46,15 +46,27 @@ import {
   Send,
   ExternalLink,
   QrCode,
-  ClipboardCheck
+  ClipboardCheck,
+  FileCheck,
+  FileCheck2,
+  Printer,
+  UserCheck,
+  Lock,
+  Hourglass
 } from 'lucide-react';
-import { MedicalEquipment, AuthUser } from '../types';
+import { MedicalEquipment, AuthUser, DepartmentMaster, StaffPersonMaster, EquipmentLoanRecord } from '../types';
+import { ApprovalApplication } from '../types/approvalTypes';
 import { EmergencyLoanRecord, loadEmergencyLoans, saveEmergencyLoans } from '../utils/emergencyReserveData';
-import { getUserDepartment } from '../utils/authUtils';
+import { getUserDepartment, isHeadNurse, isClinicalStaff, isHospitalWidePerspective } from '../utils/authUtils';
 import { getEquipmentPhoto } from '../utils/equipmentPhotoUtils';
 import { ImagePreviewModal } from './ImagePreviewModal';
 import { PhotoUploadModal } from './PhotoUploadModal';
 import { EmergencyAuditModal } from './EmergencyAuditModal';
+import { BorrowEquipmentModal } from './BorrowEquipmentModal';
+import { ReturnEquipmentModal } from './ReturnEquipmentModal';
+import { LoanVoucherPrintModal } from './LoanVoucherPrintModal';
+import { LoanTimeProgressBar, computeLoanTimeProgress, LoanCountdownBadge } from './LoanTimeProgressBar';
+import { Pagination } from './Pagination';
 
 export type GroupByOption = 'category' | 'model' | 'location' | 'status' | 'none';
 
@@ -74,19 +86,48 @@ export interface InventoryGroup {
 interface EmergencyReserveViewProps {
   equipmentList: MedicalEquipment[];
   currentUser: AuthUser | null;
+  departments?: DepartmentMaster[];
+  staff?: StaffPersonMaster[];
   onOpenRepairModal?: (device: MedicalEquipment) => void;
   onOpenAiModal?: (device: MedicalEquipment) => void;
   onViewDeviceDetail?: (device: MedicalEquipment) => void;
   onOpenQrLabels?: (devices: MedicalEquipment[]) => void;
+  onNavigateToApprovals?: (data: Partial<ApprovalApplication>) => void;
+  onConfirmBorrow?: (
+    equipmentId: string,
+    loanRecord: EquipmentLoanRecord,
+    shouldPrint?: boolean
+  ) => void;
+  onConfirmReturn?: (
+    equipmentId: string,
+    returnDetails: {
+      actualReturnTime: string;
+      returnReceiverName: string;
+      returnNotes: string;
+      equipmentStatusAfterReturn: '正常运行' | '维护保养中' | '故障待修';
+    },
+    shouldPrint?: boolean
+  ) => void;
+  onPrintLoanVoucher?: (
+    equipment: MedicalEquipment,
+    loanRecord: EquipmentLoanRecord,
+    mode?: 'loan' | 'return'
+  ) => void;
 }
 
 export const EmergencyReserveView: React.FC<EmergencyReserveViewProps> = ({
   equipmentList,
   currentUser,
+  departments = [],
+  staff = [],
   onOpenRepairModal,
   onOpenAiModal,
   onViewDeviceDetail,
-  onOpenQrLabels
+  onOpenQrLabels,
+  onNavigateToApprovals,
+  onConfirmBorrow,
+  onConfirmReturn,
+  onPrintLoanVoucher
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'inventory' | 'loans' | 'distribution'>('inventory');
   const [inventoryViewMode, setInventoryViewMode] = useState<'list' | 'grid'>('grid'); // 默认卡片视图
@@ -103,10 +144,68 @@ export const EmergencyReserveView: React.FC<EmergencyReserveViewProps> = ({
   const [selectedCategory, setSelectedCategory] = useState('全部类别');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<'all' | 'available' | 'borrowed' | 'maintenance'>('all');
   
-  // 借出设备分布专区筛选与AI推演状态
-  const [distDeptFilter, setDistDeptFilter] = useState('全部科室');
+  // 当前登录用户身份与科室识别
+  const userDept = getUserDepartment(currentUser);
+  const userIsNurse = isHeadNurse(currentUser);
+  const userIsClinical = isClinicalStaff(currentUser);
+  const isDeptFocusedUser = Boolean(userDept && (userIsNurse || userIsClinical));
+
+  // 全院级管理/医工视角判定与严格科室数据权限隔离控制
+  const hasHospitalWideAccess = isHospitalWidePerspective(currentUser);
+  // 当用户为临床医护/护士长且未具备全院管辖权限时，强制启用严格科室数据隔离（如林瑞芳护士长）
+  const isDeptRestricted = !hasHospitalWideAccess && Boolean(userDept);
+
+  // 借调用记录与流转日志 (SubTab 2: loans) 状态（受限用户强制锁定为本科室）
+  const [loanScope, setLoanScope] = useState<'dept' | 'all'>(() => (isDeptRestricted ? 'dept' : isDeptFocusedUser ? 'dept' : 'all'));
+  const [loanDeptFilter, setLoanDeptFilter] = useState<string>(() => (isDeptRestricted && userDept ? userDept : '全部科室'));
+  const [loanStatusFilter, setLoanStatusFilter] = useState<'all' | 'borrowed' | 'returned' | 'overdue'>('all');
+  const [loanSearch, setLoanSearch] = useState('');
+
+  // 借出设备分布专区 (SubTab 3: distribution) 状态（受限用户强制锁定为本科室）
+  const [distScope, setDistScope] = useState<'dept' | 'all'>(() => (isDeptRestricted ? 'dept' : isDeptFocusedUser ? 'dept' : 'all'));
+  const [distDeptFilter, setDistDeptFilter] = useState<string>(() => (isDeptRestricted && userDept ? userDept : '全部科室'));
   const [distStatusFilter, setDistStatusFilter] = useState<'all' | 'overdue' | 'longterm' | 'normal'>('all');
   const [distSearch, setDistSearch] = useState('');
+
+  // 当切换登录用户身份时自动响应并切换科室权限与聚焦范围
+  useEffect(() => {
+    const dept = getUserDepartment(currentUser);
+    const hasAccess = isHospitalWidePerspective(currentUser);
+    const shouldRestrict = !hasAccess && Boolean(dept);
+    const isNurse = isHeadNurse(currentUser);
+    const isClin = isClinicalStaff(currentUser);
+    const shouldFocus = shouldRestrict || Boolean(dept && (isNurse || isClin));
+
+    if (shouldFocus && dept) {
+      setDistDeptFilter(dept);
+      setDistScope('dept');
+      setLoanDeptFilter(dept);
+      setLoanScope('dept');
+    } else {
+      setDistDeptFilter('全部科室');
+      setDistScope('all');
+      setLoanDeptFilter('全部科室');
+      setLoanScope('all');
+    }
+  }, [currentUser?.id, currentUser?.departmentName, currentUser?.role]);
+
+  // 科室操作与数据访问鉴权检查机制：确保用户只能在符合权限的科室范围内浏览或进行应急设备的流转操作
+  const checkDepartmentAccess = (
+    targetDepartment?: string,
+    actionName = '操作'
+  ): boolean => {
+    if (hasHospitalWideAccess) return true;
+    if (!userDept) {
+      showToast(`⚠️ 权限受限：当前登录用户未绑定临床科室，无法执行${actionName}！`);
+      return false;
+    }
+    if (!targetDepartment || targetDepartment.trim() !== userDept.trim()) {
+      showToast(`⛔ 权限拦截：您当前仅具备【${userDept}】的应急流转权限，禁止对【${targetDepartment || '其他科室'}】的记录执行${actionName}！`);
+      return false;
+    }
+    return true;
+  };
+
   const [aiGenerating, setAiGenerating] = useState(false);
   const [aiProcurementReport, setAiProcurementReport] = useState<string>('');
   const [isAiReportModalOpen, setIsAiReportModalOpen] = useState(false);
@@ -120,11 +219,14 @@ export const EmergencyReserveView: React.FC<EmergencyReserveViewProps> = ({
     return loadEmergencyLoans();
   });
 
-  // 弹窗状态
-  const [isApplyModalOpen, setIsApplyModalOpen] = useState(false);
-  const [isReturnModalOpen, setIsReturnModalOpen] = useState(false);
-  const [selectedDeviceForLoan, setSelectedDeviceForLoan] = useState<MedicalEquipment | null>(null);
-  const [selectedLoanForReturn, setSelectedLoanForReturn] = useState<EmergencyLoanRecord | null>(null);
+  // 标准跨科室/应急调配借还弹窗与凭证打印状态 (与设备资产台账保持100%对齐)
+  const [borrowModalEquipment, setBorrowModalEquipment] = useState<MedicalEquipment | null>(null);
+  const [returnModalEquipment, setReturnModalEquipment] = useState<MedicalEquipment | null>(null);
+  const [printVoucherModalData, setPrintVoucherModalData] = useState<{
+    equipment: MedicalEquipment;
+    loanRecord: EquipmentLoanRecord;
+    mode: 'loan' | 'return';
+  } | null>(null);
 
   // 照片大图预览 & 照片上传修改弹窗
   const [selectedPhotoDevice, setSelectedPhotoDevice] = useState<MedicalEquipment | null>(null);
@@ -132,9 +234,8 @@ export const EmergencyReserveView: React.FC<EmergencyReserveViewProps> = ({
   const [photoRefreshKey, setPhotoRefreshKey] = useState(0);
 
   // 借用申请表单
-  const userDept = getUserDepartment(currentUser) || '急诊科';
   const [borrowForm, setBorrowForm] = useState({
-    borrowingDepartment: userDept,
+    borrowingDepartment: userDept || '急诊科',
     borrowerName: currentUser?.name || '',
     borrowerPhone: currentUser?.phone || '',
     borrowReason: '',
@@ -142,6 +243,18 @@ export const EmergencyReserveView: React.FC<EmergencyReserveViewProps> = ({
     expectedReturnHour: '18:00',
     accessories: ['主机电源线', '标准病人连接附件', '操作操作指引卡']
   });
+
+  // 随用户变化更新表单默认值
+  useEffect(() => {
+    if (currentUser) {
+      setBorrowForm(prev => ({
+        ...prev,
+        borrowingDepartment: userDept || prev.borrowingDepartment,
+        borrowerName: currentUser.name || prev.borrowerName,
+        borrowerPhone: currentUser.phone || prev.borrowerPhone
+      }));
+    }
+  }, [currentUser, userDept]);
 
   // 归还验收表单
   const [returnForm, setReturnForm] = useState({
@@ -354,29 +467,133 @@ export const EmergencyReserveView: React.FC<EmergencyReserveViewProps> = ({
     });
   }, [activeLoansWithAnalytics]);
 
-  // 所有借用科室列表
+  // 所有借用科室列表 (分布专区)
   const allBorrowingDepartments = useMemo(() => {
+    if (isDeptRestricted && userDept) return [userDept];
     const set = new Set<string>();
     activeLoansWithAnalytics.forEach(l => {
       if (l.borrowingDepartment) set.add(l.borrowingDepartment);
     });
+    if (userDept) set.add(userDept);
     return ['全部科室', ...Array.from(set)];
-  }, [activeLoansWithAnalytics]);
+  }, [activeLoansWithAnalytics, isDeptRestricted, userDept]);
 
-  // 超期借调列表
+  // 所有借调流转涉及科室列表 (流转日志专区)
+  const allLoanDepartments = useMemo(() => {
+    if (isDeptRestricted && userDept) return [userDept];
+    const set = new Set<string>();
+    loanRecords.forEach(l => {
+      if (l.borrowingDepartment) set.add(l.borrowingDepartment);
+    });
+    if (userDept) set.add(userDept);
+    return ['全部科室', ...Array.from(set)];
+  }, [loanRecords, isDeptRestricted, userDept]);
+
+  // 本科室所有借调流转记录统计
+  const userDeptLoanRecords = useMemo(() => {
+    if (!userDept) return [];
+    return loanRecords.filter(r => r.borrowingDepartment === userDept);
+  }, [loanRecords, userDept]);
+
+  const userDeptActiveLoansCount = useMemo(() => {
+    return userDeptLoanRecords.filter(r => r.status === 'borrowed' || r.status === 'overdue').length;
+  }, [userDeptLoanRecords]);
+
+  // 超期借调列表 (全院/或受限本科室)
   const overdueLoansList = useMemo(() => {
-    return activeLoansWithAnalytics.filter(l => l.isOverdue);
-  }, [activeLoansWithAnalytics]);
+    return activeLoansWithAnalytics.filter(l => {
+      if (isDeptRestricted && userDept && l.borrowingDepartment !== userDept) return false;
+      return l.isOverdue;
+    });
+  }, [activeLoansWithAnalytics, isDeptRestricted, userDept]);
 
-  // 长期借调 (>7天) 列表
+  // 长期借调 (>7天) 列表 (全院/或受限本科室)
   const longTermLoansList = useMemo(() => {
-    return activeLoansWithAnalytics.filter(l => l.isLongTerm);
-  }, [activeLoansWithAnalytics]);
+    return activeLoansWithAnalytics.filter(l => {
+      if (isDeptRestricted && userDept && l.borrowingDepartment !== userDept) return false;
+      return l.isLongTerm;
+    });
+  }, [activeLoansWithAnalytics, isDeptRestricted, userDept]);
 
-  // 过滤后的科室分布数据
+  // 过滤后的借调流转记录 (SubTab 2: loans)
+  const filteredLoanRecords = useMemo(() => {
+    const now = Date.now();
+    return loanRecords.filter(loan => {
+      // 0. 安全防越权强约束：受限科室用户绝对禁止浏览其他科室流转记录
+      if (isDeptRestricted && userDept) {
+        if (loan.borrowingDepartment !== userDept) {
+          return false;
+        }
+      }
+
+      // 1. 科室过滤
+      let matchDept = true;
+      if (loanScope === 'dept' && userDept) {
+        matchDept = loan.borrowingDepartment === userDept;
+      } else if (loanDeptFilter !== '全部科室') {
+        matchDept = loan.borrowingDepartment === loanDeptFilter;
+      }
+
+      // 2. 状态过滤
+      let matchStatus = true;
+      const isOverdue = loan.status === 'overdue' || (loan.status === 'borrowed' && new Date(loan.expectedReturnTime.replace(' ', 'T')).getTime() < now);
+      if (loanStatusFilter === 'borrowed') {
+        matchStatus = loan.status === 'borrowed';
+      } else if (loanStatusFilter === 'returned') {
+        matchStatus = loan.status === 'returned';
+      } else if (loanStatusFilter === 'overdue') {
+        matchStatus = isOverdue;
+      }
+
+      // 3. 搜索过滤
+      let matchSearch = true;
+      if (loanSearch.trim()) {
+        const q = loanSearch.toLowerCase();
+        matchSearch = (
+          (loan.id || '').toLowerCase().includes(q) ||
+          (loan.equipmentName || '').toLowerCase().includes(q) ||
+          (loan.equipmentModel || '').toLowerCase().includes(q) ||
+          (loan.equipmentSn || '').toLowerCase().includes(q) ||
+          (loan.borrowerName || '').toLowerCase().includes(q) ||
+          (loan.borrowingDepartment || '').toLowerCase().includes(q) ||
+          (loan.borrowReason || '').toLowerCase().includes(q) ||
+          (loan.notes || '').toLowerCase().includes(q)
+        );
+      }
+
+      return matchDept && matchStatus && matchSearch;
+    });
+  }, [loanRecords, isDeptRestricted, userDept, loanScope, loanDeptFilter, loanStatusFilter, loanSearch]);
+
+  // 应急借调流转记录分页
+  const [loanPage, setLoanPage] = useState<number>(1);
+  const [loanPageSize, setLoanPageSize] = useState<number>(15);
+
+  useEffect(() => {
+    setLoanPage(1);
+  }, [loanScope, loanDeptFilter, loanStatusFilter, loanSearch]);
+
+  const paginatedLoanRecords = useMemo(() => {
+    const start = (loanPage - 1) * loanPageSize;
+    return filteredLoanRecords.slice(start, start + loanPageSize);
+  }, [filteredLoanRecords, loanPage, loanPageSize]);
+
+  // 过滤后的科室分布数据 (SubTab 3: distribution)
   const filteredDepartmentDistribution = useMemo(() => {
     return departmentDistribution.filter(deptItem => {
-      const matchDept = distDeptFilter === '全部科室' || deptItem.department === distDeptFilter;
+      // 0. 安全防越权强约束：受限科室用户绝对禁止浏览其他科室借调分布
+      if (isDeptRestricted && userDept) {
+        if (deptItem.department !== userDept) {
+          return false;
+        }
+      }
+
+      let matchDept = true;
+      if (distScope === 'dept' && userDept) {
+        matchDept = deptItem.department === userDept;
+      } else if (distDeptFilter !== '全部科室') {
+        matchDept = deptItem.department === distDeptFilter;
+      }
       
       let matchStatus = true;
       if (distStatusFilter === 'overdue') {
@@ -397,7 +614,35 @@ export const EmergencyReserveView: React.FC<EmergencyReserveViewProps> = ({
 
       return matchDept && matchStatus && matchSearch;
     });
-  }, [departmentDistribution, distDeptFilter, distStatusFilter, distSearch]);
+  }, [departmentDistribution, isDeptRestricted, userDept, distScope, distDeptFilter, distStatusFilter, distSearch]);
+
+  // SubTab 3 分布专区动态卡片指标（精准响应科室筛选与本科室视角）
+  const displayDistributionMetrics = useMemo(() => {
+    const isFiltered = isDeptRestricted || (distScope === 'dept' && !!userDept) || distDeptFilter !== '全部科室';
+    const targetDept = isDeptRestricted && userDept ? userDept : (distScope === 'dept' && userDept ? userDept : distDeptFilter);
+    const targetDist = isFiltered ? filteredDepartmentDistribution : departmentDistribution;
+    const targetLoans = isFiltered 
+      ? activeLoansWithAnalytics.filter(l => l.borrowingDepartment === targetDept)
+      : activeLoansWithAnalytics;
+    const targetOverdue = targetLoans.filter(l => l.isOverdue);
+    const targetLongTerm = targetLoans.filter(l => l.isLongTerm);
+    const targetAssetValue = targetDist.reduce((acc, d) => acc + d.totalAssetValue, 0);
+    const targetAiSuggestions = targetDist.filter(d => d.aiProcurementSuggestion.urgency === 'critical' || d.aiProcurementSuggestion.urgency === 'high').length;
+
+    return {
+      isFiltered,
+      targetDept,
+      deptCount: targetDist.length,
+      activeLoansCount: targetLoans.length,
+      overdueCount: targetOverdue.length,
+      longTermCount: targetLongTerm.length,
+      totalAssetValue: targetAssetValue,
+      aiSuggestionsCount: targetAiSuggestions,
+      targetLoans,
+      targetOverdue,
+      targetLongTerm
+    };
+  }, [isDeptRestricted, distScope, userDept, distDeptFilter, filteredDepartmentDistribution, departmentDistribution, activeLoansWithAnalytics]);
 
   // 过滤后的库存列表
   const filteredInventory = useMemo(() => {
@@ -634,64 +879,223 @@ export const EmergencyReserveView: React.FC<EmergencyReserveViewProps> = ({
     }
   };
 
-  // 提交借用申请
-  const handleConfirmBorrow = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedDeviceForLoan) return;
-
-    const newLoan: EmergencyLoanRecord = {
-      id: `LOAN-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Date.now().toString().slice(-3)}`,
-      equipmentId: selectedDeviceForLoan.id,
-      equipmentName: selectedDeviceForLoan.name,
-      equipmentModel: selectedDeviceForLoan.model,
-      equipmentSn: selectedDeviceForLoan.sn,
-      category: selectedDeviceForLoan.category,
-      borrowingDepartment: borrowForm.borrowingDepartment || '急救临床科室',
-      borrowerName: borrowForm.borrowerName || currentUser?.name || '临床经办人',
-      borrowerPhone: borrowForm.borrowerPhone || '7991000',
-      borrowReason: borrowForm.borrowReason || '临床急救周转应急借用',
-      borrowTime: new Date().toLocaleString('zh-CN', { hour12: false }),
-      expectedReturnTime: `${borrowForm.expectedReturnDate} ${borrowForm.expectedReturnHour}`,
-      status: 'borrowed',
-      approver: '李强 (应急周转库管员)',
-      dispatchLocation: selectedDeviceForLoan.location || '医学工程中心 应急库房',
-      accessoriesIncluded: borrowForm.accessories,
-      qualityCheckPassed: true,
-      notes: '已完成开机自检与电量核查，出库交接确认。'
+  // 转换 EmergencyLoanRecord 为标准台账级 EquipmentLoanRecord
+  const emergencyToEquipmentLoan = (eLoan: EmergencyLoanRecord, eq?: MedicalEquipment): EquipmentLoanRecord => {
+    return {
+      id: eLoan.id,
+      equipmentId: eLoan.equipmentId,
+      equipmentName: eLoan.equipmentName || eq?.name || '急救储备设备',
+      ownerDepartment: eq?.ownerDepartment || eq?.department || '医疗设备应急库',
+      borrowingDepartment: eLoan.borrowingDepartment,
+      borrowerName: eLoan.borrowerName,
+      borrowerPhone: eLoan.borrowerPhone,
+      lenderName: eLoan.approver || '李强 (应急周转库管员)',
+      lenderPhone: '7991237',
+      borrowTime: eLoan.borrowTime,
+      expectedReturnTime: eLoan.expectedReturnTime,
+      actualReturnTime: eLoan.actualReturnTime,
+      borrowReason: eLoan.borrowReason,
+      loanStatus: eLoan.status,
+      accessories: eLoan.accessoriesIncluded || [],
+      handoverNotes: eLoan.notes || '设备外观完好，通电自检正常，关键随借配件齐备。',
+      returnNotes: eLoan.notes,
+      returnReceiverName: eLoan.returnInspector
     };
-
-    const updated = [newLoan, ...loanRecords];
-    setLoanRecords(updated);
-    saveEmergencyLoans(updated);
-
-    setIsApplyModalOpen(false);
-    setSelectedDeviceForLoan(null);
-    setActiveSubTab('loans');
   };
 
-  // 提交归还核验
-  const handleConfirmReturn = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedLoanForReturn) return;
+  // 打开借用出库弹窗 (调用与设备台账完全一致的高阶 BorrowEquipmentModal)
+  const handleOpenBorrowModal = (device: MedicalEquipment) => {
+    setBorrowModalEquipment(device);
+  };
 
-    const updated = loanRecords.map(rec => {
-      if (rec.id === selectedLoanForReturn.id) {
+  // 打开归还验收弹窗 (通过设备对象调用)
+  const handleOpenReturnModalForDevice = (device: MedicalEquipment) => {
+    const activeLoan = activeLoansMap.get(device.id);
+    if (activeLoan && !checkDepartmentAccess(activeLoan.borrowingDepartment, '归还验收')) {
+      return;
+    }
+    const devWithLoan: MedicalEquipment = {
+      ...device,
+      currentLoan: device.currentLoan || (activeLoan ? emergencyToEquipmentLoan(activeLoan, device) : undefined)
+    };
+    setReturnModalEquipment(devWithLoan);
+  };
+
+  // 打开归还验收弹窗 (通过借调记录调用)
+  const handleOpenReturnModalForLoan = (loan: EmergencyLoanRecord) => {
+    if (!checkDepartmentAccess(loan.borrowingDepartment, '归还验收')) {
+      return;
+    }
+    const targetEq = equipmentList.find(e => e.id === loan.equipmentId) || {
+      id: loan.equipmentId,
+      name: loan.equipmentName,
+      model: loan.equipmentModel,
+      sn: loan.equipmentSn,
+      category: loan.category,
+      department: '医疗设备应急库',
+      ownerDepartment: '医疗设备应急库',
+      status: '正常运行',
+      enableDate: '2023-01-01',
+      manufacturer: '迈瑞/德尔格',
+      purchasePrice: 150000,
+      repairCount: 0,
+      repairRecords: [],
+      statusLogs: []
+    } as MedicalEquipment;
+
+    const devWithLoan: MedicalEquipment = {
+      ...targetEq,
+      currentLoan: targetEq.currentLoan || emergencyToEquipmentLoan(loan, targetEq)
+    };
+    setReturnModalEquipment(devWithLoan);
+  };
+
+  // 打开纸质调配/归还单据打印预览与PDF导出 (双联签字凭证)
+  const handlePrintLoanVoucherForRecord = (loan: EmergencyLoanRecord) => {
+    if (!checkDepartmentAccess(loan.borrowingDepartment, '查阅流转单据')) {
+      return;
+    }
+    const targetEq = equipmentList.find(e => e.id === loan.equipmentId) || {
+      id: loan.equipmentId,
+      name: loan.equipmentName,
+      model: loan.equipmentModel,
+      sn: loan.equipmentSn,
+      category: loan.category,
+      department: '医疗设备应急库',
+      ownerDepartment: '医疗设备应急库',
+      status: loan.status === 'returned' ? '正常运行' : '正常运行',
+      enableDate: '2023-01-01',
+      manufacturer: '迈瑞/德尔格',
+      purchasePrice: 150000,
+      repairCount: 0,
+      repairRecords: [],
+      statusLogs: []
+    } as MedicalEquipment;
+
+    const conv = emergencyToEquipmentLoan(loan, targetEq);
+    setPrintVoucherModalData({
+      equipment: targetEq,
+      loanRecord: conv,
+      mode: loan.status === 'returned' ? 'return' : 'loan'
+    });
+  };
+
+  // 确认办理出库借用 (与全院资产台账双向数据同步)
+  const handleConfirmBorrowFromModal = (
+    equipmentId: string,
+    loanRecord: EquipmentLoanRecord,
+    shouldPrint?: boolean
+  ) => {
+    if (!checkDepartmentAccess(loanRecord.borrowingDepartment, '设备借用出库')) {
+      return;
+    }
+    const targetEq = equipmentList.find(e => e.id === equipmentId) || borrowModalEquipment;
+    if (!targetEq) return;
+
+    const newEmergencyLoan: EmergencyLoanRecord = {
+      id: loanRecord.id || `LOAN-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Date.now().toString().slice(-3)}`,
+      equipmentId: targetEq.id,
+      equipmentName: targetEq.name,
+      equipmentModel: targetEq.model,
+      equipmentSn: targetEq.sn,
+      category: targetEq.category,
+      borrowingDepartment: loanRecord.borrowingDepartment,
+      borrowerName: loanRecord.borrowerName,
+      borrowerPhone: loanRecord.borrowerPhone || '',
+      borrowReason: loanRecord.borrowReason || '临床急救周转应急借用',
+      borrowTime: loanRecord.borrowTime || new Date().toLocaleString('zh-CN', { hour12: false }),
+      expectedReturnTime: loanRecord.expectedReturnTime,
+      status: 'borrowed',
+      approver: loanRecord.lenderName || currentUser?.name || '李强 (应急周转库管员)',
+      dispatchLocation: targetEq.location || '医学工程保障中心 应急周转库房',
+      accessoriesIncluded: loanRecord.accessories || [],
+      qualityCheckPassed: true,
+      notes: loanRecord.handoverNotes || '设备外观完好，通电自检正常，关键随借配件齐备。'
+    };
+
+    const updatedLoans = [newEmergencyLoan, ...loanRecords.filter(r => !(r.equipmentId === equipmentId && r.status === 'borrowed'))];
+    setLoanRecords(updatedLoans);
+    saveEmergencyLoans(updatedLoans);
+
+    // 同步到全院台账主状态
+    if (onConfirmBorrow) {
+      onConfirmBorrow(equipmentId, loanRecord, false);
+    }
+
+    setBorrowModalEquipment(null);
+    setActiveSubTab('loans');
+
+    if (shouldPrint) {
+      setPrintVoucherModalData({
+        equipment: { ...targetEq, currentLoan: loanRecord },
+        loanRecord,
+        mode: 'loan'
+      });
+    }
+
+    showToast(`✅ 已成功完成【${targetEq.name}】出库借用登记，借入科室：${loanRecord.borrowingDepartment}`);
+  };
+
+  // 确认办理归还入库验收 (与全院资产台账双向数据同步)
+  const handleConfirmReturnFromModal = (
+    equipmentId: string,
+    returnDetails: {
+      actualReturnTime: string;
+      returnReceiverName: string;
+      returnNotes: string;
+      equipmentStatusAfterReturn: '正常运行' | '维护保养中' | '故障待修';
+    },
+    shouldPrint?: boolean
+  ) => {
+    const targetEq = equipmentList.find(e => e.id === equipmentId) || returnModalEquipment;
+    const activeLoan = loanRecords.find(r => r.equipmentId === equipmentId && (r.status === 'borrowed' || r.status === 'overdue'));
+    if (activeLoan && !checkDepartmentAccess(activeLoan.borrowingDepartment, '设备归还验收')) {
+      return;
+    }
+
+    const updatedLoans = loanRecords.map(rec => {
+      if (rec.equipmentId === equipmentId && (rec.status === 'borrowed' || rec.status === 'overdue')) {
         return {
           ...rec,
           status: 'returned' as const,
-          actualReturnTime: new Date().toLocaleString('zh-CN', { hour12: false }),
-          returnInspector: returnForm.returnInspector || '医工验收员',
-          returnCondition: returnForm.returnCondition,
-          notes: returnForm.notes
+          actualReturnTime: returnDetails.actualReturnTime,
+          returnInspector: returnDetails.returnReceiverName,
+          returnCondition: (returnDetails.equipmentStatusAfterReturn === '故障待修' ? 'faulty' : 'intact') as any,
+          notes: returnDetails.returnNotes
         };
       }
       return rec;
     });
 
-    setLoanRecords(updated);
-    saveEmergencyLoans(updated);
-    setIsReturnModalOpen(false);
-    setSelectedLoanForReturn(null);
+    setLoanRecords(updatedLoans);
+    saveEmergencyLoans(updatedLoans);
+
+    // 同步到全院台账主状态
+    if (onConfirmReturn) {
+      onConfirmReturn(equipmentId, returnDetails, false);
+    }
+
+    setReturnModalEquipment(null);
+
+    if (shouldPrint && targetEq) {
+      const loanRec = targetEq.currentLoan || (activeLoan ? emergencyToEquipmentLoan(activeLoan, targetEq) : null);
+      if (loanRec) {
+        const completedRec: EquipmentLoanRecord = {
+          ...loanRec,
+          loanStatus: 'returned',
+          actualReturnTime: returnDetails.actualReturnTime,
+          returnReceiverName: returnDetails.returnReceiverName,
+          returnNotes: returnDetails.returnNotes
+        };
+        setPrintVoucherModalData({
+          equipment: { ...targetEq, status: returnDetails.equipmentStatusAfterReturn },
+          loanRecord: completedRec,
+          mode: 'return'
+        });
+      }
+    }
+
+    showToast(`✅ 已完成【${targetEq?.name || equipmentId}】归还入库核验，设备重新转为【${returnDetails.equipmentStatusAfterReturn}】`);
   };
 
   // 生成临床工程专家智能回退报告
@@ -814,6 +1218,9 @@ export const EmergencyReserveView: React.FC<EmergencyReserveViewProps> = ({
 
   // 一键生成催还提醒通知函并复制
   const handleSendOverdueReminder = (loan: typeof activeLoansWithAnalytics[0]) => {
+    if (!checkDepartmentAccess(loan.borrowingDepartment, '催还函发送')) {
+      return;
+    }
     const notice = `【医学工程保障中心 · 应急周转设备催还通知函】
 借用科室：${loan.borrowingDepartment}
 经办人：${loan.borrowerName}（联系电话：${loan.borrowerPhone}）
@@ -831,6 +1238,9 @@ export const EmergencyReserveView: React.FC<EmergencyReserveViewProps> = ({
 
   // 一键复制科室增配申报方案
   const handleCopyDepartmentProposal = (deptData: typeof departmentDistribution[0]) => {
+    if (!checkDepartmentAccess(deptData.department, '查看增配申报方案')) {
+      return;
+    }
     const suggestion = deptData.aiProcurementSuggestion;
     const text = `【临床科室设备新增配置可行性论证建议书（AI生成呈报稿）】
 申报科室：${deptData.department}
@@ -1069,7 +1479,7 @@ ${suggestion.actionPlan}
               onClick={() => setActiveSubTab('inventory')}
               className={`px-2.5 py-1 rounded-md text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer ${
                 activeSubTab === 'inventory'
-                  ? 'bg-white text-blue-700 shadow-2xs'
+                  ? 'bg-white text-blue-700 shadow-2xs font-bold'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -1082,26 +1492,29 @@ ${suggestion.actionPlan}
               onClick={() => setActiveSubTab('loans')}
               className={`px-2.5 py-1 rounded-md text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer ${
                 activeSubTab === 'loans'
-                  ? 'bg-white text-blue-700 shadow-2xs'
+                  ? 'bg-white text-blue-700 shadow-2xs font-bold'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               <ArrowRightLeft className="w-3.5 h-3.5" />
-              <span>借调流转动态 ({loanRecords.filter(r => r.status === 'borrowed').length} 借出)</span>
+              <span>
+                借调流转动态 ({loanScope === 'dept' && userDept ? `${userDeptLoanRecords.length} 笔` : `${loanRecords.length} 笔`})
+              </span>
             </button>
 
-            {/* 新增：已借出设备的分布与AI增配分析 */}
             <button
               type="button"
               onClick={() => setActiveSubTab('distribution')}
               className={`px-2.5 py-1 rounded-md text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer ${
                 activeSubTab === 'distribution'
-                  ? 'bg-white text-blue-700 shadow-2xs'
+                  ? 'bg-white text-blue-700 shadow-2xs font-bold'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               <Building2 className="w-3.5 h-3.5" />
-              <span>已借出设备分布 ({stats.borrowed} 台在用)</span>
+              <span>
+                已借出设备分布 ({distScope === 'dept' && userDept ? `${filteredDepartmentDistribution.reduce((a, d) => a + d.totalDevices, 0)} 台` : `${stats.borrowed} 台`})
+              </span>
               {overdueLoansList.length > 0 && (
                 <span className="inline-flex items-center px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-rose-500 text-white animate-pulse">
                   {overdueLoansList.length} 超期
@@ -1110,7 +1523,98 @@ ${suggestion.actionPlan}
             </button>
           </div>
 
-          {/* 右侧筛选器与控制栏（当在已借出设备分布时展示） */}
+          {/* 右侧筛选器与控制栏：SubTab 2 借调流转动态 */}
+          {activeSubTab === 'loans' && (
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <input
+                  type="text"
+                  value={loanSearch}
+                  onChange={(e) => setLoanSearch(e.target.value)}
+                  placeholder="搜索单号、设备、科室、经办人..."
+                  className="pl-8 pr-7 py-1.5 bg-slate-100 border border-slate-200 focus:border-blue-500 focus:bg-white rounded-md text-xs w-44 sm:w-52 focus:ring-2 focus:ring-blue-100 text-slate-900 placeholder-slate-400 font-medium transition"
+                />
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5 pointer-events-none" />
+                {loanSearch && (
+                  <button 
+                    onClick={() => setLoanSearch('')}
+                    className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 text-xs cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* 本科室 / 全院 快捷切换药丸 (受限科室用户锁定为本科室视角，防止越权查看其他科室) */}
+              {userDept && (
+                isDeptRestricted ? (
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 font-semibold" title={`科室数据隔离：当前登录账号仅具备【${userDept}】流转记录查看权限`}>
+                    <Lock className="w-3 h-3 text-amber-600" />
+                    <span>{userDept} (权限锁定)</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLoanScope('dept');
+                        setLoanDeptFilter(userDept);
+                      }}
+                      className={`px-2 py-1 rounded-md text-xs transition cursor-pointer font-semibold flex items-center gap-1 ${
+                        loanScope === 'dept'
+                          ? 'bg-blue-600 text-white shadow-2xs font-bold'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <Building2 className="w-3 h-3" />
+                      <span>{userDept} (本科室)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setLoanScope('all');
+                        setLoanDeptFilter('全部科室');
+                      }}
+                      className={`px-2 py-1 rounded-md text-xs transition cursor-pointer font-semibold ${
+                        loanScope === 'all'
+                          ? 'bg-blue-600 text-white shadow-2xs font-bold'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      全院流转
+                    </button>
+                  </div>
+                )
+              )}
+
+              {/* 科室下拉筛选 (仅在全院模式下展示) */}
+              {!isDeptRestricted && loanScope === 'all' && (
+                <select
+                  value={loanDeptFilter}
+                  onChange={(e) => setLoanDeptFilter(e.target.value)}
+                  className="py-1.5 px-2.5 bg-slate-100 hover:bg-slate-200/70 border border-slate-200 rounded-md text-xs font-medium text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-blue-100 cursor-pointer transition"
+                >
+                  {allLoanDepartments.map(dept => (
+                    <option key={dept} value={dept}>{dept}</option>
+                  ))}
+                </select>
+              )}
+
+              {/* 状态下拉筛选 */}
+              <select
+                value={loanStatusFilter}
+                onChange={(e) => setLoanStatusFilter(e.target.value as any)}
+                className="py-1.5 px-2.5 bg-slate-100 hover:bg-slate-200/70 border border-slate-200 rounded-md text-xs font-medium text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-blue-100 cursor-pointer transition"
+              >
+                <option value="all">全部流转状态</option>
+                <option value="borrowed">🟡 借出在用</option>
+                <option value="returned">🟢 已归还入库</option>
+                <option value="overdue">🔴 超期未还</option>
+              </select>
+            </div>
+          )}
+
+          {/* 右侧筛选器与控制栏：SubTab 3 已借出设备分布 */}
           {activeSubTab === 'distribution' && (
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative">
@@ -1132,15 +1636,60 @@ ${suggestion.actionPlan}
                 )}
               </div>
 
-              <select
-                value={distDeptFilter}
-                onChange={(e) => setDistDeptFilter(e.target.value)}
-                className="py-1.5 px-2.5 bg-slate-100 hover:bg-slate-200/70 border border-slate-200 rounded-md text-xs font-medium text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-blue-100 cursor-pointer transition"
-              >
-                {allBorrowingDepartments.map(dept => (
-                  <option key={dept} value={dept}>{dept}</option>
-                ))}
-              </select>
+              {/* 本科室 / 全院 快捷切换药丸 (受限科室用户锁定为本科室视角，防止越权查看其他科室) */}
+              {userDept && (
+                isDeptRestricted ? (
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800 font-semibold" title={`科室数据隔离：当前登录账号仅具备【${userDept}】分布查看权限`}>
+                    <Lock className="w-3 h-3 text-amber-600" />
+                    <span>{userDept} (权限锁定)</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDistScope('dept');
+                        setDistDeptFilter(userDept);
+                      }}
+                      className={`px-2 py-1 rounded-md text-xs transition cursor-pointer font-semibold flex items-center gap-1 ${
+                        distScope === 'dept'
+                          ? 'bg-blue-600 text-white shadow-2xs font-bold'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <Building2 className="w-3 h-3" />
+                      <span>{userDept} (本科室)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDistScope('all');
+                        setDistDeptFilter('全部科室');
+                      }}
+                      className={`px-2 py-1 rounded-md text-xs transition cursor-pointer font-semibold ${
+                        distScope === 'all'
+                          ? 'bg-blue-600 text-white shadow-2xs font-bold'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      全院分布
+                    </button>
+                  </div>
+                )
+              )}
+
+              {/* 科室下拉筛选 (仅在全院模式下展示) */}
+              {!isDeptRestricted && distScope === 'all' && (
+                <select
+                  value={distDeptFilter}
+                  onChange={(e) => setDistDeptFilter(e.target.value)}
+                  className="py-1.5 px-2.5 bg-slate-100 hover:bg-slate-200/70 border border-slate-200 rounded-md text-xs font-medium text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-blue-100 cursor-pointer transition"
+                >
+                  {allBorrowingDepartments.map(dept => (
+                    <option key={dept} value={dept}>{dept}</option>
+                  ))}
+                </select>
+              )}
 
               <button
                 type="button"
@@ -1503,21 +2052,26 @@ ${suggestion.actionPlan}
                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
                             {group.items.map((device) => {
                               const activeLoan = activeLoansMap.get(device.id);
+                              const loanProgress = activeLoan ? computeLoanTimeProgress(activeLoan.borrowTime, activeLoan.expectedReturnTime) : null;
                               const isAvailable = !activeLoan && device.status === '正常运行';
                               const photoUrl = getEquipmentPhoto(device);
 
                               return (
                                 <div 
                                   key={device.id}
-                                  className={`rounded-md border p-3 transition-all flex flex-col justify-between shadow-2xs hover:shadow-xs group/card ${
+                                  className={`rounded-md border p-3 transition-all flex flex-col justify-between shadow-2xs hover:shadow-xs group/card min-w-0 overflow-hidden h-full ${
                                     isAvailable 
                                       ? 'bg-white border-slate-200 hover:border-blue-400' 
                                       : activeLoan 
-                                      ? 'bg-amber-50/20 border-amber-200 hover:border-amber-400'
+                                      ? loanProgress?.isOverdue
+                                        ? 'bg-rose-50/25 border-rose-200 hover:border-rose-400'
+                                        : loanProgress?.colorTheme === 'approaching'
+                                        ? 'bg-amber-50/25 border-amber-200 hover:border-amber-400'
+                                        : 'bg-white border-slate-200 hover:border-blue-300'
                                       : 'bg-slate-50 border-slate-200 hover:border-slate-300'
                                   }`}
                                 >
-                                  <div className="space-y-2">
+                                  <div className="space-y-2.5 w-full min-w-0">
                                     {/* 顶部：轻量紧凑实物缩略图 + 核心基础信息 */}
                                     <div className="flex items-start gap-2.5">
                                       {/* 实物缩略图 (轻量 52x52 像素小图，支持快速外观识别及点击预览大图) */}
@@ -1550,64 +2104,80 @@ ${suggestion.actionPlan}
                                             {device.id}
                                           </span>
                                           {isAvailable ? (
-                                            <span className="px-1.5 py-0.2 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200/60 shrink-0 flex items-center gap-1">
+                                            <span className="px-1.5 py-0.2 rounded text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200/60 shrink-0 flex items-center gap-1 whitespace-nowrap">
                                               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                                              待命可借
+                                              待命在库
                                             </span>
                                           ) : activeLoan ? (
-                                            <span className="px-1.5 py-0.2 rounded text-[10px] font-medium bg-amber-50 text-amber-800 border border-amber-200/60 shrink-0 truncate max-w-[100px]" title={`借出至: ${activeLoan.borrowingDepartment}`}>
-                                              借: {activeLoan.borrowingDepartment}
+                                            <span 
+                                              className={`px-1.5 py-0.2 rounded text-[10px] font-semibold border shrink-0 flex items-center gap-1 whitespace-nowrap ${
+                                                loanProgress?.isOverdue 
+                                                  ? 'bg-rose-50 text-rose-700 border-rose-200' 
+                                                  : loanProgress?.colorTheme === 'approaching'
+                                                  ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                                  : 'bg-blue-50 text-blue-700 border-blue-200'
+                                              }`}
+                                              title={`借调至: ${activeLoan.borrowingDepartment} | 预还: ${activeLoan.expectedReturnTime}`}
+                                            >
+                                              <span className={`w-1.5 h-1.5 rounded-full ${
+                                                loanProgress?.isOverdue 
+                                                  ? 'bg-rose-500 animate-pulse' 
+                                                  : loanProgress?.colorTheme === 'approaching'
+                                                  ? 'bg-amber-500'
+                                                  : 'bg-blue-500'
+                                              }`} />
+                                              {loanProgress?.isOverdue ? '借出超期' : '借调在用'}
                                             </span>
                                           ) : (
-                                            <span className="px-1.5 py-0.2 rounded text-[10px] font-medium bg-rose-50 text-rose-700 border border-rose-200/60 shrink-0">
+                                            <span className="px-1.5 py-0.2 rounded text-[10px] font-medium bg-purple-50 text-purple-700 border border-purple-200/60 shrink-0 flex items-center gap-1 whitespace-nowrap">
+                                              <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
                                               {device.status}
                                             </span>
                                           )}
                                         </div>
 
-                                        <h3 
-                                          onClick={() => onViewDeviceDetail?.(device)}
-                                          className="text-xs font-semibold text-slate-900 hover:text-blue-600 cursor-pointer transition line-clamp-1 leading-snug"
-                                          title={device.name}
-                                        >
-                                          {device.name}
-                                        </h3>
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          <h3 
+                                            onClick={() => onViewDeviceDetail?.(device)}
+                                            className="text-xs font-semibold text-slate-900 hover:text-blue-600 cursor-pointer transition line-clamp-1 leading-snug"
+                                            title={device.name}
+                                          >
+                                            {device.name}
+                                          </h3>
+                                          {device.internalNo && (
+                                            <span 
+                                              className="px-1.5 py-0.2 rounded bg-amber-50 text-amber-900 border border-amber-200 text-[10px] font-mono font-bold shrink-0"
+                                              title={`科室内部编号: ${device.internalNo}`}
+                                            >
+                                              #{device.internalNo}
+                                            </span>
+                                          )}
+                                        </div>
                                         <div className="text-[11px] text-slate-500 font-mono truncate mt-0.5" title={`型号: ${device.model}`}>
                                           型号: <span className="text-slate-700 font-medium">{device.model}</span>
                                         </div>
                                       </div>
                                     </div>
 
-                                    {/* 中部信息列表：位置与强检状态 */}
-                                    <div className="p-1.5 bg-slate-50/80 rounded border border-slate-100 text-[10.5px] space-y-1 text-slate-500">
-                                      <div className="flex items-center justify-between gap-1">
-                                        <span className="text-slate-400 shrink-0">存货货位:</span>
-                                        <span className="font-mono text-slate-700 truncate text-right flex items-center gap-0.5">
-                                          <MapPin className="w-3 h-3 text-cyan-600 shrink-0" />
-                                          <span className="truncate">{device.location || '1号楼1F 应急库'}</span>
+                                    {/* 中部核心元数据：货位与质检有效性 (横向规范单行贯穿，杜绝折字与拥挤) */}
+                                    <div className="px-2.5 py-1.5 bg-slate-50/70 rounded-md border border-slate-100 text-xs flex items-center justify-between gap-2 min-w-0 text-slate-500">
+                                      <div className="flex items-center gap-1 min-w-0 text-slate-700 text-[11px]">
+                                        <MapPin className="w-3 h-3 text-cyan-600 shrink-0" />
+                                        <span className="truncate whitespace-nowrap" title={device.location || '1号楼1F 应急库'}>
+                                          {device.location || '1号楼1F 应急库'}
                                         </span>
                                       </div>
-                                      <div className="flex items-center justify-between gap-1">
-                                        <span className="text-slate-400 shrink-0">强检状态:</span>
-                                        <span className="font-mono text-emerald-700 font-medium text-[10px] truncate">
-                                          {device.nextCalibrationDate ? `有效至 ${device.nextCalibrationDate}` : '免检/自检'}
-                                        </span>
+                                      <div className="font-mono text-emerald-700 font-medium text-[11px] shrink-0 whitespace-nowrap text-right">
+                                        {device.nextCalibrationDate ? `效期 ${device.nextCalibrationDate}` : '免检在效'}
                                       </div>
                                     </div>
 
-                                    {/* 借出在用状态提示条 */}
-                                    {activeLoan && (
-                                      <div className="p-1.5 bg-amber-50/90 rounded border border-amber-200/70 text-[10px] space-y-0.5 text-amber-900">
-                                        <div className="flex items-center justify-between font-semibold">
-                                          <span className="truncate">科室: {activeLoan.borrowingDepartment}</span>
-                                          <span className="font-mono text-amber-700">{activeLoan.borrowTime.slice(5)}</span>
-                                        </div>
-                                        <div className="flex items-center justify-between text-amber-800 text-[9.5px]">
-                                          <span>经办: {activeLoan.borrowerName}</span>
-                                          <span>预还: {activeLoan.expectedReturnTime.slice(5)}</span>
-                                        </div>
-                                      </div>
-                                    )}
+                                    {/* 核心固定时效/流转状态槽位：所有卡片统一固定具备此功能组件，消除高低不平与UI断层 */}
+                                    <LoanTimeProgressBar 
+                                      loan={activeLoan} 
+                                      device={device} 
+                                      mode="card" 
+                                    />
                                   </div>
 
                                   {/* 底部操作区 */}
@@ -1643,27 +2213,38 @@ ${suggestion.actionPlan}
                                     {isAvailable ? (
                                       <button
                                         type="button"
-                                        onClick={() => {
-                                          setSelectedDeviceForLoan(device);
-                                          setIsApplyModalOpen(true);
-                                        }}
+                                        onClick={() => handleOpenBorrowModal(device)}
                                         className="px-2 py-0.5 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded text-xs font-semibold transition shadow-2xs flex items-center gap-1 cursor-pointer"
                                       >
                                         <ArrowRightLeft className="w-3 h-3" />
                                         <span>借用</span>
                                       </button>
                                     ) : activeLoan ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setSelectedLoanForReturn(activeLoan);
-                                          setIsReturnModalOpen(true);
-                                        }}
-                                        className="px-2 py-0.5 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white rounded text-xs font-semibold transition shadow-2xs flex items-center gap-1 cursor-pointer"
-                                      >
-                                        <RotateCcw className="w-3 h-3" />
-                                        <span>归还</span>
-                                      </button>
+                                      (!isDeptRestricted || (userDept && activeLoan.borrowingDepartment === userDept)) ? (
+                                        <div className="flex items-center gap-1">
+                                          <button
+                                            type="button"
+                                            onClick={() => handlePrintLoanVoucherForRecord(activeLoan)}
+                                            className="p-1 text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 rounded border border-emerald-200 transition cursor-pointer"
+                                            title="查看电子交接流转单 (无纸化数字存证)"
+                                          >
+                                            <FileCheck2 className="w-3 h-3 text-emerald-600" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleOpenReturnModalForDevice(device)}
+                                            className="px-2 py-0.5 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white rounded text-xs font-semibold transition shadow-2xs flex items-center gap-1 cursor-pointer"
+                                          >
+                                            <RotateCcw className="w-3 h-3" />
+                                            <span>归还</span>
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <span className="px-2 py-0.5 text-slate-400 text-xs flex items-center gap-1 font-medium" title={`该设备由【${activeLoan.borrowingDepartment}】借用中，当前科室账号无权办理该设备归还验收`}>
+                                          <Lock className="w-2.5 h-2.5 text-slate-400" />
+                                          <span>借用中</span>
+                                        </span>
+                                      )
                                     ) : (
                                       <button
                                         type="button"
@@ -1736,6 +2317,7 @@ ${suggestion.actionPlan}
 
                           {group.items.map((device) => {
                             const activeLoan = activeLoansMap.get(device.id);
+                            const loanProgress = activeLoan ? computeLoanTimeProgress(activeLoan.borrowTime, activeLoan.expectedReturnTime) : null;
                             const isAvailable = !activeLoan && device.status === '正常运行';
                             const photoUrl = getEquipmentPhoto(device);
 
@@ -1755,10 +2337,33 @@ ${suggestion.actionPlan}
                                         在库可借
                                       </span>
                                     ) : activeLoan ? (
-                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-normal bg-amber-50 text-amber-800 border border-amber-200/60">
-                                        <ArrowRightLeft className="w-3 h-3 text-amber-600" />
-                                        借调在用
-                                      </span>
+                                      <div className="space-y-1">
+                                        <span className={`inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-medium border ${
+                                          loanProgress?.isOverdue
+                                            ? 'bg-rose-100 text-rose-800 border-rose-300 font-bold animate-pulse'
+                                            : loanProgress?.colorTheme === 'approaching'
+                                            ? 'bg-amber-100 text-amber-900 border-amber-300 font-bold'
+                                            : 'bg-blue-50 text-blue-700 border-blue-200/60'
+                                        }`}>
+                                          {loanProgress?.isOverdue ? (
+                                            <AlertTriangle className="w-3 h-3 text-rose-600 shrink-0" />
+                                          ) : loanProgress?.colorTheme === 'approaching' ? (
+                                            <Clock className="w-3 h-3 text-amber-700 shrink-0" />
+                                          ) : (
+                                            <ArrowRightLeft className="w-3 h-3 text-blue-600 shrink-0" />
+                                          )}
+                                          <span>{loanProgress?.isOverdue ? '借调到期超期' : loanProgress?.colorTheme === 'approaching' ? '借期过半预警' : '借调在用'}</span>
+                                        </span>
+                                        
+                                        {/* 剩余使用天数倒计时标签 */}
+                                        <div>
+                                          <LoanCountdownBadge 
+                                            loan={activeLoan} 
+                                            variant="badge" 
+                                            className="font-bold text-[9.5px]" 
+                                          />
+                                        </div>
+                                      </div>
                                     ) : (
                                       <span className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[10px] font-normal bg-rose-50 text-rose-700 border border-rose-200/60">
                                         {device.status}
@@ -1787,11 +2392,21 @@ ${suggestion.actionPlan}
                                     </div>
 
                                     <div>
-                                      <div 
-                                        onClick={() => onViewDeviceDetail?.(device)}
-                                        className="font-semibold text-slate-900 hover:text-blue-600 cursor-pointer transition text-xs leading-snug"
-                                      >
-                                        {device.name}
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <div 
+                                          onClick={() => onViewDeviceDetail?.(device)}
+                                          className="font-semibold text-slate-900 hover:text-blue-600 cursor-pointer transition text-xs leading-snug"
+                                        >
+                                          {device.name}
+                                        </div>
+                                        {device.internalNo && (
+                                          <span 
+                                            className="px-1.5 py-0.2 rounded bg-amber-50 text-amber-900 border border-amber-200 text-[10px] font-mono font-bold shrink-0"
+                                            title={`科室内部编号: ${device.internalNo}`}
+                                          >
+                                            #{device.internalNo}
+                                          </span>
+                                        )}
                                       </div>
                                       <div className="text-slate-500 font-mono mt-0.5 flex items-center gap-1.5 text-[11px]">
                                         <span>型号: <span className="text-slate-700 font-medium">{device.model}</span></span>
@@ -1838,29 +2453,10 @@ ${suggestion.actionPlan}
                                   )}
                                 </td>
 
-                                {/* 6. 库房货位 / 借调流转信息 */}
-                                <td className="py-2.5 px-3 align-top">
+                                {/* 6. 库房货位 / 借调流转信息与时效进度条 */}
+                                <td className="py-2.5 px-3 align-top min-w-[240px]">
                                   {activeLoan ? (
-                                    <div className="p-2 bg-amber-50/80 rounded-md border border-amber-200 text-xs space-y-0.5 text-amber-950">
-                                      <div className="flex items-center justify-between font-bold text-amber-900 text-[11px]">
-                                        <span className="flex items-center gap-1">
-                                          <Building2 className="w-3 h-3 text-amber-700" />
-                                          借至: {activeLoan.borrowingDepartment}
-                                        </span>
-                                        <span className="text-[10.5px] font-mono text-amber-700 font-normal">
-                                          {activeLoan.borrowTime.slice(5)}
-                                        </span>
-                                      </div>
-                                      <div className="text-[10.5px] text-amber-800 flex items-center justify-between">
-                                        <span>经办: {activeLoan.borrowerName} ({activeLoan.borrowerPhone})</span>
-                                        <span className="font-mono">预还: {activeLoan.expectedReturnTime.slice(5)}</span>
-                                      </div>
-                                      {activeLoan.borrowReason && (
-                                        <div className="text-[10.5px] text-amber-700 line-clamp-1 italic">
-                                          “{activeLoan.borrowReason}”
-                                        </div>
-                                      )}
-                                    </div>
+                                    <LoanTimeProgressBar loan={activeLoan} mode="table" />
                                   ) : (
                                     <div className="space-y-0.5 text-slate-600">
                                       <div className="flex items-center gap-1 font-medium text-slate-700 text-xs">
@@ -1908,27 +2504,38 @@ ${suggestion.actionPlan}
                                     {isAvailable ? (
                                       <button
                                         type="button"
-                                        onClick={() => {
-                                          setSelectedDeviceForLoan(device);
-                                          setIsApplyModalOpen(true);
-                                        }}
+                                        onClick={() => handleOpenBorrowModal(device)}
                                         className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-md text-xs font-bold transition shadow-2xs flex items-center gap-1 cursor-pointer"
                                       >
                                         <ArrowRightLeft className="w-3 h-3" />
                                         <span>借用出库</span>
                                       </button>
                                     ) : activeLoan ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          setSelectedLoanForReturn(activeLoan);
-                                          setIsReturnModalOpen(true);
-                                        }}
-                                        className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white rounded-md text-xs font-bold transition shadow-2xs flex items-center gap-1 cursor-pointer"
-                                      >
-                                        <RotateCcw className="w-3 h-3" />
-                                        <span>归还验收</span>
-                                      </button>
+                                      (!isDeptRestricted || (userDept && activeLoan.borrowingDepartment === userDept)) ? (
+                                        <div className="flex items-center gap-1">
+                                          <button
+                                            type="button"
+                                            onClick={() => handlePrintLoanVoucherForRecord(activeLoan)}
+                                            className="p-1 text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 rounded border border-emerald-200 transition cursor-pointer"
+                                            title="查看电子交接流转单 (无纸化数字存证)"
+                                          >
+                                            <FileCheck2 className="w-3.5 h-3.5 text-emerald-600" />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleOpenReturnModalForDevice(device)}
+                                            className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white rounded-md text-xs font-bold transition shadow-2xs flex items-center gap-1 cursor-pointer"
+                                          >
+                                            <RotateCcw className="w-3 h-3" />
+                                            <span>归还验收</span>
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <span className="px-2 py-1 text-slate-400 text-xs flex items-center gap-1 font-medium" title={`该设备由【${activeLoan.borrowingDepartment}】借用中，当前科室账号无权办理该设备归还验收`}>
+                                          <Lock className="w-3 h-3 text-slate-400" />
+                                          <span>借用中</span>
+                                        </span>
+                                      )
                                     ) : (
                                       <button
                                         type="button"
@@ -1955,103 +2562,182 @@ ${suggestion.actionPlan}
 
           {/* View B: 借调用记录与流转日志 */}
           {activeSubTab === 'loans' && (
-            <div className="flex-1 overflow-auto relative scrollbar-thin scrollbar-thumb-slate-200">
-              <table className="w-full text-left border-collapse">
-                <thead className="sticky top-0 bg-slate-100/90 backdrop-blur-xs z-10 shadow-2xs select-none">
-                  <tr className="text-slate-600 text-[11px] font-bold tracking-wider border-b border-slate-200/90">
-                    <th className="py-2.5 px-3 whitespace-nowrap min-w-[100px]">借用单号</th>
-                    <th className="py-2.5 px-3 whitespace-nowrap min-w-[180px]">设备名称 / 规格型号</th>
-                    <th className="py-2.5 px-3 whitespace-nowrap min-w-[150px]">借入科室 / 经办人</th>
-                    <th className="py-2.5 px-3 whitespace-nowrap min-w-[160px]">借调事由</th>
-                    <th className="py-2.5 px-3 whitespace-nowrap min-w-[130px]">借用时间</th>
-                    <th className="py-2.5 px-3 whitespace-nowrap min-w-[140px]">预计 / 实际归还</th>
-                    <th className="py-2.5 px-3 whitespace-nowrap min-w-[100px]">流转状态</th>
-                    <th className="py-2.5 px-3 whitespace-nowrap min-w-[120px]">库管审批 / 验收</th>
-                    <th className="py-2.5 px-3 whitespace-nowrap text-right min-w-[100px]">操作</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 bg-white">
-                  {loanRecords.map((loan) => {
-                    const isBorrowed = loan.status === 'borrowed';
-                    return (
-                      <tr key={loan.id} className="hover:bg-slate-50/80 transition">
-                        <td className="py-2.5 px-3 font-mono font-bold text-slate-700 text-xs">{loan.id}</td>
-                        <td className="py-2.5 px-3">
-                          <div className="font-bold text-slate-900 text-xs">{loan.equipmentName}</div>
-                          <div className="text-[10.5px] text-slate-500 font-mono">{loan.equipmentModel} (SN: {loan.equipmentSn})</div>
-                        </td>
-                        <td className="py-2.5 px-3">
-                          <span className="font-bold text-blue-800 bg-blue-50 px-1.5 py-0.2 rounded border border-blue-100 inline-block mb-0.5 text-[10.5px]">
-                            {loan.borrowingDepartment}
-                          </span>
-                          <div className="text-[10.5px] text-slate-600">{loan.borrowerName} · {loan.borrowerPhone}</div>
-                        </td>
-                        <td className="py-2.5 px-3 max-w-[200px] text-slate-600 text-xs truncate" title={loan.borrowReason}>
-                          {loan.borrowReason || '急救周转应急借用'}
-                        </td>
-                        <td className="py-2.5 px-3 font-mono text-slate-700 text-xs">{loan.borrowTime}</td>
-                        <td className="py-2.5 px-3 font-mono text-xs">
-                          <div className="text-slate-700">预: {loan.expectedReturnTime}</div>
-                          {loan.actualReturnTime && (
-                            <div className="text-emerald-700 font-semibold text-[10.5px]">实: {loan.actualReturnTime}</div>
-                          )}
-                        </td>
-                        <td className="py-2.5 px-3">
-                          {isBorrowed ? (
-                            <span className="px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
-                              借出在用
+            <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+              <div className="flex-1 overflow-auto relative scrollbar-thin scrollbar-thumb-slate-200">
+                {filteredLoanRecords.length === 0 ? (
+                <div className="p-12 text-center text-slate-500 my-auto flex flex-col items-center justify-center min-h-[320px]">
+                  <Boxes className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                  <p className="text-sm font-bold text-slate-800">
+                    {loanScope === 'dept' && userDept ? `【${userDept}】暂无匹配的应急借调流转记录` : '未检索到符合条件的借调流转记录'}
+                  </p>
+                  <p className="text-xs text-slate-400 mt-1 max-w-md">
+                    {loanScope === 'dept' && userDept
+                      ? isDeptRestricted
+                        ? `本科室当前没有该状态下的应急设备借调记录。您可前往“应急库设备清单”为【${userDept}】发起借用。`
+                        : '本科室当前没有该状态下的应急设备借调记录。您可前往“应急库设备清单”发起借用，或切换至“全院流转”查看全院动态。'
+                      : '请尝试清空搜索关键字或重置状态与科室筛选条件。'}
+                  </p>
+                  <div className="flex items-center justify-center gap-2.5 mt-5">
+                    {!isDeptRestricted && loanScope === 'dept' && userDept && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLoanScope('all');
+                          setLoanDeptFilter('全部科室');
+                        }}
+                        className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold transition cursor-pointer border border-slate-200"
+                      >
+                        查看全院流转动态
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setActiveSubTab('inventory')}
+                      className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition cursor-pointer shadow-2xs"
+                    >
+                      前往应急库申请借用
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <table className="w-full text-left border-collapse">
+                  <thead className="sticky top-0 bg-slate-100/90 backdrop-blur-xs z-10 shadow-2xs select-none">
+                    <tr className="text-slate-600 text-[11px] font-bold tracking-wider border-b border-slate-200/90">
+                      <th className="py-2.5 px-3 whitespace-nowrap min-w-[100px]">借用单号</th>
+                      <th className="py-2.5 px-3 whitespace-nowrap min-w-[180px]">设备名称 / 规格型号</th>
+                      <th className="py-2.5 px-3 whitespace-nowrap min-w-[150px]">借入科室 / 经办人</th>
+                      <th className="py-2.5 px-3 whitespace-nowrap min-w-[160px]">借调事由</th>
+                      <th className="py-2.5 px-3 whitespace-nowrap min-w-[130px]">借用时间</th>
+                      <th className="py-2.5 px-3 whitespace-nowrap min-w-[140px]">预计 / 实际归还</th>
+                      <th className="py-2.5 px-3 whitespace-nowrap min-w-[100px]">流转状态</th>
+                      <th className="py-2.5 px-3 whitespace-nowrap min-w-[120px]">库管审批 / 验收</th>
+                      <th className="py-2.5 px-3 whitespace-nowrap text-right min-w-[100px]">操作</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {paginatedLoanRecords.map((loan) => {
+                      const isBorrowed = loan.status === 'borrowed';
+                      return (
+                        <tr key={loan.id} className="hover:bg-slate-50/80 transition">
+                          <td className="py-2.5 px-3 font-mono font-bold text-slate-700 text-xs">{loan.id}</td>
+                          <td className="py-2.5 px-3">
+                            <div className="font-bold text-slate-900 text-xs">{loan.equipmentName}</div>
+                            <div className="text-[10.5px] text-slate-500 font-mono">{loan.equipmentModel} (SN: {loan.equipmentSn})</div>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className="font-bold text-blue-800 bg-blue-50 px-1.5 py-0.2 rounded border border-blue-100 inline-block mb-0.5 text-[10.5px]">
+                              {loan.borrowingDepartment}
                             </span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                              已归还入库
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-2.5 px-3 text-xs text-slate-600">
-                          <div>审: {loan.approver}</div>
-                          {loan.returnInspector && (
-                            <div className="text-slate-500 text-[10.5px]">验: {loan.returnInspector}</div>
-                          )}
-                        </td>
-                        <td className="py-2.5 px-3 text-right">
-                          {isBorrowed ? (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedLoanForReturn(loan);
-                                setIsReturnModalOpen(true);
-                              }}
-                              className="px-2 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded text-xs font-bold transition cursor-pointer"
-                            >
-                              验收归还
-                            </button>
-                          ) : (
-                            <span className="text-[11px] text-emerald-600 font-medium">完好结案</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                            <div className="text-[10.5px] text-slate-600">{loan.borrowerName} · {loan.borrowerPhone}</div>
+                          </td>
+                          <td className="py-2.5 px-3 max-w-[200px] text-slate-600 text-xs truncate" title={loan.borrowReason}>
+                            {loan.borrowReason || '急救周转应急借用'}
+                          </td>
+                          <td className="py-2.5 px-3 font-mono text-slate-700 text-xs">{loan.borrowTime}</td>
+                          <td className="py-2.5 px-3 font-mono text-xs">
+                            <div className="text-slate-700">预: {loan.expectedReturnTime}</div>
+                            {loan.actualReturnTime ? (
+                              <div className="text-emerald-700 font-semibold text-[10.5px]">实: {loan.actualReturnTime}</div>
+                            ) : isBorrowed ? (
+                              <div className="mt-1 min-w-[110px]">
+                                <LoanTimeProgressBar loan={loan} mode="mini" />
+                              </div>
+                            ) : null}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            {isBorrowed ? (
+                              (() => {
+                                const prog = computeLoanTimeProgress(loan.borrowTime, loan.expectedReturnTime);
+                                return (
+                                  <span className={`px-2 py-0.5 rounded-full text-[10.5px] font-bold border inline-flex items-center gap-1 ${
+                                    prog.isOverdue 
+                                      ? 'bg-rose-100 text-rose-800 border-rose-200' 
+                                      : prog.colorTheme === 'approaching'
+                                      ? 'bg-amber-100 text-amber-800 border-amber-200'
+                                      : 'bg-blue-50 text-blue-700 border-blue-200'
+                                  }`}>
+                                    {prog.isOverdue && <AlertTriangle className="w-2.5 h-2.5 text-rose-600" />}
+                                    {prog.isOverdue ? '超期在用' : '借出在用'}
+                                  </span>
+                                );
+                              })()
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full text-[10.5px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                已归还入库
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-xs text-slate-600">
+                            <div>审: {loan.approver}</div>
+                            {loan.returnInspector && (
+                              <div className="text-slate-500 text-[10.5px]">验: {loan.returnInspector}</div>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handlePrintLoanVoucherForRecord(loan)}
+                                className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded text-xs font-semibold transition cursor-pointer flex items-center gap-1 border border-emerald-200 shadow-2xs"
+                                title="查看电子闭环交接单 (已自动完成全流程电子签名与云端存证)"
+                              >
+                                <FileCheck2 className="w-3.5 h-3.5 text-emerald-600" />
+                                <span>电子单据</span>
+                              </button>
+                              {isBorrowed ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenReturnModalForLoan(loan)}
+                                  className="px-2.5 py-1 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white rounded text-xs font-bold transition cursor-pointer flex items-center gap-1 shadow-2xs"
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5" />
+                                  <span>验收归还</span>
+                                </button>
+                              ) : (
+                                <span className="text-[11px] text-emerald-600 font-medium flex items-center gap-0.5">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                  <span>完好结案</span>
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
             </div>
-          )}
+
+            {/* 应急借调流转记录分页 */}
+            <Pagination
+              currentPage={loanPage}
+              pageSize={loanPageSize}
+              totalCount={filteredLoanRecords.length}
+              onPageChange={setLoanPage}
+              onPageSizeChange={(sz) => {
+                setLoanPageSize(sz);
+                setLoanPage(1);
+              }}
+            />
+          </div>
+        )}
 
           {/* View C: 已借出设备的分布与 AI 增配决策看板 */}
           {activeSubTab === 'distribution' && (
             <div className="flex-1 overflow-auto p-4 space-y-4.5 bg-slate-50/60 scrollbar-thin scrollbar-thumb-slate-200">
               
-              {/* 1. 核心借调概览与预警指标 */}
+              {/* 1. 核心借调概览与预警指标（精准响应当前科室筛选与本科室视角） */}
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 shrink-0">
                 <div className="relative bg-white p-3.5 rounded-xl border border-slate-200/90 shadow-xs hover:shadow-md transition-all flex flex-col justify-between overflow-hidden">
                   <div className="absolute top-0 left-0 right-0 h-1 bg-blue-500" />
                   <div className="flex items-center justify-between text-xs text-slate-700 font-bold">
-                    <span>借调科室数</span>
-                    <Building2 className="w-4 h-4 text-blue-600" />
+                    <span className="truncate">{displayDistributionMetrics.isFiltered ? `${displayDistributionMetrics.targetDept}` : '借调科室数'}</span>
+                    <Building2 className="w-4 h-4 text-blue-600 shrink-0" />
                   </div>
                   <div className="mt-2 flex items-baseline justify-between">
-                    <span className="text-xl font-bold font-mono text-slate-900">{departmentDistribution.length}</span>
-                    <span className="text-xs text-slate-500 font-medium">个科室在用</span>
+                    <span className="text-xl font-bold font-mono text-slate-900">{displayDistributionMetrics.deptCount}</span>
+                    <span className="text-xs text-slate-500 font-medium">{displayDistributionMetrics.isFiltered ? '当前专区' : '个科室在用'}</span>
                   </div>
                 </div>
 
@@ -2062,7 +2748,7 @@ ${suggestion.actionPlan}
                     <Boxes className="w-4 h-4 text-amber-600" />
                   </div>
                   <div className="mt-2 flex items-baseline justify-between">
-                    <span className="text-xl font-bold font-mono text-amber-700">{activeLoansWithAnalytics.length}</span>
+                    <span className="text-xl font-bold font-mono text-amber-700">{displayDistributionMetrics.activeLoansCount}</span>
                     <span className="text-xs text-amber-700 font-medium">台正在运行</span>
                   </div>
                 </div>
@@ -2074,9 +2760,9 @@ ${suggestion.actionPlan}
                     <ShieldAlert className="w-4 h-4 text-rose-600" />
                   </div>
                   <div className="mt-2 flex items-baseline justify-between">
-                    <span className="text-xl font-bold font-mono text-rose-600">{overdueLoansList.length}</span>
+                    <span className="text-xl font-bold font-mono text-rose-600">{displayDistributionMetrics.overdueCount}</span>
                     <span className="text-xs text-rose-600 font-bold bg-rose-50 px-1.5 py-0.2 rounded-full border border-rose-200">
-                      急需催还
+                      {displayDistributionMetrics.overdueCount > 0 ? '急需催还' : '暂无超期'}
                     </span>
                   </div>
                 </div>
@@ -2088,7 +2774,7 @@ ${suggestion.actionPlan}
                     <Clock className="w-4 h-4 text-amber-600" />
                   </div>
                   <div className="mt-2 flex items-baseline justify-between">
-                    <span className="text-xl font-bold font-mono text-amber-700">{longTermLoansList.length}</span>
+                    <span className="text-xl font-bold font-mono text-amber-700">{displayDistributionMetrics.longTermCount}</span>
                     <span className="text-xs text-amber-800 font-medium">以借代配</span>
                   </div>
                 </div>
@@ -2101,7 +2787,7 @@ ${suggestion.actionPlan}
                   </div>
                   <div className="mt-2 flex items-baseline justify-between">
                     <span className="text-xl font-bold font-mono text-slate-900">
-                      ¥{(departmentDistribution.reduce((acc, d) => acc + d.totalAssetValue, 0) / 10000).toFixed(1)}
+                      ¥{(displayDistributionMetrics.totalAssetValue / 10000).toFixed(1)}
                     </span>
                     <span className="text-xs text-slate-500 font-medium">万元资产</span>
                   </div>
@@ -2115,17 +2801,17 @@ ${suggestion.actionPlan}
                   </div>
                   <div className="mt-2 flex items-baseline justify-between">
                     <span className="text-xl font-bold font-mono text-purple-700">
-                      {departmentDistribution.filter(d => d.aiProcurementSuggestion.urgency === 'critical' || d.aiProcurementSuggestion.urgency === 'high').length}
+                      {displayDistributionMetrics.aiSuggestionsCount}
                     </span>
                     <span className="text-xs text-purple-700 font-bold bg-purple-50 px-1.5 py-0.2 rounded-full border border-purple-200">
-                      科室急需
+                      科室建议
                     </span>
                   </div>
                 </div>
               </div>
 
               {/* 2. 租借时间超长 / 严重超期特别预警横幅 */}
-              {(overdueLoansList.length > 0 || longTermLoansList.length > 0) && (
+              {(displayDistributionMetrics.targetOverdue.length > 0 || displayDistributionMetrics.targetLongTerm.length > 0) && (
                 <div className="p-4 bg-gradient-to-r from-rose-50 via-amber-50 to-orange-50 border border-rose-200 rounded-xl shadow-xs space-y-3">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2.5">
@@ -2134,13 +2820,15 @@ ${suggestion.actionPlan}
                       </div>
                       <div>
                         <h4 className="font-bold text-sm text-rose-950 flex items-center gap-2">
-                          <span>租借时间超长重点监控 · 应急周转常态占用预警</span>
+                          <span>
+                            {displayDistributionMetrics.isFiltered ? `【${displayDistributionMetrics.targetDept}】` : '全院'}租借时间超长重点监控 · 应急周转常态占用预警
+                          </span>
                           <span className="px-2 py-0.5 rounded-full text-xs bg-rose-600 text-white font-mono font-bold">
-                            {overdueLoansList.length} 台超期 / {longTermLoansList.length} 台超过7天
+                            {displayDistributionMetrics.targetOverdue.length} 台超期 / {displayDistributionMetrics.targetLongTerm.length} 台超过7天
                           </span>
                         </h4>
                         <p className="text-xs text-rose-800 mt-0.5">
-                          以下设备已被临床科室连续借调占用多日，可能存在<strong>“以借代配”</strong>现象，削弱全院突发应急救治弹性。
+                          以下设备已被临床科室连续借调占用多日，可能存在<strong>“以借代配”</strong>现象，削弱突发应急救治弹性。
                         </p>
                       </div>
                     </div>
@@ -2156,7 +2844,7 @@ ${suggestion.actionPlan}
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                    {activeLoansWithAnalytics.filter(l => l.isOverdue || l.isLongTerm).map(loan => (
+                    {displayDistributionMetrics.targetLoans.filter(l => l.isOverdue || l.isLongTerm).map(loan => (
                       <div 
                         key={loan.id} 
                         className={`p-3 bg-white rounded-xl border flex flex-col justify-between gap-2.5 transition shadow-2xs hover:shadow-md ${
@@ -2199,6 +2887,16 @@ ${suggestion.actionPlan}
                         <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs">
                           <button
                             type="button"
+                            onClick={() => handlePrintLoanVoucherForRecord(loan)}
+                            className="p-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-semibold transition flex items-center gap-1 cursor-pointer"
+                            title="查看电子交接流转单"
+                          >
+                            <FileCheck2 className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>电子单据</span>
+                          </button>
+
+                          <button
+                            type="button"
                             onClick={() => handleSendOverdueReminder(loan)}
                             className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-lg font-semibold transition flex items-center gap-1 cursor-pointer flex-1 justify-center"
                           >
@@ -2208,11 +2906,8 @@ ${suggestion.actionPlan}
 
                           <button
                             type="button"
-                            onClick={() => {
-                              setSelectedLoanForReturn(loan);
-                              setIsReturnModalOpen(true);
-                            }}
-                            className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg font-bold transition flex items-center gap-1 cursor-pointer flex-1 justify-center"
+                            onClick={() => handleOpenReturnModalForLoan(loan)}
+                            className="px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white rounded-lg font-bold transition flex items-center gap-1 cursor-pointer flex-1 justify-center shadow-2xs"
                           >
                             <RotateCcw className="w-3.5 h-3.5" />
                             <span>归还验收</span>
@@ -2237,7 +2932,7 @@ ${suggestion.actionPlan}
                         : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'
                     }`}
                   >
-                    全部科室分布 ({departmentDistribution.length})
+                    {isDeptRestricted && userDept ? `【${userDept}】分布 (${filteredDepartmentDistribution.length})` : `全部科室分布 (${departmentDistribution.length})`}
                   </button>
 
                   <button
@@ -2251,7 +2946,7 @@ ${suggestion.actionPlan}
                   >
                     <span>🔴 严重超期科室</span>
                     <span className="px-1.5 py-0.2 rounded-full text-xs bg-rose-100 text-rose-800 font-mono font-bold">
-                      {departmentDistribution.filter(d => d.overdueCount > 0).length}
+                      {(isDeptRestricted ? filteredDepartmentDistribution : departmentDistribution).filter(d => d.overdueCount > 0).length}
                     </span>
                   </button>
 
@@ -2266,7 +2961,7 @@ ${suggestion.actionPlan}
                   >
                     <span>🟡 长期占用科室 (&gt;7天)</span>
                     <span className="px-1.5 py-0.2 rounded-full text-xs bg-amber-100 text-amber-800 font-mono font-bold">
-                      {departmentDistribution.filter(d => d.longTermCount > 0).length}
+                      {(isDeptRestricted ? filteredDepartmentDistribution : departmentDistribution).filter(d => d.longTermCount > 0).length}
                     </span>
                   </button>
 
@@ -2351,7 +3046,7 @@ ${suggestion.actionPlan}
                                 <span>在用 <strong className="text-slate-800 font-mono">{deptItem.totalDevices}</strong> 台</span>
                                 <span>·</span>
                                 <span>原值 <strong className="text-slate-800 font-mono">¥{(deptItem.totalAssetValue / 10000).toFixed(1)}</strong> 万</span>
-                                {deptItem.contacts.length > 0 && (
+                                {deptItem.contacts && deptItem.contacts.length > 0 && (
                                   <>
                                     <span>·</span>
                                     <span className="truncate max-w-[180px]" title={deptItem.contacts.map(c => `${c.name} (${c.phone})`).join('、')}>
@@ -2363,15 +3058,44 @@ ${suggestion.actionPlan}
                             </div>
                           </div>
 
-                          <button
-                            type="button"
-                            onClick={() => handleCopyDepartmentProposal(deptItem)}
-                            className="px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-semibold transition flex items-center gap-1 cursor-pointer shadow-2xs shrink-0"
-                            title="复制科室增配申报立项书"
-                          >
-                            <FileText className="w-3.5 h-3.5 text-blue-600" />
-                            <span>申报书</span>
-                          </button>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {onNavigateToApprovals && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  onNavigateToApprovals({
+                                    type: 'procurement_increase',
+                                    applicantDepartment: deptItem.department,
+                                    applicantName: deptItem.contacts[0]?.name || currentUser?.name || '临床联络员',
+                                    applicantPhone: deptItem.contacts[0]?.phone || currentUser?.phone || '13800000000',
+                                    targetEquipmentName: suggestion.recommendedEquipment,
+                                    targetModel: suggestion.recommendedModel,
+                                    targetCount: suggestion.recommendedCount,
+                                    estimatedBudget: suggestion.estimatedCost,
+                                    urgency: suggestion.urgency,
+                                    clinicalNecessityReason: suggestion.reason,
+                                    clinicalRiskAnalysis: suggestion.clinicalRisk,
+                                    borrowingHistorySummary: `借调${deptItem.totalDevices}台应急设备，累计占用资产原值¥${(deptItem.totalAssetValue/10000).toFixed(1)}万${deptItem.overdueCount > 0 ? `，其中${deptItem.overdueCount}台超期` : ''}`,
+                                    title: `【${deptItem.department}】${suggestion.recommendedEquipment} ${suggestion.recommendedCount}台 临床增配立项申请`
+                                  });
+                                }}
+                                className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                                title="一键将AI增配论证转入正式审批流"
+                              >
+                                <FileCheck className="w-3.5 h-3.5" />
+                                <span>发起审批流</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleCopyDepartmentProposal(deptItem)}
+                              className="px-2.5 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-xs font-semibold transition flex items-center gap-1 cursor-pointer shadow-2xs shrink-0"
+                              title="复制科室增配申报立项书"
+                            >
+                              <FileText className="w-3.5 h-3.5 text-blue-600" />
+                              <span>呈报稿</span>
+                            </button>
+                          </div>
                         </div>
 
                         {/* 设备借用清单列表 */}
@@ -2440,7 +3164,34 @@ ${suggestion.actionPlan}
                                 </div>
 
                                 {/* 操作栏 */}
-                                <div className="flex items-center justify-end gap-2 pt-1">
+                                <div className="flex items-center justify-end gap-2 pt-1 flex-wrap">
+                                  {loan.isOverdue && onNavigateToApprovals && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        onNavigateToApprovals({
+                                          type: 'loan_extension',
+                                          equipmentId: loan.equipmentId,
+                                          equipmentName: loan.equipmentName,
+                                          equipmentModel: loan.equipmentModel,
+                                          equipmentSn: loan.equipmentSn,
+                                          loanId: loan.id,
+                                          applicantDepartment: loan.borrowingDepartment,
+                                          applicantName: loan.borrowerName,
+                                          applicantPhone: loan.borrowerPhone,
+                                          originalDueDate: loan.expectedReturnTime,
+                                          requestedDueDate: new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10),
+                                          extensionReason: loan.borrowReason || '临床急危重症救治高峰，特申请延长应急周转借用期10天',
+                                          title: `【${loan.borrowingDepartment}】${loan.equipmentName} 应急调配特批延期申请`
+                                        });
+                                      }}
+                                      className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1"
+                                      title="特批延长应急借用期"
+                                    >
+                                      <RotateCcw className="w-3.5 h-3.5" />
+                                      <span>申请延期</span>
+                                    </button>
+                                  )}
                                   {loan.isOverdue && (
                                     <button
                                       type="button"
@@ -2454,10 +3205,16 @@ ${suggestion.actionPlan}
                                   )}
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      setSelectedLoanForReturn(loan);
-                                      setIsReturnModalOpen(true);
-                                    }}
+                                    onClick={() => handlePrintLoanVoucherForRecord(loan)}
+                                    className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1"
+                                    title="查看电子闭环交接流转单 (已自动完成云端存证)"
+                                  >
+                                    <FileCheck2 className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span>电子单据</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenReturnModalForLoan(loan)}
                                     className="px-3 py-1 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 shadow-2xs"
                                   >
                                     <RotateCcw className="w-3.5 h-3.5" />
@@ -2504,7 +3261,34 @@ ${suggestion.actionPlan}
                             </p>
                           </div>
 
-                          <div className="flex items-center justify-end gap-2 pt-0.5">
+                          <div className="flex items-center justify-end gap-2 pt-0.5 flex-wrap">
+                            {onNavigateToApprovals && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  onNavigateToApprovals({
+                                    type: 'procurement_increase',
+                                    applicantDepartment: deptItem.department,
+                                    applicantName: deptItem.contacts[0]?.name || currentUser?.name || '临床联络员',
+                                    applicantPhone: deptItem.contacts[0]?.phone || currentUser?.phone || '13800000000',
+                                    targetEquipmentName: suggestion.recommendedEquipment,
+                                    targetModel: suggestion.recommendedModel,
+                                    targetCount: suggestion.recommendedCount,
+                                    estimatedBudget: suggestion.estimatedCost,
+                                    urgency: suggestion.urgency,
+                                    clinicalNecessityReason: suggestion.reason,
+                                    clinicalRiskAnalysis: suggestion.clinicalRisk,
+                                    aiRecommendationReport: `【AI论证】${suggestion.title}\n建议配置：${suggestion.recommendedEquipment} (${suggestion.recommendedModel}) ${suggestion.recommendedCount}台\n预算：¥${suggestion.estimatedCost.toLocaleString()}元\n${suggestion.actionPlan}`,
+                                    borrowingHistorySummary: `借调在用${deptItem.totalDevices}台，总原值¥${(deptItem.totalAssetValue/10000).toFixed(1)}万`,
+                                    title: `【${deptItem.department}】${suggestion.recommendedEquipment} ${suggestion.recommendedCount}台 临床增配立项申请`
+                                  });
+                                }}
+                                className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-2xs cursor-pointer"
+                              >
+                                <Send className="w-3.5 h-3.5" />
+                                <span>转入审批流</span>
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => handleCopyDepartmentProposal(deptItem)}
@@ -2551,257 +3335,38 @@ ${suggestion.actionPlan}
 
       </div>
 
-      {/* ================= 4. 借用申请出库弹窗 (Loan Application Modal) ================= */}
-      {isApplyModalOpen && selectedDeviceForLoan && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl max-w-lg w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col max-h-[90vh] border border-slate-200">
-            
-            <div className="p-4 bg-gradient-to-r from-blue-700 to-indigo-800 text-white flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-md bg-white/20 flex items-center justify-center">
-                  <ArrowRightLeft className="w-4 h-4 text-white" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-sm">应急设备借用与快速出库调拨单</h3>
-                  <p className="text-[11px] text-blue-100">生命支持急救装备 · 快速周转</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => setIsApplyModalOpen(false)}
-                className="w-7 h-7 rounded-md hover:bg-white/20 flex items-center justify-center text-white text-base cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      {/* ================= 4. 应急设备借用与快速出库调拨弹窗 (参照资产台账标准借用流程) ================= */}
+      <BorrowEquipmentModal
+        isOpen={!!borrowModalEquipment}
+        equipment={borrowModalEquipment}
+        onClose={() => setBorrowModalEquipment(null)}
+        departments={departments}
+        staff={staff}
+        currentUser={currentUser}
+        restrictToDepartment={isDeptRestricted ? userDept : undefined}
+        onConfirm={handleConfirmBorrowFromModal}
+      />
 
-            <form onSubmit={handleConfirmBorrow} className="p-5 overflow-y-auto space-y-4 text-xs">
-              
-              {/* 设备概要条 (含照片小图) */}
-              <div className="p-3 bg-blue-50/70 rounded-md border border-blue-100 flex items-center gap-3">
-                <div className="w-12 h-12 rounded bg-slate-900 overflow-hidden shrink-0 border border-blue-200">
-                  <img
-                    src={getEquipmentPhoto(selectedDeviceForLoan)}
-                    alt={selectedDeviceForLoan.name}
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-                <div className="space-y-0.5 min-w-0">
-                  <div className="font-bold text-slate-800 text-sm truncate">{selectedDeviceForLoan.name}</div>
-                  <div className="text-slate-600 font-mono text-[11px] truncate">
-                    型号: {selectedDeviceForLoan.model} | 编号: {selectedDeviceForLoan.id}
-                  </div>
-                  <div className="text-[11px] text-emerald-700 font-semibold flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3" />
-                    <span>质控自检合格 · 蓄电池 100% 满电待命</span>
-                  </div>
-                </div>
-              </div>
+      {/* ================= 5. 应急设备归还验收与回库流转弹窗 (参照资产台账标准归还流程) ================= */}
+      <ReturnEquipmentModal
+        isOpen={!!returnModalEquipment}
+        equipment={returnModalEquipment}
+        onClose={() => setReturnModalEquipment(null)}
+        departments={departments}
+        staff={staff}
+        currentUser={currentUser}
+        restrictToDepartment={isDeptRestricted ? userDept : undefined}
+        onConfirm={handleConfirmReturnFromModal}
+      />
 
-              {/* 借入科室 */}
-              <div className="space-y-1">
-                <label className="font-semibold text-slate-700">借用科室/病区 *</label>
-                <input
-                  type="text"
-                  required
-                  value={borrowForm.borrowingDepartment}
-                  onChange={(e) => setBorrowForm({ ...borrowForm, borrowingDepartment: e.target.value })}
-                  placeholder="如：急诊ICU、重症医学科、麻醉手术科"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
-
-              {/* 借用人 & 电话 */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="font-semibold text-slate-700">经办人姓名 *</label>
-                  <input
-                    type="text"
-                    required
-                    value={borrowForm.borrowerName}
-                    onChange={(e) => setBorrowForm({ ...borrowForm, borrowerName: e.target.value })}
-                    placeholder="经办医生/护士"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-1 focus:ring-blue-500"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-semibold text-slate-700">联系电话/短号 *</label>
-                  <input
-                    type="text"
-                    required
-                    value={borrowForm.borrowerPhone}
-                    onChange={(e) => setBorrowForm({ ...borrowForm, borrowerPhone: e.target.value })}
-                    placeholder="如：7991000 / 53100"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-1 focus:ring-blue-500"
-                  />
-                </div>
-              </div>
-
-              {/* 借用事由 */}
-              <div className="space-y-1">
-                <label className="font-semibold text-slate-700">借用事由/临床用途 *</label>
-                <input
-                  type="text"
-                  required
-                  value={borrowForm.borrowReason}
-                  onChange={(e) => setBorrowForm({ ...borrowForm, borrowReason: e.target.value })}
-                  placeholder="如：急诊抢救突发群伤、无创呼吸机临时增援、科室故障机周转"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-1 focus:ring-blue-500"
-                />
-              </div>
-
-              {/* 预计归还时间 */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="font-semibold text-slate-700">预计归还日期 *</label>
-                  <input
-                    type="date"
-                    required
-                    value={borrowForm.expectedReturnDate}
-                    onChange={(e) => setBorrowForm({ ...borrowForm, expectedReturnDate: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-1 focus:ring-blue-500"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="font-semibold text-slate-700">预计归还时刻</label>
-                  <input
-                    type="time"
-                    value={borrowForm.expectedReturnHour}
-                    onChange={(e) => setBorrowForm({ ...borrowForm, expectedReturnHour: e.target.value })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-1 focus:ring-blue-500"
-                  />
-                </div>
-              </div>
-
-              {/* 随附配件核点 */}
-              <div className="p-3 bg-slate-50 rounded-md border border-slate-200 space-y-1.5">
-                <div className="font-semibold text-slate-700">随附配件清单（出库时请当面点清）：</div>
-                <div className="grid grid-cols-2 gap-1 text-[11px]">
-                  {borrowForm.accessories.map((acc, idx) => (
-                    <div key={idx} className="flex items-center gap-2 text-slate-700">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      <span>{acc}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* 底部按钮 */}
-              <div className="pt-3 border-t border-slate-200 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsApplyModalOpen(false)}
-                  className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-md font-medium cursor-pointer"
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-md font-bold shadow-xs cursor-pointer flex items-center gap-1.5"
-                >
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>确认出库借用</span>
-                </button>
-              </div>
-
-            </form>
-
-          </div>
-        </div>
-      )}
-
-      {/* ================= 5. 归还入库核验弹窗 (Return Verification Modal) ================= */}
-      {isReturnModalOpen && selectedLoanForReturn && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl max-w-lg w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150 flex flex-col max-h-[90vh] border border-slate-200">
-            
-            <div className="p-4 bg-gradient-to-r from-emerald-700 to-teal-800 text-white flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-md bg-white/20 flex items-center justify-center">
-                  <RotateCcw className="w-4 h-4 text-white" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-sm">应急设备归还入库验收单</h3>
-                  <p className="text-[11px] text-emerald-100">完好状态复核 · 消毒验收 · 重新回库待命</p>
-                </div>
-              </div>
-              <button 
-                onClick={() => setIsReturnModalOpen(false)}
-                className="w-7 h-7 rounded-md hover:bg-white/20 flex items-center justify-center text-white text-base cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleConfirmReturn} className="p-5 overflow-y-auto space-y-4 text-xs">
-              
-              <div className="p-3 bg-emerald-50/60 rounded-md border border-emerald-100 space-y-1">
-                <div className="font-bold text-slate-800 text-sm">{selectedLoanForReturn.equipmentName}</div>
-                <div className="text-slate-600 flex items-center gap-3">
-                  <span>借入科室: <strong>{selectedLoanForReturn.borrowingDepartment}</strong></span>
-                  <span>经办人: <strong>{selectedLoanForReturn.borrowerName}</strong></span>
-                </div>
-                <div className="text-slate-500 text-[11px] font-mono">
-                  单号: {selectedLoanForReturn.id} · 借出时间: {selectedLoanForReturn.borrowTime}
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-semibold text-slate-700">归还验收人 (医工工程师 / 应急库管员) *</label>
-                <input
-                  type="text"
-                  required
-                  value={returnForm.returnInspector}
-                  onChange={(e) => setReturnForm({ ...returnForm, returnInspector: e.target.value })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-1 focus:ring-emerald-500"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-semibold text-slate-700">设备状态与终末消毒核验 *</label>
-                <select
-                  value={returnForm.returnCondition}
-                  onChange={(e) => setReturnForm({ ...returnForm, returnCondition: e.target.value as any })}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md font-medium text-slate-700 focus:ring-1 focus:ring-emerald-500 cursor-pointer"
-                >
-                  <option value="intact">✅ 主机完好、配件齐全、自检通过 (直接回库备用)</option>
-                  <option value="needs_cleaning">🟡 已回库、待终末消毒/清洁</option>
-                  <option value="faulty">🔴 使用中出现异常 (转入维修质控工单)</option>
-                </select>
-              </div>
-
-              <div className="space-y-1">
-                <label className="font-semibold text-slate-700">验收与交接备注</label>
-                <textarea
-                  rows={2}
-                  value={returnForm.notes}
-                  onChange={(e) => setReturnForm({ ...returnForm, notes: e.target.value })}
-                  placeholder="记录设备完好情况、电量及消毒情况"
-                  className="w-full px-3 py-2 border border-slate-300 rounded-md focus:ring-1 focus:ring-emerald-500"
-                />
-              </div>
-
-              <div className="pt-3 border-t border-slate-200 flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsReturnModalOpen(false)}
-                  className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-md font-medium cursor-pointer"
-                >
-                  取消
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-md font-bold shadow-xs cursor-pointer flex items-center gap-1.5"
-                >
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>确认归还入库</span>
-                </button>
-              </div>
-
-            </form>
-
-          </div>
-        </div>
-      )}
+      {/* ================= 5.1 借还交接双联纸质单据打印预览弹窗 (含签字区与防伪条形码) ================= */}
+      <LoanVoucherPrintModal
+        isOpen={!!printVoucherModalData}
+        equipment={printVoucherModalData?.equipment || null}
+        loanRecord={printVoucherModalData?.loanRecord || null}
+        mode={printVoucherModalData?.mode || 'loan'}
+        onClose={() => setPrintVoucherModalData(null)}
+      />
 
       {/* ================= 6. 高清实物照片大图灯箱预览 (Image Preview Modal) ================= */}
       {selectedPhotoDevice && (
@@ -2875,6 +3440,29 @@ ${suggestion.actionPlan}
                 可一键复制呈报院务会或医学装备管理委员会进行采购立项评审
               </div>
               <div className="flex items-center gap-2">
+                {onNavigateToApprovals && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsAiReportModalOpen(false);
+                      onNavigateToApprovals({
+                        type: 'procurement_increase',
+                        applicantDepartment: '医学工程保障中心 / 装备委员会',
+                        applicantName: currentUser?.name || '医工主管',
+                        targetEquipmentName: '全院应急高频周转紧缺设备 (转运呼吸机/注输泵站)',
+                        estimatedBudget: 650000,
+                        urgency: 'high',
+                        aiRecommendationReport: aiProcurementReport,
+                        clinicalNecessityReason: '全院应急借调分布推演显示多科室出现长期占用与超期以借代配，建议统一纳入年度装备采购增配专项。',
+                        title: '【医学装备委员会】全院高频借调设备增配专项立项论证'
+                      });
+                    }}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                  >
+                    <FileCheck className="w-3.5 h-3.5" />
+                    <span>转入采购立项审批流</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {

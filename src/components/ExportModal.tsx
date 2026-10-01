@@ -33,6 +33,10 @@ export interface ExportFieldOption {
 
 const ALL_EXPORT_FIELDS: ExportFieldOption[] = [
   { key: 'id', label: '设备ID/编号', category: 'base', defaultChecked: true, getValue: (i) => i.id },
+  { key: 'assetNo', label: '资产编号', category: 'base', defaultChecked: true, getValue: (i) => i.assetNo || `ZC-2023-${i.id}` },
+  { key: 'assetOwnership', label: '资产归属形式', category: 'base', defaultChecked: true, getValue: (i) => i.assetOwnership || '医院自有' },
+  { key: 'codeId', label: 'code_id (统一物资溯源码)', category: 'base', defaultChecked: true, getValue: (i) => i.codeId || `COD-${i.id}` },
+  { key: 'internalNo', label: '科室内部编号 (临床自编号/报修号)', category: 'base', defaultChecked: true, getValue: (i) => i.internalNo || '' },
   { key: 'name', label: '设备名称', category: 'base', defaultChecked: true, getValue: (i) => i.name },
   { key: 'categoryNo', label: '类别序号', category: 'base', defaultChecked: true, getValue: (i) => i.categoryNo || '' },
   { key: 'category', label: '所属类别', category: 'base', defaultChecked: true, getValue: (i) => i.category || '' },
@@ -48,6 +52,7 @@ const ALL_EXPORT_FIELDS: ExportFieldOption[] = [
   { key: 'status', label: '运行状态', category: 'specs', defaultChecked: true, getValue: (i) => i.status || '' },
   
   { key: 'department', label: '使用科室', category: 'location', defaultChecked: true, getValue: (i) => i.department || '' },
+  { key: 'usageLocation', label: '具体使用场所/房间', category: 'location', defaultChecked: true, getValue: (i) => i.usageLocation || i.location || '' },
   { key: 'building', label: '存放楼栋', category: 'location', defaultChecked: true, getValue: (i) => i.building || '' },
   { key: 'floor', label: '楼层(F)', category: 'location', defaultChecked: true, getValue: (i) => i.floor || '' },
   { key: 'nursePhone', label: '科室分机', category: 'location', defaultChecked: false, getValue: (i) => i.nursePhone || '' },

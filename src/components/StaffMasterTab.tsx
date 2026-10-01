@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { StaffPersonMaster, DepartmentMaster, StaffRoleDefinition, StakeholderCluster } from '../types';
 import { 
   DEFAULT_STAFF_ROLES, 
@@ -13,6 +13,7 @@ import { StaffRoleConfigModal } from './StaffRoleConfigModal';
 import { StakeholderClusterConfigModal } from './StakeholderClusterConfigModal';
 import { StaffBatchEditModal } from './StaffBatchEditModal';
 import { StaffBatchImportModal } from './StaffBatchImportModal';
+import { Pagination } from './Pagination';
 import { 
   Users, 
   Search, 
@@ -44,8 +45,6 @@ import {
   ExternalLink,
   ChevronRight,
   ChevronLeft,
-  ChevronsLeft,
-  ChevronsRight,
   Sparkles
 } from 'lucide-react';
 
@@ -108,7 +107,6 @@ export const StaffMasterTab: React.FC<StaffMasterTabProps> = ({
   // 分页状态
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [pageSize, setPageSize] = useState<number>(10);
-  const [jumpPageInput, setJumpPageInput] = useState<string>('');
 
   // 4. Modals state
   const [isClusterModalOpen, setIsClusterModalOpen] = useState(false);
@@ -181,31 +179,15 @@ export const StaffMasterTab: React.FC<StaffMasterTabProps> = ({
     });
   }, [staff, selectedCluster, selectedRole, selectedDept, selectedOrg, selectedTier, selectedStatus, searchQuery]);
 
-  // 分页计算
-  const totalPages = Math.max(1, Math.ceil(filteredStaff.length / pageSize));
-  const validCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
-  if (currentPage !== validCurrentPage && filteredStaff.length > 0) {
-    setCurrentPage(validCurrentPage);
-  }
+  // 重置分页
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedCluster, selectedRole, selectedDept, selectedOrg, selectedTier, selectedStatus, searchQuery]);
 
   const paginatedStaff = useMemo(() => {
-    const startIndex = (validCurrentPage - 1) * pageSize;
+    const startIndex = (currentPage - 1) * pageSize;
     return filteredStaff.slice(startIndex, startIndex + pageSize);
-  }, [filteredStaff, validCurrentPage, pageSize]);
-
-  const handlePageChange = (page: number) => {
-    const target = Math.min(Math.max(1, page), totalPages);
-    setCurrentPage(target);
-  };
-
-  const handleJumpPage = (e: React.FormEvent) => {
-    e.preventDefault();
-    const pageNum = parseInt(jumpPageInput, 10);
-    if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= totalPages) {
-      setCurrentPage(pageNum);
-      setJumpPageInput('');
-    }
-  };
+  }, [filteredStaff, currentPage, pageSize]);
 
   // Distinct organizations for filter dropdown
   const uniqueOrgs = useMemo(() => {
@@ -695,7 +677,7 @@ export const StaffMasterTab: React.FC<StaffMasterTabProps> = ({
           </div>
         ) : (
           <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden flex flex-col">
-            {/* Top Pagination Toolbar */}
+            {/* 表格顶部数据统计栏 */}
             <div className="px-4 py-2.5 bg-slate-50/90 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
               <div className="flex items-center gap-2">
                 <span className="font-bold text-slate-800 flex items-center gap-1.5">
@@ -705,57 +687,6 @@ export const StaffMasterTab: React.FC<StaffMasterTabProps> = ({
                 <span className="px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 font-bold border border-indigo-200 text-[11px]">
                   共 {filteredStaff.length} 人
                 </span>
-                {filteredStaff.length > 0 && (
-                  <span className="text-slate-500 hidden sm:inline text-[11px]">
-                    (显示第 <span className="font-semibold text-slate-700">{(validCurrentPage - 1) * pageSize + 1}</span> - <span className="font-semibold text-slate-700">{Math.min(validCurrentPage * pageSize, filteredStaff.length)}</span> 人)
-                  </span>
-                )}
-              </div>
-
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-slate-500">每页:</span>
-                  <select
-                    value={pageSize}
-                    onChange={(e) => {
-                      setPageSize(Number(e.target.value));
-                      setCurrentPage(1);
-                    }}
-                    className="bg-white border border-slate-300 rounded px-2 py-1 text-xs text-slate-800 font-bold focus:ring-2 focus:ring-indigo-500 cursor-pointer shadow-2xs"
-                  >
-                    <option value={5}>5 人/页</option>
-                    <option value={10}>10 人/页</option>
-                    <option value={15}>15 人/页</option>
-                    <option value={20}>20 人/页</option>
-                    <option value={50}>50 人/页</option>
-                  </select>
-                </div>
-
-                <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-lg p-0.5 shadow-2xs">
-                  <button
-                    type="button"
-                    onClick={() => handlePageChange(validCurrentPage - 1)}
-                    disabled={validCurrentPage === 1}
-                    className="px-2 py-0.5 rounded text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer font-bold text-xs flex items-center gap-0.5 transition"
-                    title="上一页"
-                  >
-                    <ChevronLeft className="w-3.5 h-3.5" />
-                    <span className="hidden md:inline">上一页</span>
-                  </button>
-                  <span className="px-2 py-0.5 text-xs font-mono font-bold text-indigo-700 bg-indigo-50 rounded">
-                    {validCurrentPage} / {totalPages}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => handlePageChange(validCurrentPage + 1)}
-                    disabled={validCurrentPage === totalPages}
-                    className="px-2 py-0.5 rounded text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer font-bold text-xs flex items-center gap-0.5 transition"
-                    title="下一页"
-                  >
-                    <span className="hidden md:inline">下一页</span>
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
               </div>
             </div>
 
@@ -989,138 +920,16 @@ export const StaffMasterTab: React.FC<StaffMasterTabProps> = ({
             </div>
 
             {/* Table Footer Complete Pagination */}
-            <div className="px-4 py-3 bg-slate-50/90 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
-              <div className="flex items-center gap-3">
-                <span className="text-slate-600">
-                  共 <span className="font-bold text-slate-900">{filteredStaff.length}</span> 位人员
-                  {filteredStaff.length > 0 && (
-                    <span className="text-slate-500 ml-1">
-                      (当前显示第 <span className="font-semibold text-slate-800">{(validCurrentPage - 1) * pageSize + 1}</span> - <span className="font-semibold text-slate-800">{Math.min(validCurrentPage * pageSize, filteredStaff.length)}</span> 位)
-                    </span>
-                  )}
-                </span>
-
-                <div className="flex items-center gap-1.5 border-l border-slate-300 pl-3">
-                  <span className="text-slate-500">每页:</span>
-                  <select
-                    value={pageSize}
-                    onChange={(e) => {
-                      setPageSize(Number(e.target.value));
-                      setCurrentPage(1);
-                    }}
-                    className="bg-white border border-slate-300 rounded px-2 py-0.5 text-xs text-slate-800 font-medium focus:outline-hidden focus:ring-1 focus:ring-indigo-500 cursor-pointer"
-                  >
-                    <option value={5}>5 人/页</option>
-                    <option value={10}>10 人/页</option>
-                    <option value={15}>15 人/页</option>
-                    <option value={20}>20 人/页</option>
-                    <option value={50}>50 人/页</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => handlePageChange(1)}
-                    disabled={validCurrentPage === 1}
-                    className="p-1 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition"
-                    title="首页"
-                  >
-                    <ChevronsLeft className="w-4 h-4" />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handlePageChange(validCurrentPage - 1)}
-                    disabled={validCurrentPage === 1}
-                    className="p-1 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition"
-                    title="上一页"
-                  >
-                    <ChevronLeft className="w-4 h-4" />
-                  </button>
-
-                  <div className="flex items-center gap-1 px-1">
-                    {Array.from({ length: totalPages }, (_, i) => i + 1)
-                      .filter(page => {
-                        if (totalPages <= 7) return true;
-                        if (page === 1 || page === totalPages) return true;
-                        return Math.abs(page - validCurrentPage) <= 1;
-                      })
-                      .reduce<(number | string)[]>((acc, page, idx, arr) => {
-                        if (idx > 0 && typeof arr[idx - 1] === 'number' && (page as number) - (arr[idx - 1] as number) > 1) {
-                          acc.push(`dots-${page}`);
-                        }
-                        acc.push(page);
-                        return acc;
-                      }, [])
-                      .map((item) => {
-                        if (typeof item === 'string') {
-                          return (
-                            <span key={item} className="px-1 text-slate-400 font-mono">...</span>
-                          );
-                        }
-                        const isCurrent = item === validCurrentPage;
-                        return (
-                          <button
-                            key={item}
-                            type="button"
-                            onClick={() => handlePageChange(item)}
-                            className={`min-w-[28px] h-7 px-1.5 rounded text-xs font-bold font-mono transition cursor-pointer ${
-                              isCurrent
-                                ? 'bg-indigo-600 text-white shadow-2xs'
-                                : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
-                            }`}
-                          >
-                            {item}
-                          </button>
-                        );
-                      })}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => handlePageChange(validCurrentPage + 1)}
-                    disabled={validCurrentPage === totalPages}
-                    className="p-1 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition"
-                    title="下一页"
-                  >
-                    <ChevronRight className="w-4 h-4" />
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handlePageChange(totalPages)}
-                    disabled={validCurrentPage === totalPages}
-                    className="p-1 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer transition"
-                    title="末页"
-                  >
-                    <ChevronsRight className="w-4 h-4" />
-                  </button>
-                </div>
-
-                <form onSubmit={handleJumpPage} className="flex items-center gap-1 ml-2 border-l border-slate-300 pl-2">
-                  <span className="text-slate-500">前往:</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={totalPages}
-                    value={jumpPageInput}
-                    onChange={(e) => setJumpPageInput(e.target.value)}
-                    placeholder={`${validCurrentPage}`}
-                    className="w-12 h-7 bg-white border border-slate-300 rounded px-1.5 text-center text-xs text-slate-800 font-mono focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
-                  />
-                  <span className="text-slate-500">页</span>
-                  <button
-                    type="submit"
-                    className="h-7 px-2 bg-slate-200 hover:bg-slate-300 text-slate-700 font-medium rounded text-xs transition cursor-pointer"
-                  >
-                    跳转
-                  </button>
-                </form>
-              </div>
-            </div>
+            <Pagination
+              currentPage={currentPage}
+              pageSize={pageSize}
+              totalCount={filteredStaff.length}
+              onPageChange={setCurrentPage}
+              onPageSizeChange={(sz) => {
+                setPageSize(sz);
+                setCurrentPage(1);
+              }}
+            />
           </div>
         )}
       </div>

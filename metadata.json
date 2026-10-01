@@ -1,6 +1,10 @@
 {
-  "name": "医疗设备管理台账系统",
-  "description": "专业的医学装备与空间资产管理平台，提供基于院区-楼宇-楼层-科室-责任工程师的标准主数据字典、设备台账、级联调拨、不良事件及应急调配联动与AI智能维保分析功能。",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "name": "五莲县人民医院 - 医疗设备管理台账系统",
+  "description": "五莲县人民医院医学装备全生命周期管理系统，集成设备台账、动态调拨、医工智能派工调度、维修备品备件库、手机扫码巡检、外协维修协同与月度报价审价报表、按月实际维修费用结算与财务科付款资金请款单报表、单机ROI效益核算、全生命周期预算执行预警与折旧进度管控看板、基于剩余使用年限的资产价值衰减轨迹折线图、AI多维智能研判。",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

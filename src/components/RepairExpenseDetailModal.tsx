@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { MedicalEquipment, RepairRecord } from '../types';
-import { Coins, Calendar, X, FileText, ChevronRight, Filter } from 'lucide-react';
+import { Coins, Calendar, X, FileText, ChevronRight, Filter, Landmark } from 'lucide-react';
+import { MonthlyFinanceReportModal } from './MonthlyFinanceReportModal';
 
 interface RepairExpenseDetailModalProps {
   isOpen: boolean;
@@ -21,6 +22,8 @@ export const RepairExpenseDetailModal: React.FC<RepairExpenseDetailModalProps> =
   selectedMonth,
   selectedDate,
 }) => {
+  const [isFinanceModalOpen, setIsFinanceModalOpen] = useState(false);
+
   if (!isOpen) return null;
 
   // Collect all repair records with equipment info
@@ -94,12 +97,23 @@ export const RepairExpenseDetailModal: React.FC<RepairExpenseDetailModalProps> =
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="text-slate-400 hover:text-white hover:bg-slate-800 p-1.5 rounded-lg transition"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsFinanceModalOpen(true)}
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+              title="按月生成提交财务科的付款资金准备请款单（如截至8月底结算）"
+            >
+              <Landmark className="w-3.5 h-3.5" />
+              <span>财务付款资金请款单</span>
+            </button>
+            <button
+              onClick={onClose}
+              className="text-slate-400 hover:text-white hover:bg-slate-800 p-1.5 rounded-lg transition"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Content Body */}
@@ -218,15 +232,34 @@ export const RepairExpenseDetailModal: React.FC<RepairExpenseDetailModalProps> =
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-3 bg-slate-50 border-t border-slate-200 text-right shrink-0">
+        <div className="px-6 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between shrink-0">
+          <button
+            type="button"
+            onClick={() => setIsFinanceModalOpen(true)}
+            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-md transition shadow-2xs flex items-center gap-1.5 cursor-pointer"
+          >
+            <Landmark className="w-3.5 h-3.5" />
+            <span>生成提交财务科的月度请款单 (如截至8月底)</span>
+          </button>
+
           <button
             onClick={onClose}
-            className="px-4 py-1.5 bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold rounded-md transition shadow-2xs"
+            className="px-4 py-1.5 bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold rounded-md transition shadow-2xs cursor-pointer"
           >
             关闭账单明细
           </button>
         </div>
       </div>
+
+      {/* 财务请款单模态框 */}
+      <MonthlyFinanceReportModal
+        isOpen={isFinanceModalOpen}
+        onClose={() => setIsFinanceModalOpen(false)}
+        equipmentList={equipmentList}
+        initialYear={selectedYear || '2026'}
+        initialMonth={selectedMonth || '08'}
+        initialScopeMode={timeScope === 'month' ? 'single_month' : 'cumulative_month_end'}
+      />
     </div>
   );
 };
