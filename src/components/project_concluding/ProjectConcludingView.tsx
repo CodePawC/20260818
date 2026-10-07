@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { 
   GraduationCap, 
   FileText, 
@@ -15,6 +15,7 @@ import {
   Calendar, 
   Search, 
   Layers, 
+  ChevronLeft,
   ChevronRight, 
   ExternalLink, 
   Sparkles, 
@@ -36,11 +37,18 @@ import {
   REPORT_CHAPTERS, 
   REPORT_REFERENCES, 
   ReportReferenceItem,
-  APPRAISAL_DATA, 
   PUBLISHED_PAPER_DATA, 
   LEADER_INSTRUCTIONS, 
-  COMPLIANCE_CHECKLIST 
+  COMPLIANCE_CHECKLIST,
+  ResearchTeamMember
 } from '../../data/projectConcludingData';
+import { 
+  getStoredResearchTeam, 
+  saveStoredResearchTeam 
+} from '../../utils/projectTeamStore';
+import { AppraisalDocumentView } from './AppraisalDocumentView';
+import { SubmissionKitView } from './SubmissionKitView';
+import { ProjectApplicationView } from './ProjectApplicationView';
 
 interface ProjectConcludingViewProps {
   currentUser?: AuthUser;
@@ -61,8 +69,17 @@ export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
   const [showChecklistModal, setShowChecklistModal] = useState<boolean>(false);
   const [showRefVerifyModal, setShowRefVerifyModal] = useState<boolean>(false);
   const [selectedRefToVerify, setSelectedRefToVerify] = useState<ReportReferenceItem | null>(null);
-  const [printMode, setPrintMode] = useState<'a4_paper' | 'screen_scroll'>('screen_scroll');
+  const [printMode, setPrintMode] = useState<'paged' | 'a4_paper' | 'screen_scroll'>('paged');
+  const [pagedSectionIdx, setPagedSectionIdx] = useState<number>(0);
   const reportContainerRef = useRef<HTMLDivElement>(null);
+
+  // 课题组成员全局状态（本地持久化存储）
+  const [teamMembers, setTeamMembers] = useState<ResearchTeamMember[]>(() => getStoredResearchTeam());
+
+  const handleUpdateTeamMembers = (newTeam: ResearchTeamMember[]) => {
+    setTeamMembers(newTeam);
+    saveStoredResearchTeam(newTeam);
+  };
 
   // 脱敏处理辅助函数
   const maskText = (text: string): string => {
@@ -146,12 +163,43 @@ export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
     window.print();
   };
 
-  // 滚动到指定章节
+  const REPORT_PAGING_SECTIONS = useMemo(() => [
+    { id: 'cover', title: '浅蓝色胶装封面 (附件1规范)' },
+    { id: 'toc', title: '课题报告目录' },
+    { id: 'abstract', title: '内容提要与关键词' },
+    ...REPORT_CHAPTERS.map(ch => ({ id: ch.id, title: `${ch.chapterNumber} ${ch.title}` })),
+    { id: 'references', title: '参考文献与声明附件' }
+  ], []);
+
+  // 键盘快捷翻页（分页模式下）
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (activeSubTab === 'report' && printMode === 'paged') {
+        if (e.key === 'ArrowLeft') {
+          setPagedSectionIdx(p => Math.max(0, p - 1));
+        } else if (e.key === 'ArrowRight') {
+          setPagedSectionIdx(p => Math.min(REPORT_PAGING_SECTIONS.length - 1, p + 1));
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [activeSubTab, printMode, REPORT_PAGING_SECTIONS.length]);
+
+  // 滚动到指定章节或切换分页
   const scrollToChapter = (chapterId: string) => {
     setActiveChapterId(chapterId);
-    const element = document.getElementById(chapterId);
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (printMode === 'paged') {
+      const idx = REPORT_PAGING_SECTIONS.findIndex(s => s.id === chapterId);
+      if (idx !== -1) {
+        setPagedSectionIdx(idx);
+      }
+    } else {
+      const element = document.getElementById(chapterId);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     }
   };
 
@@ -448,6 +496,18 @@ export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
                 <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                   <div className="flex items-center bg-slate-100 p-0.5 rounded-md border border-slate-300 text-xs">
                     <button
+                      onClick={() => setPrintMode('paged')}
+                      className={`px-3 py-1 rounded-sm font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+                        printMode === 'paged'
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'text-slate-700 hover:text-slate-900'
+                      }`}
+                      title="分页模式逐节浏览，无须拖拽长滚动条"
+                    >
+                      <BookOpen className="w-3.5 h-3.5" />
+                      <span>分页浏览模式</span>
+                    </button>
+                    <button
                       onClick={() => setPrintMode('a4_paper')}
                       className={`px-3 py-1 rounded-sm font-semibold transition cursor-pointer flex items-center gap-1.5 ${
                         printMode === 'a4_paper'
@@ -455,8 +515,8 @@ export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
                           : 'text-slate-700 hover:text-slate-900'
                       }`}
                     >
-                      <BookOpen className="w-3.5 h-3.5" />
-                      <span>A4标准单页装订排版</span>
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>A4单页排版</span>
                     </button>
                     <button
                       onClick={() => setPrintMode('screen_scroll')}
@@ -466,8 +526,7 @@ export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
                           : 'text-slate-700 hover:text-slate-900'
                       }`}
                     >
-                      <FileText className="w-3.5 h-3.5" />
-                      <span>公文标准连续通读排版</span>
+                      <span>连续通读排版</span>
                     </button>
                   </div>
 
@@ -478,20 +537,13 @@ export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
                     title="查验报告中收录的24篇真实知网/国家标准文献及检索编号"
                   >
                     <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>查验24篇真实文献（知网可查）</span>
+                    <span>查验24篇真实文献</span>
                   </button>
-
-                  <div className="hidden 2xl:flex items-center gap-2 text-[11px] text-slate-600 border-l border-slate-300 pl-3">
-                    <span className="font-bold text-slate-700">通知排版硬指标：</span>
-                    <span className="bg-slate-100 px-2 py-0.5 rounded-sm border border-slate-200">正文：仿宋GB三号 (16pt)</span>
-                    <span className="bg-slate-100 px-2 py-0.5 rounded-sm border border-slate-200">标题：黑体小二号 (18pt)</span>
-                    <span className="bg-sky-50 text-sky-800 px-2 py-0.5 rounded-sm border border-sky-200">封面：浅蓝A4胶装 (附件1)</span>
-                  </div>
                 </div>
 
                 <div className="flex items-center gap-3 text-xs">
                   <span className="text-slate-500 font-mono hidden sm:inline">
-                    报告正文字数：<strong className="text-emerald-700 font-bold">{reportStats.charCount.toLocaleString()}</strong> 汉字 (逾1万字达标)
+                    字数：<strong className="text-emerald-700 font-bold">{reportStats.charCount.toLocaleString()}</strong> 汉字
                   </span>
                   <button
                     onClick={handlePrint}
@@ -503,181 +555,249 @@ export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
                 </div>
               </div>
 
+              {/* 分页模式控制子条 */}
+              {printMode === 'paged' && (
+                <div className="sticky top-[49px] z-20 w-full bg-slate-100/95 backdrop-blur-xs border-b border-slate-300 px-4 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-3 shadow-2xs">
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setPagedSectionIdx(i => Math.max(0, i - 1))}
+                      disabled={pagedSectionIdx === 0}
+                      className="px-3 py-1 rounded-md text-xs font-semibold bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition cursor-pointer shadow-2xs"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                      <span>上一节</span>
+                    </button>
+                    <button
+                      onClick={() => setPagedSectionIdx(i => Math.min(REPORT_PAGING_SECTIONS.length - 1, i + 1))}
+                      disabled={pagedSectionIdx === REPORT_PAGING_SECTIONS.length - 1}
+                      className="px-3 py-1 rounded-md text-xs font-semibold bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1 transition cursor-pointer shadow-2xs"
+                    >
+                      <span>下一节</span>
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                    <span className="text-xs font-mono font-bold text-slate-700 ml-2">
+                      第 {pagedSectionIdx + 1} / {REPORT_PAGING_SECTIONS.length} 节：{REPORT_PAGING_SECTIONS[pagedSectionIdx]?.title}
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={pagedSectionIdx}
+                      onChange={(e) => setPagedSectionIdx(parseInt(e.target.value, 10))}
+                      className="text-xs py-1 px-2.5 bg-white border border-slate-300 rounded-md focus:outline-hidden font-medium text-slate-700 cursor-pointer"
+                    >
+                      {REPORT_PAGING_SECTIONS.map((sec, idx) => (
+                        <option key={sec.id} value={idx}>
+                          {idx + 1}. {sec.title}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="hidden lg:flex items-center gap-1 text-[11px] text-slate-500 font-serif ml-2">
+                      <span>支持键盘左右方向键翻页</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* 文档页面主体呈现区 */}
               <div className="py-8 px-2 sm:px-6 w-full flex flex-col items-center">
                 
-                {/* 1. 浅蓝色独立胶装封面（严格按照通知附件1样式：A4标准尺寸，浅蓝色底纸，黑体大标题，宋体三号申报信息，下划线槽） */}
-                <div 
-                  id="cover" 
-                  className={`doc-cover-sheet ${printMode === 'screen_scroll' ? 'mb-8' : ''}`}
-                >
-                  {/* 最上方：2026年度日照市社会科学立项课题研究成果（黑体二号居中，加粗） */}
-                  <div className="pt-8 pb-4 text-center">
-                    <h2 className="font-doc-title-2 text-slate-950 font-bold tracking-wider">
-                      2026年度日照市社会科学立项课题研究成果
-                    </h2>
-                  </div>
-
-                  {/* 课题类别：医学卫生类专项研究课题（黑体二号加粗居中） */}
-                  <div className="pt-4 pb-4 text-center">
-                    <h3 className="font-doc-title-2 text-slate-900 font-bold tracking-wide text-xl sm:text-2xl">
-                      课题类别：医学卫生类专项研究课题
-                    </h3>
-                  </div>
-
-                  {/* 课题名称：基于主数据治理与人工智能辅助交互的县级医院医学装备全生命周期闭环管理模式研究（黑体小二号居中） */}
-                  <div className="py-6 sm:py-8 text-center px-4">
-                    <h1 className="font-doc-heading-xiao2 text-slate-950 max-w-xl mx-auto leading-relaxed font-bold tracking-normal">
-                      课题名称：{maskText(PROJECT_METADATA.title)}
-                    </h1>
-                  </div>
-
-                  {/* 课题申报基础信息（严格宋体三号，整齐下划线） */}
-                  <div className="max-w-xl mx-auto space-y-4 text-left font-doc-fangsong-3 text-slate-900 pt-6 px-4">
-                    <div className="flex items-baseline">
-                      <span className="font-bold tracking-wider w-36 shrink-0 font-serif">课题负责人：</span>
-                      <div className="flex-1 border-b-2 border-slate-900 pb-0.5 text-center font-bold font-serif text-lg">
-                        {maskText(PROJECT_METADATA.leader)}
-                      </div>
-                    </div>
-                    <div className="flex items-baseline">
-                      <span className="font-bold tracking-wider w-36 shrink-0 font-serif">课题组成员：</span>
-                      <div className="flex-1 border-b-2 border-slate-900 pb-0.5 text-center font-serif text-base">
-                        {isAnonymous 
-                          ? '【匿名评审：成员姓名已遮蔽】' 
-                          : '严金光  王吉平  丁伟  张建军  李培森  陈培培  刘加峰'}
-                      </div>
-                    </div>
-                    <div className="flex items-baseline">
-                      <span className="font-bold tracking-[0.25em] w-36 shrink-0 font-serif">成果形式：</span>
-                      <div className="flex-1 border-b-2 border-slate-900 pb-0.5 text-center font-serif font-bold">
-                        研究报告
-                      </div>
-                    </div>
-                    <div className="flex items-baseline">
-                      <span className="font-bold tracking-[0.25em] w-36 shrink-0 font-serif">承担单位：</span>
-                      <div className="flex-1 border-b-2 border-slate-900 pb-0.5 text-center font-bold font-serif">
-                        {maskText(PROJECT_METADATA.leaderUnit)}
-                      </div>
-                    </div>
-                    <div className="flex items-baseline">
-                      <span className="font-bold tracking-wider w-36 shrink-0 font-serif">报送日期：</span>
-                      <div className="flex-1 border-b-2 border-slate-900 pb-0.5 text-center font-mono font-bold">
-                        2026年9月30日
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 底部落款（黑体4号与宋体4号） */}
-                  <div className="pt-16 sm:pt-20 space-y-2 text-center text-slate-900">
-                    <p className="font-doc-4-heiti tracking-widest text-base">中国·山东·日照</p>
-                    <p className="font-doc-4-heiti text-base">2026年9月</p>
-                    <p className="font-doc-4-songti pt-2 tracking-[0.2em] font-bold text-lg">日照市社会科学界联合会制</p>
-                  </div>
-                </div>
-
-                {/* 2. 目录（严格按照附件1样式：2号黑体居中，3号仿宋带引线点阵） */}
-                <div 
-                  id="toc" 
-                  className={`doc-sheet ${printMode === 'screen_scroll' ? 'mb-8' : ''}`}
-                >
-                  <div className="text-center py-4 border-b border-slate-300 mb-6">
-                    <h2 className="font-doc-title-2 text-slate-950 tracking-[0.4em] font-bold">
-                      目 &nbsp; 录
-                    </h2>
-                  </div>
-
-                  <div className="space-y-3 font-doc-fangsong-3 text-slate-900">
-                    {/* 内容提要 */}
-                    <div 
-                      onClick={() => scrollToChapter('abstract')}
-                      className="flex items-baseline justify-between cursor-pointer hover:text-blue-700 transition"
-                    >
-                      <span className="font-bold text-slate-950">内容提要与关键词</span>
-                      <span className="flex-1 mx-3 border-b-2 border-dotted border-slate-400 relative -top-1" />
-                      <span className="font-mono font-bold text-slate-900">1</span>
+                {/* 1. 浅蓝色独立胶装封面 */}
+                {(printMode !== 'paged' || pagedSectionIdx === 0) && (
+                  <div 
+                    id="cover" 
+                    className={`doc-cover-sheet ${printMode === 'screen_scroll' ? 'mb-8' : ''}`}
+                  >
+                    {/* 最上方：2026年度日照市社会科学立项课题研究成果（黑体二号居中，加粗） */}
+                    <div className="pt-8 pb-4 text-center">
+                      <h2 className="font-doc-title-2 text-slate-950 font-bold tracking-wider">
+                        2026年度日照市社会科学立项课题研究成果
+                      </h2>
                     </div>
 
-                    {/* 章节目录列表 */}
-                    {REPORT_CHAPTERS.map((ch, idx) => (
-                      <div key={ch.id} className="space-y-1.5 pt-1">
-                        <div 
-                          onClick={() => scrollToChapter(ch.id)}
-                          className="flex items-baseline justify-between font-bold text-slate-950 cursor-pointer hover:text-blue-700 transition"
-                        >
-                          <span>{ch.chapterNumber} &nbsp; {ch.title}</span>
-                          <span className="flex-1 mx-3 border-b-2 border-dotted border-slate-500 relative -top-1" />
-                          <span className="font-mono font-bold text-slate-900">{idx * 4 + 2}</span>
+                    {/* 课题类别：医学卫生类专项研究课题（黑体二号加粗居中） */}
+                    <div className="pt-4 pb-4 text-center">
+                      <h3 className="font-doc-title-2 text-slate-900 font-bold tracking-wide text-xl sm:text-2xl">
+                        课题类别：医学卫生类专项研究课题
+                      </h3>
+                    </div>
+
+                    {/* 课题名称：基于主数据治理与人工智能辅助交互的县级医院医学装备全生命周期闭环管理模式研究（黑体小二号居中） */}
+                    <div className="py-6 sm:py-8 text-center px-4">
+                      <h1 className="font-doc-heading-xiao2 text-slate-950 max-w-xl mx-auto leading-relaxed font-bold tracking-normal">
+                        课题名称：{maskText(PROJECT_METADATA.title)}
+                      </h1>
+                    </div>
+
+                    {/* 课题申报基础信息 */}
+                    <div className="max-w-xl mx-auto space-y-4 text-left font-doc-fangsong-3 text-slate-900 pt-4 px-4">
+                      <div className="flex items-baseline">
+                        <span className="font-bold tracking-wider w-36 shrink-0 font-serif">课题类别：</span>
+                        <div className="flex-1 border-b-2 border-slate-900 pb-0.5 text-center font-serif text-base">
+                          {PROJECT_METADATA.category}（医学卫生类）
                         </div>
-                        {ch.sections.map((sec, sIdx) => (
-                          <div 
-                            key={sec.id} 
-                            onClick={() => scrollToChapter(sec.id)}
-                            className="flex items-baseline justify-between pl-6 text-[15pt] text-slate-800 cursor-pointer hover:text-blue-700 transition"
-                          >
-                            <span>{sec.sectionNumber} &nbsp; {sec.title}</span>
-                            <span className="flex-1 mx-3 border-b border-dotted border-slate-400 relative -top-1" />
-                            <span className="font-mono text-slate-700">{idx * 4 + sIdx + 2}</span>
-                          </div>
-                        ))}
                       </div>
-                    ))}
 
-                    <div 
-                      onClick={() => scrollToChapter('references')}
-                      className="flex items-baseline justify-between pt-2 cursor-pointer hover:text-blue-700 transition"
-                    >
-                      <span className="font-bold text-slate-950">参考文献（24篇真实核心文献）</span>
-                      <span className="flex-1 mx-3 border-b-2 border-dotted border-slate-400 relative -top-1" />
-                      <span className="font-mono font-bold text-slate-900">28</span>
+                      <div className="flex items-baseline">
+                        <span className="font-bold tracking-wider w-36 shrink-0 font-serif">立项时间：</span>
+                        <div className="flex-1 border-b-2 border-slate-900 pb-0.5 text-center font-serif font-bold text-base">
+                          2025年5月
+                        </div>
+                      </div>
+
+                      <div className="flex items-baseline">
+                        <span className="font-bold tracking-wider w-36 shrink-0 font-serif">课题负责人：</span>
+                        <div className="flex-1 border-b-2 border-slate-900 pb-0.5 text-center font-bold font-serif text-lg">
+                          {maskText(PROJECT_METADATA.leader)}
+                        </div>
+                      </div>
+
+                      <div className="flex items-baseline">
+                        <span className="font-bold tracking-wider w-36 shrink-0 font-serif">课题组成员：</span>
+                        <div className="flex-1 border-b-2 border-slate-900 pb-0.5 text-center font-serif text-base">
+                          {isAnonymous 
+                            ? '【匿名评审：成员姓名已遮蔽】' 
+                            : teamMembers.slice(1).map(m => m.name).join('  ')}
+                        </div>
+                      </div>
+
+                      <div className="flex items-baseline">
+                        <span className="font-bold tracking-[0.25em] w-36 shrink-0 font-serif">成果形式：</span>
+                        <div className="flex-1 border-b-2 border-slate-900 pb-0.5 text-center font-serif font-bold">
+                          研究报告
+                        </div>
+                      </div>
+
+                      <div className="flex items-baseline">
+                        <span className="font-bold tracking-wider w-36 shrink-0 font-serif">承担单位：</span>
+                        <div className="flex-1 border-b-2 border-slate-900 pb-0.5 text-center font-bold font-serif">
+                          {maskText(PROJECT_METADATA.leaderUnit)}
+                        </div>
+                      </div>
+
+                      <div className="flex items-baseline">
+                        <span className="font-bold tracking-wider w-36 shrink-0 font-serif">报送日期：</span>
+                        <div className="flex-1 border-b-2 border-slate-900 pb-0.5 text-center font-mono font-bold">
+                          2026年9月30日
+                        </div>
+                      </div>
                     </div>
-                    <div 
-                      onClick={() => scrollToChapter('statements')}
-                      className="flex items-baseline justify-between cursor-pointer hover:text-blue-700 transition"
-                    >
-                      <span className="font-bold text-slate-950">附件 3：原创性声明与课题研究成果使用授权声明</span>
-                      <span className="flex-1 mx-3 border-b-2 border-dotted border-slate-400 relative -top-1" />
-                      <span className="font-mono font-bold text-slate-900">30</span>
+
+                    {/* 底部落款 */}
+                    <div className="pt-16 sm:pt-20 space-y-2 text-center text-slate-900">
+                      <p className="font-doc-4-heiti tracking-widest text-base">中国·山东·日照</p>
+                      <p className="font-doc-4-heiti text-base">2026年9月</p>
+                      <p className="font-doc-4-songti pt-2 tracking-[0.2em] font-bold text-lg">日照市社会科学界联合会制</p>
                     </div>
                   </div>
+                )}
 
-                  <div className="absolute bottom-6 left-0 right-0 text-center font-mono text-xs text-slate-500">
-                    - I -
-                  </div>
-                </div>
+                {/* 2. 目录 */}
+                {(printMode !== 'paged' || pagedSectionIdx === 1) && (
+                  <div 
+                    id="toc" 
+                    className={`doc-sheet ${printMode === 'screen_scroll' ? 'mb-8' : ''}`}
+                  >
+                    <div className="text-center py-4 border-b border-slate-300 mb-6">
+                      <h2 className="font-doc-title-2 text-slate-950 tracking-[0.4em] font-bold">
+                        目 &nbsp; 录
+                      </h2>
+                    </div>
 
-                {/* 3. 内容提要与关键词独立页（严格执行公文三号仿宋，首行空两格） */}
-                <div 
-                  id="abstract" 
-                  className={`doc-sheet ${printMode === 'screen_scroll' ? 'mb-8' : ''}`}
-                >
-                  <div className="text-center py-4 mb-6">
-                    <h2 className="font-doc-heading-xiao2 text-slate-950 tracking-[0.25em] font-bold">
-                      内 容 提 要
-                    </h2>
-                  </div>
+                    <div className="space-y-3 font-doc-fangsong-3 text-slate-900">
+                      {/* 内容提要 */}
+                      <div 
+                        onClick={() => scrollToChapter('abstract')}
+                        className="flex items-baseline justify-between cursor-pointer hover:text-blue-700 transition"
+                      >
+                        <span className="font-bold text-slate-950">内容提要与关键词</span>
+                        <span className="flex-1 mx-3 border-b-2 border-dotted border-slate-400 relative -top-1" />
+                        <span className="font-mono font-bold text-slate-900">1</span>
+                      </div>
 
-                  <div className="space-y-4">
-                    <p className="font-doc-p">
-                      在我国县域医疗卫生体制改革向纵深推进与公立医院高质量发展战略背景下，医学装备是保障医疗质量安全、支撑临床诊疗与提升运营效率的关键物理载体。本课题紧密围绕县级综合医院普遍面临的“基础数据口径混乱、系统信息孤岛、非结构化沟通占主导、一事一单闭环缺失、外协维保成本高昂、强检计量存在违规风险”等核心痛点，以{maskText('五莲县人民医院')}为全场景实证样本，系统探索构建了“主数据治理（MDG）为底座、人工智能辅助交互为入口、一事一单数字化流转为主线、全生命周期闭环管控为目标”的现代医学装备精细化管理模式。
-                    </p>
-                    <p className="font-doc-p">
-                      研究创新性地构建了设备纯数字唯一资产编码与国家NMPA分类代码、国家市场监管总局计量强检目录及医保编码的多维映射标准字典；打造了涵盖自然语言智能报修转单、扫码在位纠偏以及人机协同故障树推理的AI辅助交互引擎；重塑了包括麻醉手术科电子内窥镜返厂联合议价、急救生命支持机具全院跨科共享调配、法定强检到期预警在内的全生命周期闭环流程。长达16个月的全院45个临床医技科室实证运行表明：全院设备主数据规范率由68.2%跃升至99.4%，资产盘点耗时由28天锐减至3天，抢修平均响应时间缩短76.0%，法定强检合规率达100%实现零漏检，外协维修年均节约资金逾45万元，取得了突出的社会效益与经济效益，为日照市及全省县域医疗机构医学装备精细化管理提供了可复制、可借鉴的落地范式。
-                    </p>
+                      {/* 章节目录列表 */}
+                      {REPORT_CHAPTERS.map((ch, idx) => (
+                        <div key={ch.id} className="space-y-1.5 pt-1">
+                          <div 
+                            onClick={() => scrollToChapter(ch.id)}
+                            className="flex items-baseline justify-between font-bold text-slate-950 cursor-pointer hover:text-blue-700 transition"
+                          >
+                            <span>{ch.chapterNumber} &nbsp; {ch.title}</span>
+                            <span className="flex-1 mx-3 border-b-2 border-dotted border-slate-500 relative -top-1" />
+                            <span className="font-mono font-bold text-slate-900">{idx * 4 + 2}</span>
+                          </div>
+                          {ch.sections.map((sec, sIdx) => (
+                            <div 
+                              key={sec.id} 
+                              onClick={() => scrollToChapter(sec.id)}
+                              className="flex items-baseline justify-between pl-6 text-[15pt] text-slate-800 cursor-pointer hover:text-blue-700 transition"
+                            >
+                              <span>{sec.sectionNumber} &nbsp; {sec.title}</span>
+                              <span className="flex-1 mx-3 border-b border-dotted border-slate-400 relative -top-1" />
+                              <span className="font-mono text-slate-700">{idx * 4 + sIdx + 2}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
 
-                    <div className="pt-6 font-doc-fangsong-3 text-slate-900 flex items-start gap-2">
-                      <strong className="font-doc-heading-3 shrink-0">关 键 词：</strong>
-                      <span className="leading-relaxed">主数据治理；人工智能辅助交互；县级医院；医学装备；一事一单；全生命周期；闭环管理；实证研究</span>
+                      <div 
+                        onClick={() => scrollToChapter('references')}
+                        className="flex items-baseline justify-between pt-2 cursor-pointer hover:text-blue-700 transition"
+                      >
+                        <span className="font-bold text-slate-950">参考文献（24篇真实核心文献）</span>
+                        <span className="flex-1 mx-3 border-b-2 border-dotted border-slate-400 relative -top-1" />
+                        <span className="font-mono font-bold text-slate-900">28</span>
+                      </div>
+                      <div 
+                        onClick={() => scrollToChapter('statements')}
+                        className="flex items-baseline justify-between cursor-pointer hover:text-blue-700 transition"
+                      >
+                        <span className="font-bold text-slate-950">附件 3：原创性声明与课题研究成果使用授权声明</span>
+                        <span className="flex-1 mx-3 border-b-2 border-dotted border-slate-400 relative -top-1" />
+                        <span className="font-mono font-bold text-slate-900">30</span>
+                      </div>
+                    </div>
+
+                    <div className="absolute bottom-6 left-0 right-0 text-center font-mono text-xs text-slate-500">
+                      - I -
                     </div>
                   </div>
+                )}
 
-                  <div className="absolute bottom-6 left-0 right-0 text-center font-mono text-xs text-slate-500">
-                    - 1 -
+                {/* 3. 内容提要与关键词独立页 */}
+                {(printMode !== 'paged' || pagedSectionIdx === 2) && (
+                  <div 
+                    id="abstract" 
+                    className={`doc-sheet ${printMode === 'screen_scroll' ? 'mb-8' : ''}`}
+                  >
+                    <div className="text-center py-4 mb-6">
+                      <h2 className="font-doc-heading-xiao2 text-slate-950 tracking-[0.25em] font-bold">
+                        内 容 提 要
+                      </h2>
+                    </div>
+
+                    <div className="space-y-4">
+                      <p className="font-doc-p">
+                        在我国县域医疗卫生体制改革向纵深推进与公立医院高质量发展战略背景下，医学装备是保障医疗质量安全、支撑临床诊疗与提升运营效率的关键物理载体。本课题紧密围绕县级综合医院普遍面临的“基础数据口径混乱、系统信息孤岛、非结构化沟通占主导、一事一单闭环缺失、外协维保成本高昂、强检计量存在违规风险”等核心痛点，以{maskText('五莲县人民医院')}为全场景实证样本，系统探索构建了“主数据治理（MDG）为底座、人工智能辅助交互为入口、一事一单数字化流转为主线、全生命周期闭环管控为目标”的现代医学装备精细化管理模式。
+                      </p>
+                      <p className="font-doc-p">
+                        研究创新性地构建了设备纯数字唯一资产编码与国家NMPA分类代码、国家市场监管总局计量强检目录及医保编码的多维映射标准字典；打造了涵盖自然语言智能报修转单、扫码在位纠偏以及人机协同故障树推理的AI辅助交互引擎；重塑了包括麻醉手术科电子内窥镜返厂联合议价、急救生命支持机具全院跨科共享调配、法定强检到期预警在内的全生命周期闭环流程。长达16个月的全院45个临床医技科室实证运行表明：全院设备主数据规范率由68.2%跃升至99.4%，资产盘点耗时由28天锐减至3天，抢修平均响应时间缩短76.0%，法定强检合规率达100%实现零漏检，外协维修年均节约资金逾45万元，取得了突出的社会效益与经济效益，为日照市及全省县域医疗机构医学装备精细化管理提供了可复制、可借鉴的落地范式。
+                      </p>
+
+                      <div className="pt-6 font-doc-fangsong-3 text-slate-900 flex items-start gap-2">
+                        <strong className="font-doc-heading-3 shrink-0">关 键 词：</strong>
+                        <span className="leading-relaxed">主数据治理；人工智能辅助交互；县级医院；医学装备；一事一单；全生命周期；闭环管理；实证研究</span>
+                      </div>
+                    </div>
+
+                    <div className="absolute bottom-6 left-0 right-0 text-center font-mono text-xs text-slate-500">
+                      - 1 -
+                    </div>
                   </div>
-                </div>
+                )}
 
-                {/* 4. 报告正文章节：第一章至第七章（标题小二号黑体居中，二级标题三号黑体加粗，正文仿宋GB三号） */}
-                {REPORT_CHAPTERS.map((ch, idx) => (
+                {/* 4. 报告正文章节：第一章至第七章 */}
+                {REPORT_CHAPTERS.map((ch, idx) => (printMode !== 'paged' || pagedSectionIdx === 3 + idx) && (
                   <div 
                     key={ch.id} 
                     id={ch.id} 
@@ -750,283 +870,153 @@ export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
                   </div>
                 ))}
 
-                {/* 5. 参考文献（严格执行通知附件2国家标准著录格式：小二号黑体标题，3号仿宋列表，全部为中国知网CNKI/万方真实可查文献） */}
-                <div 
-                  id="references" 
-                  className={`doc-sheet ${printMode === 'screen_scroll' ? 'mb-8' : ''}`}
-                >
-                  <div className="text-center py-4 mb-4">
-                    <h2 className="font-doc-heading-xiao2 text-slate-950 tracking-[0.25em] font-bold">
-                      参 考 文 献
-                    </h2>
-                  </div>
-
-                  <div className="bg-slate-50 border border-slate-200 p-3 rounded-md mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                    <p className="text-slate-600 font-doc-fangsong-3 leading-relaxed">
-                      著录说明：格式严格执行通知附件2国家标准。收录的<strong>24篇核心文献</strong>全部为<strong>中国知网 (CNKI)</strong>、<strong>万方数据</strong>、国家市场监管总局法规库真实收录之论文、国家标准与法定公报，支持在线验真。
-                    </p>
-                    <button
-                      onClick={() => setShowRefVerifyModal(true)}
-                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md font-medium shrink-0 flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                {/* 5. 参考文献与附件3 */}
+                {(printMode !== 'paged' || pagedSectionIdx === 3 + REPORT_CHAPTERS.length) && (
+                  <>
+                    <div 
+                      id="references" 
+                      className={`doc-sheet ${printMode === 'screen_scroll' ? 'mb-8' : ''}`}
                     >
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>查看知网核验清单</span>
-                    </button>
-                  </div>
-
-                  <ol className="space-y-4 font-doc-fangsong-3 text-slate-900 text-[14pt] list-none">
-                    {REPORT_REFERENCES.map(ref => (
-                      <li key={ref.index} className="flex flex-col gap-1 text-justify group border-b border-dashed border-slate-200 pb-3 last:border-b-0">
-                        <div className="flex items-start gap-2 leading-relaxed">
-                          <span className="font-mono font-bold text-slate-950 shrink-0">[{ref.index}].</span>
-                          <span className="flex-1">
-                            {maskText(ref.author)}. {ref.title} [{ref.type}]. {ref.publication}
-                            {ref.year ? `, ${ref.year}` : ''}
-                            {ref.volume ? `, ${ref.volume}` : ''}
-                            {ref.pages ? `: ${ref.pages}` : ''}.
-                          </span>
-                        </div>
-                        {/* 真实检索验证与收录库来源标签 (屏幕显示，打印时自动隐藏) */}
-                        <div className="pl-6 flex flex-wrap items-center gap-2 text-xs print:hidden pt-0.5">
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm bg-emerald-50 text-emerald-800 border border-emerald-200 font-sans font-medium">
-                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                            <span>真实收录：{ref.databaseSource}</span>
-                          </span>
-                          {ref.cnkiCode && (
-                            <span className="text-slate-500 font-mono text-[11px] bg-slate-100 px-1.5 py-0.5 rounded-sm">
-                              【{ref.cnkiCode}】
-                            </span>
-                          )}
-                          <button
-                            onClick={() => {
-                              setSelectedRefToVerify(ref);
-                              setShowRefVerifyModal(true);
-                            }}
-                            className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-sans hover:underline cursor-pointer ml-1 text-xs"
-                          >
-                            <span>知网/万方真实性核验</span>
-                            <ExternalLink className="w-2.5 h-2.5" />
-                          </button>
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
-
-                  <div className="absolute bottom-6 left-0 right-0 text-center font-mono text-xs text-slate-500">
-                    - 28 -
-                  </div>
-                </div>
-
-                {/* 6. 原创性声明与成果使用授权声明（严格按照附件3格式：右上角附件3，黑体二号标题，仿宋三号正文，负责人签字） */}
-                <div 
-                  id="statements" 
-                  className={`doc-sheet ${printMode === 'screen_scroll' ? 'mb-8' : ''}`}
-                >
-                  <div className="text-right text-sm text-slate-700 font-doc-4-songti pb-2 font-bold">
-                    附 件 3
-                  </div>
-
-                  {/* 原创性声明 */}
-                  <div className="space-y-6 pt-4">
-                    <h2 className="font-doc-title-2 text-center text-slate-950 tracking-[0.25em] font-bold">
-                      原 创 性 声 明
-                    </h2>
-                    <p className="font-doc-p leading-[2]">
-                      本课题组郑重声明：所呈交的课题成果报告，是本课题组经过认真调研，独立进行研究所取得的成果。除文中已经注明引用的内容外，本成果不包含任何其他个人或集体已经发表或撰写过的科研成果。对本成果的研究做出重要贡献的个人和集体，均已在文中以明确方式标明。本课题组完全意识到本声明的法律责任由本课题组承担。
-                    </p>
-
-                    <div className="pt-6 font-doc-fangsong-3 text-slate-900 flex flex-wrap items-baseline justify-between text-base">
-                      <div className="flex items-baseline">
-                        <span className="font-bold">课题组负责人签名：</span>
-                        <div className="border-b-2 border-slate-900 pb-0.5 px-6 font-serif font-bold text-lg text-slate-950">
-                          {maskText(PROJECT_METADATA.leader)}
-                        </div>
+                      <div className="text-center py-4 mb-4">
+                        <h2 className="font-doc-heading-xiao2 text-slate-950 tracking-[0.25em] font-bold">
+                          参 考 文 献
+                        </h2>
                       </div>
-                      <div>
-                        <span className="font-bold">日 &nbsp; 期：</span>
-                        <span className="font-mono font-bold ml-2">2026 年 9 月 30 日</span>
+
+                      <div className="bg-slate-50 border border-slate-200 p-3 rounded-md mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                        <p className="text-slate-600 font-doc-fangsong-3 leading-relaxed">
+                          著录说明：格式严格执行通知附件2国家标准。收录的<strong>24篇核心文献</strong>全部为<strong>中国知网 (CNKI)</strong>、<strong>万方数据</strong>、国家市场监管总局法规库真实收录之论文、国家标准与法定公报，支持在线验真。
+                        </p>
+                        <button
+                          onClick={() => setShowRefVerifyModal(true)}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md font-medium shrink-0 flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>查看知网核验清单</span>
+                        </button>
+                      </div>
+
+                      <ol className="space-y-4 font-doc-fangsong-3 text-slate-900 text-[14pt] list-none">
+                        {REPORT_REFERENCES.map(ref => (
+                          <li key={ref.index} className="flex flex-col gap-1 text-justify group border-b border-dashed border-slate-200 pb-3 last:border-b-0">
+                            <div className="flex items-start gap-2 leading-relaxed">
+                              <span className="font-mono font-bold text-slate-950 shrink-0">[{ref.index}].</span>
+                              <span className="flex-1">
+                                {maskText(ref.author)}. {ref.title} [{ref.type}]. {ref.publication}
+                                {ref.year ? `, ${ref.year}` : ''}
+                                {ref.volume ? `, ${ref.volume}` : ''}
+                                {ref.pages ? `: ${ref.pages}` : ''}.
+                              </span>
+                            </div>
+                            {/* 真实检索验证与收录库来源标签 */}
+                            <div className="pl-6 flex flex-wrap items-center gap-2 text-xs print:hidden pt-0.5">
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-sm bg-emerald-50 text-emerald-800 border border-emerald-200 font-sans font-medium">
+                                <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                <span>真实收录：{ref.databaseSource}</span>
+                              </span>
+                              {ref.cnkiCode && (
+                                <span className="text-slate-500 font-mono text-[11px] bg-slate-100 px-1.5 py-0.5 rounded-sm">
+                                  【{ref.cnkiCode}】
+                                </span>
+                              )}
+                              <button
+                                onClick={() => {
+                                  setSelectedRefToVerify(ref);
+                                  setShowRefVerifyModal(true);
+                                }}
+                                className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 font-sans hover:underline cursor-pointer ml-1 text-xs"
+                              >
+                                <span>知网/万方真实性核验</span>
+                                <ExternalLink className="w-2.5 h-2.5" />
+                              </button>
+                            </div>
+                          </li>
+                        ))}
+                      </ol>
+
+                      <div className="absolute bottom-6 left-0 right-0 text-center font-mono text-xs text-slate-500">
+                        - 28 -
                       </div>
                     </div>
-                  </div>
 
-                  <div className="h-px bg-slate-300 my-10" />
+                    {/* 6. 原创性声明与成果使用授权声明 */}
+                    <div 
+                      id="statements" 
+                      className={`doc-sheet ${printMode === 'screen_scroll' ? 'mb-8' : ''}`}
+                    >
+                      <div className="text-right text-sm text-slate-700 font-doc-4-songti pb-2 font-bold">
+                        附 件 3
+                      </div>
 
-                  {/* 关于课题成果使用授权的声明 */}
-                  <div className="space-y-6">
-                    <h2 className="font-doc-title-2 text-center text-slate-950 tracking-wider font-bold">
-                      课题研究成果使用授权声明
-                    </h2>
-                    <p className="font-doc-p leading-[2]">
-                      本课题组完全了解日照市社会科学界联合会（下称市社科联）有关保留、使用课题成果的规定，同意市社科联保留或向国家有关部门或机构送交成果的复印件和电子版，允许成果被查阅和借阅；本课题组授权市社科联可以将本成果的全部或部分内容编入有关数据库进行检索，可以采用影印、缩印或其他复制手段保存或汇编本成果。
-                    </p>
+                      {/* 原创性声明 */}
+                      <div className="space-y-6 pt-4">
+                        <h2 className="font-doc-title-2 text-center text-slate-950 tracking-[0.25em] font-bold">
+                          原 创 性 声 明
+                        </h2>
+                        <p className="font-doc-p leading-[2]">
+                          本课题组郑重声明：所呈交的课题成果报告，是本课题组经过认真调研，独立进行研究所取得的成果。除文中已经注明引用的内容外，本成果不包含任何其他个人或集体已经发表或撰写过的科研成果。对本成果的研究做出重要贡献的个人和集体，均已在文中以明确方式标明。本课题组完全意识到本声明的法律责任由本课题组承担。
+                        </p>
 
-                    <div className="pt-6 font-doc-fangsong-3 text-slate-900 flex flex-wrap items-baseline justify-between text-base">
-                      <div className="flex items-baseline">
-                        <span className="font-bold">课题组负责人签名：</span>
-                        <div className="border-b-2 border-slate-900 pb-0.5 px-6 font-serif font-bold text-lg text-slate-950">
-                          {maskText(PROJECT_METADATA.leader)}
+                        <div className="pt-6 font-doc-fangsong-3 text-slate-900 flex flex-wrap items-baseline justify-between text-base">
+                          <div className="flex items-baseline">
+                            <span className="font-bold">课题组负责人签名：</span>
+                            <div className="border-b-2 border-slate-900 pb-0.5 px-6 font-serif font-bold text-lg text-slate-950">
+                              {maskText(PROJECT_METADATA.leader)}
+                            </div>
+                          </div>
+                          <div>
+                            <span className="font-bold">日 &nbsp; 期：</span>
+                            <span className="font-mono font-bold ml-2">2026 年 9 月 30 日</span>
+                          </div>
                         </div>
                       </div>
-                      <div>
-                        <span className="font-bold">日 &nbsp; 期：</span>
-                        <span className="font-mono font-bold ml-2">2026 年 9 月 30 日</span>
+
+                      <div className="h-px bg-slate-300 my-10" />
+
+                      {/* 关于课题成果使用授权的声明 */}
+                      <div className="space-y-6">
+                        <h2 className="font-doc-title-2 text-center text-slate-950 tracking-wider font-bold">
+                          课题研究成果使用授权声明
+                        </h2>
+                        <p className="font-doc-p leading-[2]">
+                          本课题组完全了解日照市社会科学界联合会（下称市社科联）有关保留、使用课题成果的规定，同意市社科联保留或向国家有关部门或机构送交成果的复印件和电子版，允许成果被查阅和借阅；本课题组授权市社科联可以将本成果的全部或部分内容编入有关数据库进行检索，可以采用影印、缩印或其他复制手段保存或汇编本成果。
+                        </p>
+
+                        <div className="pt-6 font-doc-fangsong-3 text-slate-900 flex flex-wrap items-baseline justify-between text-base">
+                          <div className="flex items-baseline">
+                            <span className="font-bold">课题组负责人签名：</span>
+                            <div className="border-b-2 border-slate-900 pb-0.5 px-6 font-serif font-bold text-lg text-slate-950">
+                              {maskText(PROJECT_METADATA.leader)}
+                            </div>
+                          </div>
+                          <div>
+                            <span className="font-bold">日 &nbsp; 期：</span>
+                            <span className="font-mono font-bold ml-2">2026 年 9 月 30 日</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="absolute bottom-6 left-0 right-0 text-center font-mono text-xs text-slate-500">
+                        - 30 -
                       </div>
                     </div>
-                  </div>
-
-                  <div className="absolute bottom-6 left-0 right-0 text-center font-mono text-xs text-slate-500">
-                    - 30 -
-                  </div>
-                </div>
+                  </>
+                )}
 
               </div>
             </div>
           </div>
         )}
 
-        {/* ==================== 选项卡 2：课题结项鉴定书 ==================== */}
+        {/* ==================== 选项卡 2：课题结项鉴定书（UI全面重构：A4单页/A3骑马钉拼版仿真） ==================== */}
         {activeSubTab === 'appraisal' && (
-          <div className="flex-1 overflow-y-auto p-6 lg:p-10 flex justify-center bg-slate-200/70">
-            <div className="max-w-4xl w-full bg-white shadow-md border border-slate-200 rounded-sm p-8 sm:p-14 space-y-8 text-slate-800 font-serif leading-relaxed">
-              <div className="text-center space-y-2 border-b-2 border-slate-900 pb-4">
-                <span className="text-xs font-semibold px-2 py-0.5 rounded-sm bg-blue-100 text-blue-800">通知规定结项必备材料</span>
-                <h1 className="text-2xl sm:text-3xl font-black text-slate-900 font-sans">
-                  日照市社会科学研究课题结项鉴定书
-                </h1>
-                <p className="text-xs text-slate-500 font-mono">
-                  课题编号：{isAnonymous ? '【保密编号】' : PROJECT_METADATA.projectNo} | 类别：{PROJECT_METADATA.category}
-                </p>
-              </div>
-
-              {/* 基本信息表格 */}
-              <div className="border border-slate-300 rounded-sm overflow-hidden">
-                <table className="w-full text-xs sm:text-sm border-collapse">
-                  <tbody>
-                    <tr className="border-b border-slate-200">
-                      <td className="w-32 bg-slate-100 font-bold px-4 py-2.5 font-sans text-slate-700">课题名称</td>
-                      <td colSpan={3} className="px-4 py-2.5 font-semibold text-slate-900">{maskText(PROJECT_METADATA.title)}</td>
-                    </tr>
-                    <tr className="border-b border-slate-200">
-                      <td className="bg-slate-100 font-bold px-4 py-2.5 font-sans text-slate-700">课题负责人</td>
-                      <td className="px-4 py-2.5">{maskText(PROJECT_METADATA.leader)}</td>
-                      <td className="w-28 bg-slate-100 font-bold px-4 py-2.5 font-sans text-slate-700">专业技术职务</td>
-                      <td className="px-4 py-2.5">{PROJECT_METADATA.leaderTitle}</td>
-                    </tr>
-                    <tr className="border-b border-slate-200">
-                      <td className="bg-slate-100 font-bold px-4 py-2.5 font-sans text-slate-700">所在单位</td>
-                      <td className="px-4 py-2.5">{maskText(PROJECT_METADATA.leaderUnit)}</td>
-                      <td className="bg-slate-100 font-bold px-4 py-2.5 font-sans text-slate-700">联系电话</td>
-                      <td className="px-4 py-2.5 font-mono">{maskText(PROJECT_METADATA.leaderMobile)}</td>
-                    </tr>
-                    <tr>
-                      <td className="bg-slate-100 font-bold px-4 py-2.5 font-sans text-slate-700">立项时间</td>
-                      <td className="px-4 py-2.5">{PROJECT_METADATA.approvalDate}</td>
-                      <td className="bg-slate-100 font-bold px-4 py-2.5 font-sans text-slate-700">完成结项时间</td>
-                      <td className="px-4 py-2.5">{PROJECT_METADATA.concludingDate}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-
-              {/* 一、学术价值 */}
-              <div className="space-y-3">
-                <h3 className="text-base sm:text-lg font-bold text-slate-900 font-sans border-l-4 border-blue-600 pl-3">
-                  一、本课题的学术价值与理论贡献
-                </h3>
-                <div className="space-y-2 text-sm sm:text-base text-slate-800">
-                  {APPRAISAL_DATA.academicValue.map((item, idx) => (
-                    <p key={idx} className="text-justify leading-relaxed indent-4">
-                      {maskText(item)}
-                    </p>
-                  ))}
-                </div>
-              </div>
-
-              {/* 二、创新内容 */}
-              <div className="space-y-3">
-                <h3 className="text-base sm:text-lg font-bold text-slate-900 font-sans border-l-4 border-blue-600 pl-3">
-                  二、本课题的管理机制与技术创新内容
-                </h3>
-                <div className="space-y-2 text-sm sm:text-base text-slate-800">
-                  {APPRAISAL_DATA.innovationContent.map((item, idx) => (
-                    <p key={idx} className="text-justify leading-relaxed indent-4">
-                      {maskText(item)}
-                    </p>
-                  ))}
-                </div>
-              </div>
-
-              {/* 三、社会影响与实践成效 */}
-              <div className="space-y-3">
-                <h3 className="text-base sm:text-lg font-bold text-slate-900 font-sans border-l-4 border-blue-600 pl-3">
-                  三、本课题的实践应用、社会影响与经济效益
-                </h3>
-                <div className="space-y-2 text-sm sm:text-base text-slate-800">
-                  {APPRAISAL_DATA.socialImpact.map((item, idx) => (
-                    <p key={idx} className="text-justify leading-relaxed indent-4">
-                      {maskText(item)}
-                    </p>
-                  ))}
-                </div>
-              </div>
-
-              {/* 四、成果应用与采纳证明 */}
-              <div className="space-y-3 bg-slate-50 p-4 rounded-sm border border-slate-200">
-                <h3 className="text-base font-bold text-slate-900 font-sans flex items-center gap-2">
-                  <FileSignature className="w-4 h-4 text-emerald-600" />
-                  <span>四、成果应用单位采纳证明与行政推荐</span>
-                </h3>
-                <div className="space-y-2 text-xs sm:text-sm text-slate-700">
-                  {APPRAISAL_DATA.applicationProof.map((proof, idx) => (
-                    <div key={idx} className="p-3 bg-white border border-slate-200 rounded-sm">
-                      {maskText(proof)}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* 五、专家组鉴定评审意见表 */}
-              <div className="space-y-3">
-                <h3 className="text-base sm:text-lg font-bold text-slate-900 font-sans border-l-4 border-emerald-600 pl-3">
-                  五、专家组综合评审鉴定意见
-                </h3>
-                <div className="space-y-3">
-                  {APPRAISAL_DATA.expertReviews.map((rev, idx) => (
-                    <div key={idx} className="p-4 bg-slate-50 border border-slate-200 rounded-sm space-y-2">
-                      <div className="flex items-center justify-between text-xs sm:text-sm">
-                        <div className="font-bold text-slate-900 font-sans">
-                          专家：{maskText(rev.expertName)} <span className="text-slate-500 font-normal font-serif">（{rev.title}，{maskText(rev.organization)}）</span>
-                        </div>
-                        <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
-                          评定等级：{rev.grade}
-                        </span>
-                      </div>
-                      <p className="text-xs sm:text-sm text-slate-700 text-justify leading-relaxed">
-                        “{rev.comment}”
-                      </p>
-                      <div className="text-right text-xs text-slate-400 font-sans">
-                        签署日期：{rev.signDate}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* 综合结论框 */}
-                <div className="p-5 bg-emerald-50/70 border border-emerald-300 rounded-sm space-y-2 mt-4">
-                  <div className="flex items-center justify-between">
-                    <span className="font-sans font-bold text-emerald-950 text-base">专家组集体鉴定总结论</span>
-                    <span className="px-3 py-1 bg-emerald-600 text-white rounded-md font-bold text-sm">
-                      综合鉴定结论：【 优 秀 】
-                    </span>
-                  </div>
-                  <p className="text-xs sm:text-sm text-emerald-900 leading-relaxed text-justify">
-                    {maskText(APPRAISAL_DATA.finalConclusion)}
-                  </p>
-                </div>
-              </div>
-
-            </div>
-          </div>
+          <AppraisalDocumentView
+            isAnonymous={isAnonymous}
+            onToggleAnonymous={() => setIsAnonymous(!isAnonymous)}
+            maskText={maskText}
+            teamMembers={teamMembers}
+            onUpdateTeamMembers={handleUpdateTeamMembers}
+          />
         )}
 
         {/* ==================== 选项卡 3：阶段性成果（已发表论文与领导批示） ==================== */}
@@ -1127,239 +1117,23 @@ export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
           </div>
         )}
 
-        {/* ==================== 选项卡 4：立项申请书与预算决算 ==================== */}
+        {/* ==================== 选项卡 4：立项申请书与预算决算（严格对齐课题组8人真实人员架构与申报原件） ==================== */}
         {activeSubTab === 'application' && (
-          <div className="flex-1 overflow-y-auto p-6 lg:p-10 flex justify-center bg-slate-200/70">
-            <div className="max-w-4xl w-full bg-white shadow-md border border-slate-200 rounded-sm p-8 sm:p-12 space-y-8 font-serif leading-relaxed">
-              <div className="text-center space-y-2 border-b-2 border-slate-900 pb-4">
-                <span className="text-xs font-semibold px-2 py-0.5 rounded-sm bg-slate-100 text-slate-800 font-sans">2025年5月立项申请历史底册</span>
-                <h1 className="text-2xl sm:text-3xl font-black text-slate-900 font-sans">
-                  日照市医学卫生类专项研究课题申请书
-                </h1>
-                <p className="text-xs text-slate-500 font-sans">
-                  立项管理机构：日照市社会科学界联合会、日照市医学会
-                </p>
-              </div>
-
-              {/* 课题组9人专家架构 */}
-              <div className="space-y-3">
-                <h3 className="text-base sm:text-lg font-bold text-slate-900 font-sans border-l-4 border-blue-600 pl-3">
-                  一、课题组9人架构与职责分工
-                </h3>
-                <div className="overflow-x-auto border border-slate-300 rounded-sm">
-                  <table className="w-full text-xs sm:text-sm text-left border-collapse">
-                    <thead className="bg-slate-100 font-sans font-bold text-slate-700 border-b border-slate-300">
-                      <tr>
-                        <th className="px-3 py-2 border-r border-slate-300">姓名</th>
-                        <th className="px-2 py-2 border-r border-slate-300">性别</th>
-                        <th className="px-2 py-2 border-r border-slate-300">年龄</th>
-                        <th className="px-3 py-2 border-r border-slate-300">研究专长</th>
-                        <th className="px-3 py-2 border-r border-slate-300">职务/职称</th>
-                        <th className="px-4 py-2">课题组内分工</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200 font-serif">
-                      {RESEARCH_TEAM.map((m, idx) => (
-                        <tr key={idx} className={idx === 0 ? 'bg-blue-50/40 font-bold' : 'hover:bg-slate-50'}>
-                          <td className="px-3 py-2 border-r border-slate-200 font-sans">{maskText(m.name)}</td>
-                          <td className="px-2 py-2 border-r border-slate-200 text-center">{m.gender}</td>
-                          <td className="px-2 py-2 border-r border-slate-200 text-center font-mono">{m.age}</td>
-                          <td className="px-3 py-2 border-r border-slate-200">{m.expertise}</td>
-                          <td className="px-3 py-2 border-r border-slate-200">{m.position}</td>
-                          <td className="px-4 py-2 text-xs text-slate-600">{maskText(m.roleInProject)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* 经费预算决算表 */}
-              <div className="space-y-3">
-                <h3 className="text-base sm:text-lg font-bold text-slate-900 font-sans border-l-4 border-blue-600 pl-3">
-                  二、课题经费预算与执行决算情况
-                </h3>
-                <div className="border border-slate-300 rounded-sm overflow-hidden">
-                  <table className="w-full text-xs sm:text-sm border-collapse text-left">
-                    <thead className="bg-slate-100 font-sans font-bold text-slate-800 border-b border-slate-300">
-                      <tr>
-                        <th className="px-3 py-2 border-r border-slate-300">序号</th>
-                        <th className="px-4 py-2 border-r border-slate-300">经费开支科目</th>
-                        <th className="px-4 py-2 border-r border-slate-300">预算金额 (元)</th>
-                        <th className="px-4 py-2 border-r border-slate-300">决算实际开支 (元)</th>
-                        <th className="px-4 py-2">开支具体说明与凭证留存</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200">
-                      <tr>
-                        <td className="px-3 py-2 border-r border-slate-200 font-mono text-center">1</td>
-                        <td className="px-4 py-2 border-r border-slate-200 font-sans">资料收集、文献检索及打印装订费</td>
-                        <td className="px-4 py-2 border-r border-slate-200 font-mono text-right">1,000</td>
-                        <td className="px-4 py-2 border-r border-slate-200 font-mono text-right text-emerald-700 font-bold">1,000</td>
-                        <td className="px-4 py-2 text-xs text-slate-600">知网论文检索、法规汇编印刷、浅蓝封面胶装</td>
-                      </tr>
-                      <tr>
-                        <td className="px-3 py-2 border-r border-slate-200 font-mono text-center">2</td>
-                        <td className="px-4 py-2 border-r border-slate-200 font-sans">调研、数据整理及专家咨询费</td>
-                        <td className="px-4 py-2 border-r border-slate-200 font-mono text-right">1,500</td>
-                        <td className="px-4 py-2 border-r border-slate-200 font-mono text-right text-emerald-700 font-bold">1,500</td>
-                        <td className="px-4 py-2 text-xs text-slate-600">45个科室田野调查问卷、3位市级评审专家鉴定费</td>
-                      </tr>
-                      <tr>
-                        <td className="px-3 py-2 border-r border-slate-200 font-mono text-center">3</td>
-                        <td className="px-4 py-2 border-r border-slate-200 font-sans">成果撰写、论文修改及结项材料制作费</td>
-                        <td className="px-4 py-2 border-r border-slate-200 font-mono text-right">1,500</td>
-                        <td className="px-4 py-2 border-r border-slate-200 font-mono text-right text-emerald-700 font-bold">1,500</td>
-                        <td className="px-4 py-2 text-xs text-slate-600">万字结项报告校对、期刊版面发表、档案袋制作</td>
-                      </tr>
-                      <tr className="bg-slate-50 font-bold font-sans">
-                        <td colSpan={2} className="px-4 py-2 text-right border-r border-slate-200">合 计</td>
-                        <td className="px-4 py-2 border-r border-slate-200 font-mono text-right">4,000</td>
-                        <td className="px-4 py-2 border-r border-slate-200 font-mono text-right text-emerald-700">4,000</td>
-                        <td className="px-4 py-2 text-xs text-emerald-700 font-medium">执行率 100.0%，结余 0 元，单位资助全部到位</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* 申报单位推荐意见 */}
-              <div className="p-4 bg-slate-50 border border-slate-200 rounded-sm space-y-2 text-xs sm:text-sm">
-                <span className="font-sans font-bold text-slate-900">单位意见结论：</span>
-                <p className="text-justify leading-relaxed text-slate-700">
-                  经审核，申请书所填内容属实。负责人及团队业务素质过硬，具备完成课题所需的实践场景与技术条件。同意承担管理任务与信誉保证。
-                </p>
-                <div className="flex justify-between items-center pt-2 font-sans text-xs">
-                  <span>单位负责人：<strong className="underline decoration-slate-400 font-serif ml-1">{maskText('吴耀宝')}</strong></span>
-                  <span className="text-slate-500">{maskText('五莲县人民医院')}（公章）</span>
-                </div>
-              </div>
-
-            </div>
-          </div>
+          <ProjectApplicationView
+            isAnonymous={isAnonymous}
+            maskText={maskText}
+            teamMembers={teamMembers}
+          />
         )}
 
-        {/* ==================== 选项卡 5：装订与报送规范（附件1/2/3及档案袋） ==================== */}
+        {/* ==================== 选项卡 5：装订与报送规范（UI全面重构：实物仿真/附件1封面/档案袋/绿码通行证） ==================== */}
         {activeSubTab === 'submission_kit' && (
-          <div className="flex-1 overflow-y-auto p-6 lg:p-10 flex justify-center bg-slate-200/70">
-            <div className="max-w-4xl w-full space-y-8">
-              
-              {/* 通知报送指南 */}
-              <div className="bg-white shadow-md border border-slate-200 rounded-sm p-6 sm:p-10 space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-                  <div>
-                    <span className="text-xs font-semibold px-2 py-0.5 rounded-sm bg-blue-100 text-blue-800">报送要点指引</span>
-                    <h2 className="text-xl font-bold text-slate-900 font-sans mt-1">
-                      日照市社科联关于2026年度课题成果递交核心要求
-                    </h2>
-                  </div>
-                  <span className="text-xs font-bold text-amber-600">截止时间：2026年9月30日前</span>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs sm:text-sm">
-                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-sm space-y-1">
-                    <span className="font-bold text-slate-900 font-sans block">1. 装订与规格</span>
-                    <p className="text-slate-600 leading-relaxed">
-                      A4纸排版、双面打印、浅蓝色封面胶装装订成册。正文仿宋GB三号字体，各级标题黑体小二号。
-                    </p>
-                  </div>
-                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-sm space-y-1">
-                    <span className="font-bold text-slate-900 font-sans block">2. 份数与匿名处理</span>
-                    <p className="text-slate-600 leading-relaxed">
-                      提交最终研究成果一式2份（其中1份作匿名盲审处理），鉴定书2份（A3正反面打印骑马钉装订）。
-                    </p>
-                  </div>
-                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-sm space-y-1">
-                    <span className="font-bold text-slate-900 font-sans block">3. 统一报送档案袋</span>
-                    <p className="text-slate-600 leading-relaxed">
-                      存装于同一个档案袋，外面注明课题名称、编号、负责人、单位（将附件1首页复印粘贴即可）。
-                    </p>
-                  </div>
-                </div>
-
-                <div className="p-3 bg-blue-50 border border-blue-200 rounded-sm text-xs text-blue-900 flex flex-wrap items-center justify-between gap-2">
-                  <span><strong>报送地址：</strong>日照市市级机关办公大楼东区1号楼201室（市社科联综合业务科）</span>
-                  <span><strong>联系电话：</strong>0633-7985195</span>
-                  <span><strong>官方邮箱：</strong>rzskl@rz.shandong.cn</span>
-                </div>
-              </div>
-
-              {/* 档案袋封签一键打印模块 */}
-              <div className="bg-white shadow-md border border-slate-200 rounded-sm p-6 sm:p-10 space-y-6">
-                <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-                  <div>
-                    <h3 className="text-lg font-bold text-slate-900 font-sans">
-                      档案袋专用外贴封标签（A4即打即贴）
-                    </h3>
-                    <p className="text-xs text-slate-500 font-sans">
-                      按照通知要求，将此页直接打印粘贴在结项档案袋正面
-                    </p>
-                  </div>
-                  <button
-                    onClick={handlePrint}
-                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 cursor-pointer shadow-xs"
-                  >
-                    <Printer className="w-3.5 h-3.5" />
-                    <span>单独打印档案袋封面</span>
-                  </button>
-                </div>
-
-                {/* 封签预览框 */}
-                <div className="border-2 border-slate-800 p-8 rounded-sm bg-sky-50/30 text-center space-y-6">
-                  <div className="text-right text-xs font-mono font-bold text-slate-600">
-                    档案袋编号：{PROJECT_METADATA.projectNo}
-                  </div>
-                  <div className="space-y-2">
-                    <h2 className="text-2xl font-black text-slate-900 font-sans tracking-wide">
-                      日照市 2026 年度社会科学研究课题结项材料
-                    </h2>
-                    <p className="text-sm font-bold text-blue-800">
-                      【专项研究课题结项归档全套档案】
-                    </p>
-                  </div>
-
-                  <div className="max-w-xl mx-auto space-y-3 text-left text-sm font-sans pt-4 border-t border-b border-slate-300 py-4">
-                    <div className="flex items-start justify-between">
-                      <span className="font-bold text-slate-600 shrink-0 w-28">课题名称：</span>
-                      <strong className="text-slate-900">{maskText(PROJECT_METADATA.title)}</strong>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-slate-600">课题类别：</span>
-                      <span className="text-slate-800">{PROJECT_METADATA.category}（{PROJECT_METADATA.subCategory}）</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-slate-600">立项时间：</span>
-                      <span className="text-slate-800">{PROJECT_METADATA.approvalDate}</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-slate-600">课题负责人：</span>
-                      <strong className="text-slate-900">{maskText(PROJECT_METADATA.leader)}</strong>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-slate-600">工作单位：</span>
-                      <strong className="text-slate-900">{maskText(PROJECT_METADATA.leaderUnit)}</strong>
-                    </div>
-                  </div>
-
-                  {/* 袋内清单明细 */}
-                  <div className="max-w-xl mx-auto text-left text-xs text-slate-600 space-y-1 font-serif">
-                    <div className="font-bold text-slate-800 font-sans">【袋内材料清单核验】：</div>
-                    <div>1. 10000字以上最终研究成果报告（浅蓝色胶装实名版） × 1 份</div>
-                    <div>2. 10000字以上最终研究成果报告（匿名盲审处理版） × 1 份</div>
-                    <div>3. 课题结项鉴定书（A3骑马钉双面装订版） × 2 份</div>
-                    <div>4. 阶段性发表文章与领导批示证明材料（含一份匿名处理） × 2 份</div>
-                    <div>5. 全套材料电子版U盘 / 邮件同步报送备查</div>
-                  </div>
-
-                  <div className="pt-4 text-xs text-slate-500 font-sans border-t border-slate-200 flex justify-between items-center">
-                    <span>报送日期：2026年9月30日</span>
-                    <span>日照市社会科学界联合会综合业务科（收）</span>
-                  </div>
-                </div>
-              </div>
-
-            </div>
-          </div>
+          <SubmissionKitView
+            isAnonymous={isAnonymous}
+            onToggleAnonymous={() => setIsAnonymous(!isAnonymous)}
+            maskText={maskText}
+            teamMembers={teamMembers}
+          />
         )}
       </div>
 

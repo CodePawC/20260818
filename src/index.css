@@ -977,6 +977,95 @@ a, button {
   border-bottom: none;
 }
 
+/* 鉴定书与A3拼版装订仿真系统 */
+.doc-appraisal-sheet {
+  width: 210mm;
+  max-width: 100%;
+  min-height: 297mm;
+  padding: 22mm 20mm 20mm 22mm;
+  background-color: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.1), 0 2px 6px -1px rgba(0, 0, 0, 0.06);
+  box-sizing: border-box;
+  margin: 0 auto 28px auto;
+  position: relative;
+  transition: all 0.2s ease-in-out;
+}
+
+.doc-a3-spread-sheet {
+  width: 420mm;
+  max-width: 100%;
+  min-height: 297mm;
+  background-color: #ffffff;
+  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.15), 0 4px 12px rgba(0, 0, 0, 0.08);
+  box-sizing: border-box;
+  margin: 0 auto 36px auto;
+  position: relative;
+  display: flex;
+}
+
+.doc-a3-fold-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 2px;
+  background: repeating-linear-gradient(to bottom, #94a3b8 0, #94a3b8 6px, transparent 6px, transparent 12px);
+  transform: translateX(-50%);
+  pointer-events: none;
+  z-index: 20;
+}
+
+.doc-a3-staple-top {
+  position: absolute;
+  left: 50%;
+  top: 75mm;
+  width: 4px;
+  height: 22mm;
+  background: #475569;
+  border-radius: 2px;
+  transform: translateX(-50%);
+  box-shadow: 0 0 2px rgba(0,0,0,0.5);
+  z-index: 25;
+}
+
+.doc-a3-staple-bottom {
+  position: absolute;
+  left: 50%;
+  bottom: 75mm;
+  width: 4px;
+  height: 22mm;
+  background: #475569;
+  border-radius: 2px;
+  transform: translateX(-50%);
+  box-shadow: 0 0 2px rgba(0,0,0,0.5);
+  z-index: 25;
+}
+
+/* 官方红色印章拟真效果 */
+.official-red-stamp {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 3px solid #dc2626;
+  border-radius: 50%;
+  color: #dc2626;
+  user-select: none;
+  opacity: 0.88;
+  mix-blend-mode: multiply;
+  transform: rotate(-6deg);
+}
+
+.official-red-rect-stamp {
+  border: 2px solid #dc2626;
+  color: #dc2626;
+  user-select: none;
+  opacity: 0.88;
+  mix-blend-mode: multiply;
+  transform: rotate(-3deg);
+}
+
 @media print {
   @page {
     size: A4 portrait;
