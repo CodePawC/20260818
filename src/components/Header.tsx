@@ -138,6 +138,18 @@ export const Header: React.FC<HeaderProps> = ({
         return { title: 'AI 智维专家助手', badge: 'Gemini 智能临床故障诊断与技术评估推演', category: '统计决策与效益' };
       case 'regulations':
         return { title: '医学工程管理规章制度中心', badge: '国家药监法规 · 院级制度 · PM强检规程 · 临床SOP与应急预案', category: '决策与档案' };
+      case 'project_concluding':
+        return { title: '日照市社会科学专项课题结项专区', badge: '万字实证研究报告 · 仿真结项鉴定书 · 核心论文知网核验', category: '科研成果与鉴定' };
+      case 'system_ops':
+        return { title: '系统与运维综合管理中心', badge: 'AI 大模型配置 · 数据库安全备份 · 前端 UI 更新 · 草料二维码直通', category: '系统与运维' };
+      case 'ai_config':
+        return { title: 'AI 智能模型与算法引擎配置', badge: 'Google Gemini / 本地私有化模型 / 专科 Prompt / RAG 知识库', category: '系统与运维' };
+      case 'database_backup':
+        return { title: '数据安全备份与数据库管理配置', badge: '多源数据库连接池 / 定时冷备份 / 全量快照一键灾难恢复', category: '系统与运维' };
+      case 'system_update':
+        return { title: '系统更新与前端 UI 视觉设计配置', badge: '主题色板定制 / 院区品牌标识 / 热插拔特性开关 / 在线热更新', category: '系统与运维' };
+      case 'caoliao_integration':
+        return { title: '草料二维码官方数据库联动接口', badge: '阿里云 RDS · 1602个活码 · 现场扫码与医院工单实时联动', category: '系统与运维' };
       default:
         return { title: '设备资产台账', badge: '全院设备资产全息管理', category: '技术资产与库房' };
     }

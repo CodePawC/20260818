@@ -72,6 +72,7 @@ import { FactoryRepairWorkflowView } from './components/factory_repair/FactoryRe
 import { RepairClosedLoopView } from './components/RepairClosedLoopView';
 import { RegulationsView } from './components/RegulationsView';
 import { ProjectConcludingView } from './components/project_concluding/ProjectConcludingView';
+import { SystemOpsUnifiedView } from './components/SystemOpsUnifiedView';
 import { BorrowEquipmentModal } from './components/BorrowEquipmentModal';
 import { ReturnEquipmentModal } from './components/ReturnEquipmentModal';
 import { LoanVoucherPrintModal } from './components/LoanVoucherPrintModal';
@@ -864,6 +865,13 @@ export default function App() {
 
   useEffect(() => {
     fetchEquipmentData();
+    const handleRefresh = () => {
+      fetchEquipmentData();
+    };
+    window.addEventListener('medical_equipment_updated', handleRefresh);
+    return () => {
+      window.removeEventListener('medical_equipment_updated', handleRefresh);
+    };
   }, []);
 
   // Recalculate stats whenever equipmentList changes locally
@@ -1558,6 +1566,8 @@ export default function App() {
         <main className={`flex-1 min-h-0 flex flex-col ${
           activeTab === 'vendor_collaboration' || activeTab === 'dispatch'
             ? 'p-2 sm:p-2.5 gap-2 overflow-hidden bg-slate-100/70' 
+            : activeTab === 'system_ops' || activeTab === 'ai_config' || activeTab === 'database_backup' || activeTab === 'system_update' || activeTab === 'caoliao_integration'
+            ? 'p-0 overflow-y-auto bg-slate-100/70'
             : activeTab === 'roi' || activeTab === 'master_data' || activeTab === 'partners' || activeTab === 'regulations'
             ? 'p-3 sm:p-3.5 lg:p-4 overflow-y-auto gap-3.5 bg-slate-100/70'
             : 'p-3 sm:p-3.5 lg:p-4 overflow-y-auto gap-3.5 bg-slate-100/70'
@@ -2013,6 +2023,21 @@ export default function App() {
             <ProjectConcludingView
               currentUser={currentUser}
               onNavigateToTab={(tab) => setActiveTab(tab)}
+            />
+          )}
+
+          {(activeTab === 'system_ops' || activeTab === 'ai_config' || activeTab === 'database_backup' || activeTab === 'system_update' || activeTab === 'caoliao_integration') && (
+            <SystemOpsUnifiedView
+              initialSubTab={
+                activeTab === 'database_backup' 
+                  ? 'database_backup' 
+                  : activeTab === 'system_update' 
+                  ? 'system_update' 
+                  : activeTab === 'caoliao_integration'
+                  ? 'caoliao_integration'
+                  : 'ai_config'
+              }
+              onNavigateTab={(tab) => setActiveTab(tab)}
             />
           )}
             </>

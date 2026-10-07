@@ -1288,9 +1288,20 @@ export const EquipmentTable: React.FC<EquipmentTableProps> = ({
                   {cols.codeId && (
                     <td className={cellPyClass}>
                       <div className="flex items-center gap-1 group/code">
-                        <span className="font-mono text-slate-600 text-xs whitespace-nowrap">
+                        <span className="font-mono text-slate-700 font-medium text-xs whitespace-nowrap bg-slate-100/80 px-1 py-0.5 rounded border border-slate-200">
                           {item.codeId || `COD-${item.id}`}
                         </span>
+                        {item.caoliaoUrl && (
+                          <a
+                            href={item.caoliaoUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-emerald-600 hover:text-emerald-800 p-0.5 rounded transition"
+                            title="打开草料在线活码页面"
+                          >
+                            <QrCode className="w-3.5 h-3.5" />
+                          </a>
+                        )}
                         <button
                           type="button"
                           onClick={() => handleCopyText(item.codeId || `COD-${item.id}`, `code-${item.id}`)}

@@ -19,7 +19,7 @@ export interface MetrologyCatalogueItem {
   notes?: string;
 }
 
-export type ActiveTab = 'welcome' | 'ledger' | 'dashboard' | 'maintenance' | 'repairs' | 'dispatch' | 'parts_inventory' | 'adverse_events' | 'emergency_reserve' | 'tracking' | 'analytics' | 'roi' | 'ai' | 'partners' | 'master_data' | 'approvals' | 'mobile_inspection' | 'vendor_collaboration' | 'factory_repair_workflow' | 'repair_closed_loop' | 'regulations' | 'project_concluding';
+export type ActiveTab = 'welcome' | 'ledger' | 'dashboard' | 'maintenance' | 'repairs' | 'dispatch' | 'parts_inventory' | 'adverse_events' | 'emergency_reserve' | 'tracking' | 'analytics' | 'roi' | 'ai' | 'partners' | 'master_data' | 'approvals' | 'mobile_inspection' | 'vendor_collaboration' | 'factory_repair_workflow' | 'repair_closed_loop' | 'regulations' | 'project_concluding' | 'ai_config' | 'database_backup' | 'system_update' | 'system_ops' | 'caoliao_integration';
 
 // ==================== 移动扫码巡检与快速盘点 (Mobile Inspection & Inventory Audit) ====================
 export type InspectionAuditResult = 'normal_present' | 'location_discrepancy' | 'fault_reported' | 'accessory_missing' | 'calibration_expired';
@@ -265,7 +265,7 @@ export interface RepairRecord {
   equipmentName: string;
   equipmentSn: string;
   faultDate: string; // YYYY-MM-DD
-  repairType: '紧急故障维修' | '定期预防性保养' | '计量校准' | '巡检维护' | '全院零星维保框架批次' | (string & {});
+  repairType: '紧急故障维修' | '定期预防性保养' | '计量校准' | '巡检维护' | '全院零星维保框架批次' | '草料二维码扫码报修' | (string & {});
   faultDescription: string;
   technician: string; // 维修人员或服务商
   cost: number; // 费用（元）
@@ -274,6 +274,13 @@ export interface RepairRecord {
   status: '处理中' | '已完成' | '待配件';
   completionDate?: string;
   department?: string;
+  reporterName?: string;
+  reporterPhone?: string;
+  codeId?: string;
+  recordNo?: string;
+  photoUrl?: string;
+  videoUrl?: string;
+  source?: 'caoliao' | 'platform' | 'manual';
 }
 
 export interface StatusLog {
@@ -406,7 +413,9 @@ export interface MedicalEquipment {
   id: string; // ID (系统编号/资产ID)
   assetNo?: string; // 资产编号 (如: ZC-2023-10159)
   assetOwnership?: string; // 资产归属 (如: 医院自有 / 科室自购 / 厂商租赁 / 厂商投放 / 受赠资产 / 科研托管 等)
-  codeId?: string; // code_id (统一物资追溯条码 / 物资编码 如: COD-10159)
+  codeId?: string; // code_id (统一物资追溯条码 / 草料活码 code_id 如: 133382883)
+  caoliaoUrl?: string; // 草料二维码活码线上直达链接 (如: http://qr71.cn/oTiEcM/qNfQEMG)
+  caoliaoCodeName?: string; // 草料端活码全称 (如: 麻醉手术科-高频电刀)
   internalNo?: string; // 科室内部编号 / 临床自编号 (如: 8号机, 1号监护仪, US-01, ICU-03, 临床科室用于区分同类设备及日常沟通报修使用)
   usageLocation?: string; // 使用场所 / 安装场所 (如: 综合楼3F 超声诊断1室)
   categoryNo?: string; // 类别序号

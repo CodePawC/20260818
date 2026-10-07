@@ -372,7 +372,22 @@ export const EquipmentDetailModal: React.FC<EquipmentDetailModalProps> = ({
                   <span>{equipment.sn || equipment.id}</span>
                 </span>
                 <span className="text-slate-300">|</span>
-                <span>code_id: <strong className="text-slate-700">{equipment.codeId || `COD-${equipment.id}`}</strong></span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span>code_id:</span>
+                  <strong className="text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded font-mono text-xs">{equipment.codeId || `COD-${equipment.id}`}</strong>
+                  {equipment.caoliaoUrl && (
+                    <a
+                      href={equipment.caoliaoUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-1.5 py-0.5 rounded text-[11px] inline-flex items-center gap-1 transition"
+                      title="打开草料云端官方活码"
+                    >
+                      <span>草料活码</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  )}
+                </span>
                 {equipment.internalNo && (
                   <>
                     <span className="text-slate-300">|</span>

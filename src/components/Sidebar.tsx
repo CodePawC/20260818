@@ -23,7 +23,11 @@ import {
   RotateCcw,
   GitMerge,
   BookOpen,
-  GraduationCap
+  GraduationCap,
+  Bot,
+  HardDrive,
+  Palette,
+  Sliders
 } from 'lucide-react';
 import { ActiveTab, AuthUser } from '../types';
 import { canAccessTab, isHeadNurse, isDepartmentRestricted, getUserDepartment } from '../utils/authUtils';
@@ -255,6 +259,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
           nurseLabel: '课题结项报告',
           icon: GraduationCap,
           description: '日照市2026年社科专项课题结项万字报告与鉴定成果'
+        }
+      ]
+    },
+    {
+      id: 'system_ops',
+      title: '系统与运维',
+      items: [
+        {
+          key: 'system_ops',
+          label: '系统与运维',
+          nurseLabel: '系统与运维',
+          icon: Sliders,
+          description: 'AI大模型配置、数据库灾备管理、前端UI与草料二维码直通'
         }
       ]
     }

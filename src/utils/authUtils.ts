@@ -295,6 +295,14 @@ export function canAccessTab(user: AuthUser | null | undefined, tab: ActiveTab):
       // AI 智能诊断：全员可用
       return true;
 
+    case 'system_ops':
+    case 'ai_config':
+    case 'database_backup':
+    case 'system_update':
+    case 'caoliao_integration':
+      // 系统运维配置、AI模型配置与数据备份、草料二维码接口：医工管理与系统运维均可访问配置
+      return true;
+
     default:
       return true;
   }
