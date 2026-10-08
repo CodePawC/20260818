@@ -17,7 +17,9 @@ import { INITIAL_ADVERSE_EVENTS } from './src/utils/adverseEventData';
 import { AdverseEventRecord } from './src/types/adverseEventTypes';
 
 // Persistent file-backed storage
-const DATA_DIR = path.join(process.cwd(), 'data');
+const DATA_DIR = process.env.APP_DATA_DIR
+  ? path.resolve(process.env.APP_DATA_DIR)
+  : path.join(process.cwd(), 'data');
 const DATA_FILE = path.join(DATA_DIR, 'equipment_store.json');
 const CATALOGUE_FILE = path.join(DATA_DIR, 'metrology_catalogue.json');
 const NMPA_CATEGORIES_FILE = path.join(DATA_DIR, 'nmpa_categories.json');
@@ -227,9 +229,14 @@ let equipmentStore: MedicalEquipment[] = loadPersistentEquipment();
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
+  const DEMO_MODE = process.env.DEMO_MODE === '1';
 
   app.use(express.json({ limit: '10mb' }));
+
+  app.get('/api/health', (_req, res) => {
+    res.json({ success: true, mode: DEMO_MODE ? 'demo' : 'standard' });
+  });
 
   // API Routes
   
@@ -1812,11 +1819,11 @@ ${userQuestion}
 
   // ==================== 17. 草料二维码 (Caoliao QR) RDS MySQL 官方数据库对接接口 ====================
   const DEFAULT_CAOLIAO_DB_CONFIG = {
-    host: process.env.CAOLIAO_DB_HOST || 'rm-bp1m4fy8d66u3c6xmbo.mysql.rds.aliyuncs.com',
+    host: process.env.CAOLIAO_DB_HOST || '',
     port: Number(process.env.CAOLIAO_DB_PORT) || 3306,
-    user: process.env.CAOLIAO_DB_USER || 'cli_9833874',
-    password: process.env.CAOLIAO_DB_PASSWORD || '374c90a0888b9c015189421e477a0503',
-    database: process.env.CAOLIAO_DB_NAME || 'cli_9833874',
+    user: process.env.CAOLIAO_DB_USER || '',
+    password: process.env.CAOLIAO_DB_PASSWORD || '',
+    database: process.env.CAOLIAO_DB_NAME || '',
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
@@ -1826,8 +1833,17 @@ ${userQuestion}
   let caoliaoDbPool: any = null;
 
   function getCaoliaoDbPool(custom?: any) {
+    if (DEMO_MODE) {
+      throw new Error('单机演示模式已禁用外部数据库连接');
+    }
+    const config = custom && custom.host
+      ? { ...DEFAULT_CAOLIAO_DB_CONFIG, ...custom }
+      : DEFAULT_CAOLIAO_DB_CONFIG;
+    if (!config.host || !config.user || !config.password || !config.database) {
+      throw new Error('未配置草料数据库连接参数');
+    }
     if (custom && custom.host) {
-      return mysql.createPool({ ...DEFAULT_CAOLIAO_DB_CONFIG, ...custom });
+      return mysql.createPool(config);
     }
     if (!caoliaoDbPool) {
       caoliaoDbPool = mysql.createPool(DEFAULT_CAOLIAO_DB_CONFIG);
@@ -1850,7 +1866,7 @@ ${userQuestion}
         success: true,
         latencyMs,
         serverVersion: vRows[0]?.version || 'MySQL 5.7',
-        database: vRows[0]?.db || 'cli_9833874',
+        database: vRows[0]?.db || config.database || DEFAULT_CAOLIAO_DB_CONFIG.database || 'unknown',
         serverTime: vRows[0]?.serverTime,
         qrCount: cRows[0]?.qrCount || 1602,
         repairCount: rRows[0]?.repairCount || 547,
@@ -2549,6 +2565,10 @@ ${userQuestion}
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Medical Equipment Management Server running on http://localhost:${PORT}`);
+    if (DEMO_MODE || !DEFAULT_CAOLIAO_DB_CONFIG.host) {
+      console.log('[Caoliao Auto-Sync] Skipped in demo mode or when database is not configured.');
+      return;
+    }
     // Auto-sync real code_ids from Caoliao RDS database in background
     setTimeout(async () => {
       try {
