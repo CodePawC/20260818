@@ -55,7 +55,8 @@ import {
   X,
   Flame,
   Tag,
-  SlidersHorizontal
+  SlidersHorizontal,
+  QrCode
 } from 'lucide-react';
 import { SparePartsWarehouseView } from './SparePartsWarehouseView';
 import { Pagination } from './Pagination';
@@ -83,6 +84,90 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
   useEffect(() => {
     saveStoredWorkOrders(workOrders);
   }, [workOrders]);
+
+  const fetchServerWorkOrders = async (silent = true) => {
+    try {
+      const res = await fetch('/api/work-orders');
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+        setWorkOrders(prev => {
+          const map = new Map<string, EngineeringWorkOrder>();
+          prev.forEach(o => map.set(o.id, o));
+          let hasNew = false;
+          json.data.forEach((o: EngineeringWorkOrder) => {
+            if (!map.has(o.id)) {
+              map.set(o.id, o);
+              hasNew = true;
+            } else {
+              map.set(o.id, { ...map.get(o.id)!, ...o });
+            }
+          });
+          const merged = Array.from(map.values()).sort((a, b) => (b.reportTime || '').localeCompare(a.reportTime || ''));
+          if (hasNew && !silent) {
+            showToast('已从服务器同步最新工单（含草料 Webhook 回调转建任务）！');
+          }
+          saveStoredWorkOrders(merged);
+          return merged;
+        });
+      }
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  useEffect(() => {
+    fetchServerWorkOrders(true);
+    const interval = setInterval(() => {
+      fetchServerWorkOrders(true);
+    }, 12000);
+
+    const handleSync = () => {
+      fetchServerWorkOrders(true);
+    };
+    window.addEventListener('work_orders_updated', handleSync);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('work_orders_updated', handleSync);
+    };
+  }, []);
+
+  const [isSyncingCaoliao, setIsSyncingCaoliao] = useState(false);
+
+  const handlePullFromCaoliao = async () => {
+    setIsSyncingCaoliao(true);
+    try {
+      const res = await fetch('/api/caoliao/pull-and-sync-dispatch', { method: 'POST' });
+      const json = await res.json();
+      if (json.success && Array.isArray(json.candidateWorkOrders)) {
+        const currentOrders = loadStoredWorkOrders();
+        const existingIds = new Set(currentOrders.map(o => o.id));
+        let addedCount = 0;
+        const newOrders = [...currentOrders];
+
+        json.candidateWorkOrders.forEach((candidate: EngineeringWorkOrder) => {
+          if (!existingIds.has(candidate.id)) {
+            newOrders.unshift(candidate);
+            existingIds.add(candidate.id);
+            addedCount++;
+          }
+        });
+
+        if (addedCount > 0) {
+          setWorkOrders(newOrders);
+          saveStoredWorkOrders(newOrders);
+          showToast(`已成功从草料二维码单向拉取 ${addedCount} 条全新现场报修并转建院内派工单！`);
+        } else {
+          showToast(`草料报修数据已是最新，暂无新未派工单。`);
+        }
+      } else {
+        showToast(json.error || '拉取草料报修失败');
+      }
+    } catch (e: any) {
+      showToast('网络请求异常，无法拉取草料报修');
+    } finally {
+      setIsSyncingCaoliao(false);
+    }
+  };
 
   // Recalculate engineers workload dynamically based on current workOrders
   const liveEngineers = useMemo(() => {
@@ -185,6 +270,7 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
       sla_warning: workOrders.filter(o => o.status !== 'closed' && ((o.totalDowntimeHours || 0) >= (o.slaRepairLimitHours * 0.75) || !o.isSlaResponseMet)).length,
       unassigned: workOrders.filter(o => o.status === 'pending_dispatch' || !o.assignedEngineerId).length,
       waiting_parts: workOrders.filter(o => o.status === 'waiting_parts').length,
+      caoliao: workOrders.filter(o => o.source === 'caoliao' || o.id.startsWith('WO-CL-')).length,
     };
   }, [workOrders]);
 
@@ -233,6 +319,7 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
       }
       if (quickPreset === 'unassigned' && (order.status !== 'pending_dispatch' && order.assignedEngineerId)) return false;
       if (quickPreset === 'waiting_parts' && order.status !== 'waiting_parts') return false;
+      if (quickPreset === 'caoliao' && !(order.source === 'caoliao' || order.id.startsWith('WO-CL-'))) return false;
 
       // Search query
       if (searchQuery.trim()) {
@@ -538,6 +625,15 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
         {/* Right: Actions */}
         <div className="flex items-center gap-2 shrink-0">
           <button
+            onClick={handlePullFromCaoliao}
+            disabled={isSyncingCaoliao}
+            className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 text-xs font-bold rounded-lg transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+            title="草料单向安全架构：从草料只读从库拉取现场报修，转建院内派工单"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncingCaoliao ? 'animate-spin text-emerald-600' : 'text-emerald-600'}`} />
+            <span>{isSyncingCaoliao ? '拉取中...' : '同步草料报修'}</span>
+          </button>
+          <button
             onClick={() => setIsCreateModalOpen(true)}
             className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-xs transition flex items-center gap-1 cursor-pointer"
           >
@@ -599,6 +695,7 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
                   {[
                     { id: 'p1_emergency', label: '🚨 P1特急', count: presetCounts.p1_emergency },
                     { id: 'sla_warning', label: '⏱️ SLA预警', count: presetCounts.sla_warning },
+                    { id: 'caoliao', label: '📱 草料扫码', count: presetCounts.caoliao },
                     { id: 'unassigned', label: '👤 待指派', count: presetCounts.unassigned },
                     { id: 'waiting_parts', label: '📦 待配件', count: presetCounts.waiting_parts },
                   ].map((sc) => {
@@ -918,6 +1015,12 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
                           <span className="font-mono text-2xs font-bold text-slate-700">
                             {order.id}
                           </span>
+                          {(order.source === 'caoliao' || order.id.startsWith('WO-CL-')) && (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200" title="该工单由临床科室微信扫草料活码单向报修触发生成">
+                              <QrCode className="w-2.5 h-2.5" />
+                              <span>草料扫码</span>
+                            </span>
+                          )}
                         </div>
 
                         {/* Status badge */}
@@ -964,8 +1067,32 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
                         </div>
 
                         {/* Fault description */}
-                        <div className="p-2 bg-slate-50 rounded-lg border border-slate-100 text-slate-700 text-2xs leading-relaxed">
+                        <div className="p-2 bg-slate-50 rounded-lg border border-slate-100 text-slate-700 text-2xs leading-relaxed space-y-1">
                           <p className="line-clamp-2">{order.faultDescription}</p>
+                          {(order.photoUrl || order.videoUrl) && (
+                            <div className="flex items-center gap-3 pt-1 border-t border-slate-200/60 text-2xs">
+                              {order.photoUrl && (
+                                <a
+                                  href={order.photoUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-emerald-700 hover:text-emerald-800 font-bold inline-flex items-center gap-1 hover:underline"
+                                >
+                                  📷 现场报修照片
+                                </a>
+                              )}
+                              {order.videoUrl && (
+                                <a
+                                  href={order.videoUrl}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="text-indigo-700 hover:text-indigo-800 font-bold inline-flex items-center gap-1 hover:underline"
+                                >
+                                  🎬 故障视频证据
+                                </a>
+                              )}
+                            </div>
+                          )}
                         </div>
 
                         {/* Engineer & SLA Tracker */}

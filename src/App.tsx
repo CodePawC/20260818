@@ -1566,7 +1566,7 @@ export default function App() {
         <main className={`flex-1 min-h-0 flex flex-col ${
           activeTab === 'vendor_collaboration' || activeTab === 'dispatch'
             ? 'p-2 sm:p-2.5 gap-2 overflow-hidden bg-slate-100/70' 
-            : activeTab === 'system_ops' || activeTab === 'ai_config' || activeTab === 'database_backup' || activeTab === 'system_update' || activeTab === 'caoliao_integration'
+            : activeTab === 'system_ops' || activeTab === 'ai_config' || activeTab === 'database_backup' || activeTab === 'system_update' || activeTab === 'caoliao_integration' || activeTab === 'caoliao_sync_settings'
             ? 'p-0 overflow-y-auto bg-slate-100/70'
             : activeTab === 'roi' || activeTab === 'master_data' || activeTab === 'partners' || activeTab === 'regulations'
             ? 'p-3 sm:p-3.5 lg:p-4 overflow-y-auto gap-3.5 bg-slate-100/70'
@@ -1826,6 +1826,12 @@ export default function App() {
                onViewPartner={handleOpenPartnerByName}
                onNavigateToApprovals={handleNavigateToApprovals}
                onOpenStatusChange={(device) => setStatusChangeDevice(device)}
+               onViewEquipmentDetails={(item, initialTab) => {
+                 const fullItem = equipmentList.find(e => e.id === item.id || (item.codeId && String(e.codeId) === String(item.codeId))) || item;
+                 setDetailDevice(fullItem);
+                 setDetailInitialTab(initialTab as any);
+               }}
+               onNavigateToTab={(tab) => setActiveTab(tab)}
              />
            )}
 
@@ -2026,7 +2032,7 @@ export default function App() {
             />
           )}
 
-          {(activeTab === 'system_ops' || activeTab === 'ai_config' || activeTab === 'database_backup' || activeTab === 'system_update' || activeTab === 'caoliao_integration') && (
+          {(activeTab === 'system_ops' || activeTab === 'ai_config' || activeTab === 'database_backup' || activeTab === 'system_update' || activeTab === 'caoliao_integration' || activeTab === 'caoliao_sync_settings') && (
             <SystemOpsUnifiedView
               initialSubTab={
                 activeTab === 'database_backup' 
@@ -2035,9 +2041,17 @@ export default function App() {
                   ? 'system_update' 
                   : activeTab === 'caoliao_integration'
                   ? 'caoliao_integration'
+                  : activeTab === 'caoliao_sync_settings'
+                  ? 'caoliao_sync_settings'
                   : 'ai_config'
               }
               onNavigateTab={(tab) => setActiveTab(tab)}
+              onViewEquipmentDetails={(item, initialTab) => {
+                // Find full item from equipmentList if possible
+                const fullItem = equipmentList.find(e => e.id === item.id || (item.codeId && String(e.codeId) === String(item.codeId))) || item;
+                setDetailDevice(fullItem);
+                setDetailInitialTab(initialTab as any);
+              }}
             />
           )}
             </>

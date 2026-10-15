@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   MedicalEquipment,
   MetrologyCatalogueItem,
@@ -35,7 +35,16 @@ import {
   Hourglass,
   BadgeCheck,
   ChevronRight,
-  Printer
+  Printer,
+  QrCode,
+  ExternalLink,
+  Video,
+  Play,
+  RefreshCw,
+  Phone,
+  Image as ImageIcon,
+  Radio,
+  X
 } from 'lucide-react';
 import { getEquipmentValidityInfo } from '../utils/validityUtils';
 import { getEquipmentCalibrationInfo } from '../utils/calibrationUtils';
@@ -68,6 +77,9 @@ export interface TimelineEventItem {
   department?: string;
   statusTag?: { label: string; color: string };
   rawRecord?: any;
+  isCaoliao?: boolean;
+  videoUrl?: string;
+  photoUrl?: string;
 }
 
 interface EquipmentLifecycleTimelineProps {
@@ -87,8 +99,42 @@ export const EquipmentLifecycleTimeline: React.FC<EquipmentLifecycleTimelineProp
   onPrintLoanVoucher,
   onPrintAcceptanceDossier,
 }) => {
-  const [selectedFilter, setSelectedFilter] = useState<'all' | 'milestone' | 'repair' | 'calibration' | 'loan' | 'status'>('all');
+  const [selectedFilter, setSelectedFilter] = useState<'all' | 'milestone' | 'repair' | 'calibration' | 'loan' | 'status' | 'caoliao'>('all');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc'); // desc: 最新在前, asc: 从诞生起正序
+
+  // 草料官方 RDS 数据库实时直连数据
+  const [caoliaoLiveRepairs, setCaoliaoLiveRepairs] = useState<any[]>([]);
+  const [caoliaoStateLogs, setCaoliaoStateLogs] = useState<any[]>([]);
+  const [caoliaoCodeInfo, setCaoliaoCodeInfo] = useState<any>(null);
+  const [isLoadingCaoliao, setIsLoadingCaoliao] = useState<boolean>(false);
+  const [activeVideoUrl, setActiveVideoUrl] = useState<string | null>(null);
+  const [activePhotoUrl, setActivePhotoUrl] = useState<string | null>(null);
+
+  // 实时直连草料 RDS 数据库获取最新报修与状态流转
+  const fetchLiveCaoliaoData = async () => {
+    const lookupKey = equipment.codeId || equipment.id;
+    if (!lookupKey) return;
+    setIsLoadingCaoliao(true);
+    try {
+      const res = await fetch(`/api/caoliao/equipment-repairs/${lookupKey}`);
+      const json = await res.json();
+      if (json.success) {
+        setCaoliaoLiveRepairs(json.repairs || []);
+        setCaoliaoStateLogs(json.stateLogs || []);
+        if (json.codeInfo) {
+          setCaoliaoCodeInfo(json.codeInfo);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to fetch live caoliao data:', err);
+    } finally {
+      setIsLoadingCaoliao(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLiveCaoliaoData();
+  }, [equipment.id, equipment.codeId]);
 
   const validityInfo = getEquipmentValidityInfo(equipment);
   const calibrationInfo = getEquipmentCalibrationInfo(equipment, metrologyCatalogue);
@@ -103,9 +149,26 @@ export const EquipmentLifecycleTimeline: React.FC<EquipmentLifecycleTimelineProp
     return Math.max(0.1, Number(diffYears.toFixed(1)));
   }, [equipment]);
 
+  // 安全日期解析工具，彻底防止无效时间戳导致排序沉底，全面兼容各种浏览器引擎与格式
+  const parseEventDate = (d?: string): number => {
+    if (!d) return 0;
+    const clean = String(d).replace(/\//g, '-').replace(/ GM.*/, '').trim();
+    const ts = new Date(clean).getTime();
+    if (!isNaN(ts)) return ts;
+    const tsIso = new Date(clean.replace(' ', 'T')).getTime();
+    if (!isNaN(tsIso)) return tsIso;
+    const m = clean.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+    if (m) {
+      return new Date(`${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`).getTime() || 0;
+    }
+    return 0;
+  };
+
   // 1. 组装并清洗全生命周期事件流
   const allEvents = useMemo<TimelineEventItem[]>(() => {
     const events: TimelineEventItem[] = [];
+    const addedEventIds = new Set<string>();
+    const seenRecordNos = new Set<string>();
 
     // 1.1 出厂制造事件 (Manufacturing)
     if (equipment.manufactureDate) {
@@ -197,35 +260,142 @@ export const EquipmentLifecycleTimeline: React.FC<EquipmentLifecycleTimelineProp
       });
     }
 
-    // 1.5 维修与保养记录 (Repair & PM)
+    // 1.5 维修与保养记录 (Repair & PM，包含草料二维码现场报修)
     if (equipment.repairRecords && equipment.repairRecords.length > 0) {
       equipment.repairRecords.forEach(rep => {
         const isPM = rep.repairType === '定期预防性保养' || rep.repairType === '巡检维护';
+        const isCaoliao = rep.repairType?.includes('草料') || rep.source === 'caoliao' || (rep.id && rep.id.startsWith('REP-CL'));
+        const eventId = `evt-rep-${rep.id}`;
+        const recordKey = rep.recordNo || rep.id.replace('REP-CL-', '');
+        if (recordKey && seenRecordNos.has(recordKey)) return;
+        if (recordKey) seenRecordNos.add(recordKey);
+        addedEventIds.add(eventId);
+
         events.push({
-          id: `evt-rep-${rep.id}`,
+          id: eventId,
           type: isPM ? 'maintenance' : 'repair',
+          isCaoliao,
           date: rep.faultDate,
-          title: rep.repairType,
-          categoryLabel: isPM ? '预防性维护' : '故障维保',
-          badgeClass: isPM ? 'bg-sky-50 text-sky-700 border-sky-200' : 'bg-amber-50 text-amber-800 border-amber-200',
-          icon: isPM ? <ShieldCheck className="w-4 h-4 text-sky-600" /> : <Wrench className="w-4 h-4 text-amber-600" />,
-          summary: rep.faultDescription,
+          title: isCaoliao 
+            ? `草料二维码现场报修 (单号: ${rep.recordNo || rep.id.replace('REP-CL-', '')})` 
+            : rep.repairType,
+          categoryLabel: isCaoliao ? '草料扫码直报' : (isPM ? '预防性维护' : '故障维保'),
+          badgeClass: isCaoliao 
+            ? 'bg-emerald-50 text-emerald-800 border-emerald-300 font-bold' 
+            : (isPM ? 'bg-sky-50 text-sky-700 border-sky-200' : 'bg-amber-50 text-amber-800 border-amber-200'),
+          icon: isCaoliao 
+            ? <QrCode className="w-4 h-4 text-emerald-600" /> 
+            : (isPM ? <ShieldCheck className="w-4 h-4 text-sky-600" /> : <Wrench className="w-4 h-4 text-amber-600" />),
+          summary: isCaoliao
+            ? `临床使用科室通过设备机身草料活码现场扫码建单。报修人【${rep.reporterName || rep.technician}】（电话：${rep.reporterPhone || '未预留'}），报修故障表现：${rep.faultDescription}。已实时同步至医院医工闭环调度大厅。`
+            : rep.faultDescription,
           details: [
-            { label: '维保工程师', value: rep.technician },
+            ...(isCaoliao && rep.recordNo ? [{ label: '草料工单号', value: rep.recordNo, isMono: true, isHighlight: true }] : []),
+            { label: isCaoliao ? '现场报修人' : '维保工程师', value: rep.reporterName || rep.technician || '医护人员' },
+            ...(isCaoliao && rep.reporterPhone ? [{ label: '联系电话', value: rep.reporterPhone, isMono: true }] : []),
+            ...(isCaoliao ? [{ label: '草料活码ID', value: String(rep.codeId || equipment.codeId || ''), isMono: true }] : []),
             { label: '支出费用', value: `￥${(rep.cost || 0).toLocaleString()}`, isHighlight: rep.cost > 0 },
             { label: '更换配件', value: rep.partsReplaced || '无配件更换' },
-            { label: '结案日期', value: rep.completionDate || rep.faultDate, isMono: true }
+            { label: '登记时间', value: rep.faultDate, isMono: true }
           ],
-          remarks: `处理方案与结论: ${rep.resolution}`,
+          remarks: rep.resolution ? `处理方案与结论: ${rep.resolution}` : undefined,
           cost: rep.cost,
-          operator: rep.technician,
-          department: equipment.department,
+          operator: rep.reporterName || rep.technician,
+          department: rep.department || equipment.department,
           statusTag: {
             label: rep.status,
-            color: rep.status === '已完成' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-amber-50 text-amber-700 border-amber-200'
+            color: rep.status === '已完成' 
+              ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+              : 'bg-amber-100 text-amber-800 border-amber-300 font-bold'
           },
+          videoUrl: rep.videoUrl,
+          photoUrl: rep.photoUrl,
           rawRecord: rep
         });
+      });
+    }
+
+    // 1.5.1 实时补充草料 RDS 数据库中的最新扫码报修（避免本地缓存未同步）
+    if (caoliaoLiveRepairs && caoliaoLiveRepairs.length > 0) {
+      caoliaoLiveRepairs.forEach(clRep => {
+        const recordKey = clRep.recordNo || String(clRep.recordId);
+        const repId = `REP-CL-${recordKey}`;
+        const eventId = `evt-rep-${repId}`;
+        if (!addedEventIds.has(eventId) && !seenRecordNos.has(recordKey)) {
+          addedEventIds.add(eventId);
+          seenRecordNos.add(recordKey);
+          events.push({
+            id: eventId,
+            type: 'repair',
+            isCaoliao: true,
+            date: clRep.recordTime || '2026-10-04 15:50:43',
+            title: `草料二维码现场报修 (单号: ${recordKey})`,
+            categoryLabel: '草料扫码直报',
+            badgeClass: 'bg-emerald-50 text-emerald-800 border-emerald-300 font-bold',
+            icon: <QrCode className="w-4 h-4 text-emerald-600" />,
+            summary: `临床使用科室通过现场草料二维码移动端扫码建单。报修人【${clRep.reporterName}】（联系电话：${clRep.reporterPhone || '未预留'}），报修故障表现：${clRep.faultDescription}。工单已自动直通医院医工闭环调度大厅。`,
+            details: [
+              { label: '草料工单号', value: recordKey, isMono: true, isHighlight: true },
+              { label: '现场报修人', value: clRep.reporterName },
+              { label: '联系电话', value: clRep.reporterPhone || '-', isMono: true },
+              { label: '故障表现', value: clRep.faultDescription, isHighlight: true },
+              { label: '草料活码ID', value: String(clRep.codeId || equipment.codeId || ''), isMono: true },
+              { label: '建单渠道', value: clRep.createSource || '手机扫码填写' }
+            ],
+            remarks: clRep.videoUrl ? `已捕获现场多媒体佐证：现场录制故障视频 (${clRep.videoUrl.split('/').pop()})` : undefined,
+            cost: 0,
+            operator: clRep.reporterName,
+            department: equipment.department,
+            statusTag: {
+              label: clRep.processStatus === '已完成' ? '已修复闭环' : '待医工响应/处置中',
+              color: clRep.processStatus === '已完成' 
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                : 'bg-amber-100 text-amber-800 border-amber-300 font-bold'
+            },
+            videoUrl: clRep.videoUrl,
+            photoUrl: clRep.photoUrl,
+            rawRecord: clRep
+          });
+        }
+      });
+    }
+
+    // 1.5.2 实时补充草料 RDS 数据库中的状态审计流转日志 (code_state_log)
+    if (caoliaoStateLogs && caoliaoStateLogs.length > 0) {
+      const seenStateKeys = new Set<string>();
+      caoliaoStateLogs.forEach((sLog, sIdx) => {
+        const stateKey = `${sLog.timestamp}-${sLog.statusGroup}-${sLog.statusValue}`;
+        if (seenStateKeys.has(stateKey)) return;
+        seenStateKeys.add(stateKey);
+        const stateEventId = `evt-cl-state-${sLog.timestamp}-${sIdx}`;
+        if (!addedEventIds.has(stateEventId)) {
+          addedEventIds.add(stateEventId);
+          events.push({
+            id: stateEventId,
+            type: 'status_change',
+            isCaoliao: true,
+            date: sLog.timestamp,
+            title: `草料活码状态变更: 【${sLog.statusGroup || '运行状态'}】➔【${sLog.statusValue}】`,
+            categoryLabel: '草料状态流转',
+            badgeClass: 'bg-teal-50 text-teal-800 border-teal-200',
+            icon: <Activity className="w-4 h-4 text-teal-600" />,
+            summary: `经草料二维码扫码流转，设备在草料数据库中状态变更为【${sLog.statusValue}】（变更方式: ${sLog.changeMethod}${sLog.source ? `，源自工单 #${sLog.source}` : ''}）。`,
+            details: [
+              { label: '流转状态', value: sLog.statusValue, isHighlight: true },
+              { label: '状态分类', value: sLog.statusGroup || '当前状态' },
+              { label: '变更方式', value: sLog.changeMethod },
+              { label: '变更时间', value: sLog.timestamp, isMono: true }
+            ],
+            operator: '草料二维码扫码联动',
+            department: equipment.department,
+            statusTag: {
+              label: sLog.statusValue,
+              color: sLog.statusValue.includes('故障') 
+                ? 'bg-rose-100 text-rose-800 border-rose-300 font-bold' 
+                : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+            }
+          });
+        }
       });
     }
 
@@ -331,22 +501,30 @@ export const EquipmentLifecycleTimeline: React.FC<EquipmentLifecycleTimelineProp
       });
     }
 
-    // 排序
+    // 排序：基于安全解析的时间戳进行正序或倒序排列，彻底避免无效日期导致的排序异常
     return events.sort((a, b) => {
-      const timeA = new Date(a.date).getTime() || 0;
-      const timeB = new Date(b.date).getTime() || 0;
+      const timeA = parseEventDate(a.date);
+      const timeB = parseEventDate(b.date);
       return sortOrder === 'desc' ? timeB - timeA : timeA - timeB;
     });
-  }, [equipment, calibrationInfo, validityInfo, sortOrder, serviceYears]);
+  }, [equipment, calibrationInfo, validityInfo, sortOrder, serviceYears, caoliaoLiveRepairs, caoliaoStateLogs]);
+
+  // 统计草料专属报修与流转事件数
+  const caoliaoRepairCount = useMemo(() => {
+    return allEvents.filter(e => e.isCaoliao).length;
+  }, [allEvents]);
 
   // 2. 根据筛选类别过滤
   const filteredEvents = useMemo(() => {
     if (selectedFilter === 'all') return allEvents;
+    if (selectedFilter === 'caoliao') {
+      return allEvents.filter(e => e.isCaoliao);
+    }
     if (selectedFilter === 'milestone') {
       return allEvents.filter(e => ['purchase', 'manufacturing', 'commissioning', 'aging_scrap'].includes(e.type));
     }
     if (selectedFilter === 'repair') {
-      return allEvents.filter(e => ['repair', 'maintenance'].includes(e.type));
+      return allEvents.filter(e => ['repair', 'maintenance'].includes(e.type) || e.isCaoliao);
     }
     if (selectedFilter === 'calibration') {
       return allEvents.filter(e => e.type === 'calibration');
@@ -385,6 +563,87 @@ export const EquipmentLifecycleTimeline: React.FC<EquipmentLifecycleTimelineProp
   return (
     <div className="space-y-5" id="equipment-lifecycle-timeline-container">
       
+      {/* 顶部草料二维码官方 RDS 数据库直连专区（当设备关联 code_id 时高亮显示） */}
+      {equipment.codeId && (
+        <div className="bg-linear-to-r from-emerald-950/90 via-slate-900 to-teal-950 text-white p-4 sm:p-5 rounded-2xl border border-emerald-500/30 shadow-md">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-400/30 flex items-center justify-center shrink-0">
+                <QrCode className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h4 className="font-bold text-sm text-white">草料二维码官方数据库实时直连 (Aliyun RDS)</h4>
+                  <span className="px-2 py-0.5 rounded-full text-2xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    已双向联动
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 text-xs text-slate-300 mt-1 flex-wrap">
+                  <span>草料活码 ID: <strong className="text-emerald-300 font-mono font-bold">{equipment.codeId}</strong></span>
+                  <span className="text-slate-600">|</span>
+                  <span>活码全称: <strong className="text-slate-200">{equipment.caoliaoCodeName || caoliaoCodeInfo?.codeName || equipment.name}</strong></span>
+                  {equipment.caoliaoUrl && (
+                    <>
+                      <span className="text-slate-600">|</span>
+                      <a
+                        href={equipment.caoliaoUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-emerald-400 hover:text-emerald-300 hover:underline inline-flex items-center gap-1 font-bold"
+                      >
+                        <span>打开草料线上活码</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <div className="text-right hidden sm:block">
+                <div className="text-xs text-slate-400">现场扫码实时工单</div>
+                <div className="text-sm font-bold text-emerald-400 font-mono">
+                  {caoliaoRepairCount} 条记录
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={fetchLiveCaoliaoData}
+                disabled={isLoadingCaoliao}
+                className="px-3 py-1.5 bg-emerald-600/80 hover:bg-emerald-600 text-white rounded-lg text-xs font-bold border border-emerald-400/30 flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                title="重新向阿里云 RDS 查询最新报修及流转数据"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isLoadingCaoliao ? 'animate-spin' : ''}`} />
+                <span>{isLoadingCaoliao ? '查询中...' : '刷新草料直连'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 实时快报栏 */}
+          {caoliaoLiveRepairs.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-emerald-800/50 flex items-center justify-between text-xs text-emerald-200/90 flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[11px] font-bold">最新扫码报修</span>
+                <span>单号【<strong className="font-mono text-white">{caoliaoLiveRepairs[0].recordNo}</strong>】：{caoliaoLiveRepairs[0].faultDescription}</span>
+                <span className="text-slate-400 text-2xs">({caoliaoLiveRepairs[0].reporterName} · {caoliaoLiveRepairs[0].recordTime})</span>
+              </div>
+              {caoliaoLiveRepairs[0].videoUrl && (
+                <button
+                  type="button"
+                  onClick={() => setActiveVideoUrl(caoliaoLiveRepairs[0].videoUrl)}
+                  className="px-2 py-0.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 rounded border border-rose-500/30 flex items-center gap-1 text-2xs font-bold transition cursor-pointer"
+                >
+                  <Video className="w-3 h-3 text-rose-400" />
+                  <span>查看现场故障视频 (MP4)</span>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 1. 顶部：生命周期阶段可视化进度条 (Phase Stepper Ribbon) */}
       <div className="bg-white rounded-2xl border border-slate-200 p-4 sm:p-5 shadow-2xs space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
@@ -484,6 +743,21 @@ export const EquipmentLifecycleTimeline: React.FC<EquipmentLifecycleTimelineProp
             全部事件 ({allEvents.length})
           </button>
           
+          {caoliaoRepairCount > 0 && (
+            <button
+              type="button"
+              onClick={() => setSelectedFilter('caoliao')}
+              className={`px-3 py-1.5 rounded-lg font-medium transition cursor-pointer shrink-0 flex items-center gap-1 ${
+                selectedFilter === 'caoliao'
+                  ? 'bg-emerald-600 text-white font-bold shadow-xs'
+                  : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-300 font-semibold'
+              }`}
+            >
+              <QrCode className="w-3.5 h-3.5" />
+              <span>草料报修 ({caoliaoRepairCount})</span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => setSelectedFilter('milestone')}
@@ -507,7 +781,7 @@ export const EquipmentLifecycleTimeline: React.FC<EquipmentLifecycleTimelineProp
             }`}
           >
             <Wrench className="w-3.5 h-3.5" />
-            <span>维修保养 ({equipment.repairRecords?.length || 0})</span>
+            <span>维修保养 ({allEvents.filter(e => ['repair', 'maintenance'].includes(e.type) || e.isCaoliao).length})</span>
           </button>
 
           <button
@@ -627,6 +901,43 @@ export const EquipmentLifecycleTimeline: React.FC<EquipmentLifecycleTimelineProp
                   </div>
                 )}
 
+                {/* 草料专属多媒体佐证卡片 (视频 MP4 / 现场照片) */}
+                {(evt.videoUrl || evt.photoUrl) && (
+                  <div className="bg-emerald-50/70 border border-emerald-200/80 p-3 rounded-xl flex items-center justify-between flex-wrap gap-3">
+                    <div className="flex items-center gap-2 text-xs text-emerald-950 font-medium">
+                      <span className="font-bold flex items-center gap-1 text-emerald-800">
+                        <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>现场填报存证材料:</span>
+                      </span>
+                      <span>包含手机扫码实拍视频与故障现象证据</span>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {evt.videoUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setActiveVideoUrl(evt.videoUrl!)}
+                          className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs transition cursor-pointer"
+                        >
+                          <Play className="w-3.5 h-3.5 fill-current" />
+                          <span>播放现场故障视频 (MP4)</span>
+                        </button>
+                      )}
+
+                      {evt.photoUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setActivePhotoUrl(evt.photoUrl!)}
+                          className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-xs transition cursor-pointer"
+                        >
+                          <ImageIcon className="w-3.5 h-3.5" />
+                          <span>查看现场故障照片</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 {/* 补充说明或修复结论 */}
                 {evt.remarks && (
                   <div className="text-xs text-slate-600 bg-amber-50/60 p-2.5 rounded-lg border border-amber-100/80 leading-relaxed">
@@ -650,6 +961,20 @@ export const EquipmentLifecycleTimeline: React.FC<EquipmentLifecycleTimelineProp
                       </span>
                     )}
                   </div>
+
+                  {/* 针对特定事件的单据/操作入口 */}
+                  {evt.isCaoliao && equipment.caoliaoUrl && (
+                    <a
+                      href={equipment.caoliaoUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-md font-bold flex items-center gap-1 text-xs border border-emerald-300 transition"
+                      title="打开草料云端官方活码"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>草料活码原址</span>
+                    </a>
+                  )}
 
                   {/* 针对特定事件的单据/操作入口 */}
                   {(evt.type === 'purchase_inbound' || evt.type === 'install_commission') && onPrintAcceptanceDossier && (
@@ -682,6 +1007,81 @@ export const EquipmentLifecycleTimeline: React.FC<EquipmentLifecycleTimelineProp
         )}
 
       </div>
+
+      {/* 4. 现场故障视频在线播放模态弹窗 */}
+      {activeVideoUrl && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl overflow-hidden max-w-2xl w-full shadow-2xl space-y-3">
+            <div className="p-4 bg-slate-800/90 border-b border-slate-700 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-white font-bold text-sm">
+                <Video className="w-4 h-4 text-rose-500" />
+                <span>草料移动端现场扫码填报故障视频 (MP4)</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveVideoUrl(null)}
+                className="w-7 h-7 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 flex items-center justify-center transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4">
+              <div className="rounded-xl overflow-hidden bg-black flex items-center justify-center aspect-video">
+                <video
+                  controls
+                  autoPlay
+                  src={activeVideoUrl}
+                  className="max-h-full max-w-full"
+                >
+                  您的浏览器暂不支持此视频播放，请点击下方下载原件。
+                </video>
+              </div>
+              <div className="flex items-center justify-between text-xs text-slate-400 mt-3">
+                <span className="truncate max-w-md font-mono text-[11px]">{activeVideoUrl}</span>
+                <a
+                  href={activeVideoUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-emerald-400 hover:underline flex items-center gap-1 shrink-0 font-bold"
+                >
+                  <span>新窗口播放/下载</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 5. 现场故障照片查看模态弹窗 */}
+      {activePhotoUrl && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl overflow-hidden max-w-xl w-full shadow-2xl space-y-3">
+            <div className="p-4 bg-slate-800/90 border-b border-slate-700 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-white font-bold text-sm">
+                <ImageIcon className="w-4 h-4 text-blue-400" />
+                <span>草料移动端现场扫码填报故障照片</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActivePhotoUrl(null)}
+                className="w-7 h-7 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 flex items-center justify-center transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 flex items-center justify-center">
+              <img
+                src={activePhotoUrl}
+                alt="现场故障照片"
+                className="max-h-[70vh] rounded-lg object-contain shadow-md"
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

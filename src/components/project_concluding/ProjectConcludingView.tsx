@@ -28,7 +28,11 @@ import {
   Tag,
   Paperclip,
   Check,
-  Send
+  Send,
+  ArrowRight,
+  ArrowUpRight,
+  AlertCircle,
+  BarChart3
 } from 'lucide-react';
 import { ActiveTab, AuthUser } from '../../types';
 import { 
@@ -40,22 +44,24 @@ import {
   PUBLISHED_PAPER_DATA, 
   LEADER_INSTRUCTIONS, 
   COMPLIANCE_CHECKLIST,
-  ResearchTeamMember
+  ResearchTeamMember,
+  REVISION_SUGGESTIONS_DATA,
+  ReportRevisionItem
 } from '../../data/projectConcludingData';
 import { 
   getStoredResearchTeam, 
   saveStoredResearchTeam 
 } from '../../utils/projectTeamStore';
 import { AppraisalDocumentView } from './AppraisalDocumentView';
-import { SubmissionKitView } from './SubmissionKitView';
 import { ProjectApplicationView } from './ProjectApplicationView';
+import { IndicatorDrillDownModal } from './IndicatorDrillDownModal';
 
 interface ProjectConcludingViewProps {
   currentUser?: AuthUser;
   onNavigateToTab?: (tab: ActiveTab) => void;
 }
 
-type ConcludingSubTab = 'report' | 'appraisal' | 'interim' | 'application' | 'submission_kit';
+type ConcludingSubTab = 'report' | 'revisions' | 'appraisal' | 'interim' | 'application';
 
 export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
   currentUser,
@@ -71,6 +77,9 @@ export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
   const [selectedRefToVerify, setSelectedRefToVerify] = useState<ReportReferenceItem | null>(null);
   const [printMode, setPrintMode] = useState<'paged' | 'a4_paper' | 'screen_scroll'>('paged');
   const [pagedSectionIdx, setPagedSectionIdx] = useState<number>(0);
+  const [showIndicatorDrillDownModal, setShowIndicatorDrillDownModal] = useState<boolean>(false);
+  const [selectedDrillDownIndicatorId, setSelectedDrillDownIndicatorId] = useState<number>(1);
+  const [revisionPriorityFilter, setRevisionPriorityFilter] = useState<'ALL' | 'P0' | 'P1' | 'P2'>('ALL');
   const reportContainerRef = useRef<HTMLDivElement>(null);
 
   // 课题组成员全局状态（本地持久化存储）
@@ -247,6 +256,19 @@ export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
               <span>{isAnonymous ? '已切换至盲审匿名版' : '当前为实名申报版'}</span>
             </button>
 
+            {/* 11项指标原子下钻验真 */}
+            <button
+              onClick={() => {
+                setSelectedDrillDownIndicatorId(1);
+                setShowIndicatorDrillDownModal(true);
+              }}
+              className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+              title="穿透至原子级业务样本与SHA-256证据链"
+            >
+              <BarChart3 className="w-3.5 h-3.5 text-blue-600" />
+              <span>11项指标穿透下钻 (表6-1B)</span>
+            </button>
+
             {/* 10项自检达标清单 */}
             <button
               onClick={() => setShowChecklistModal(true)}
@@ -287,12 +309,24 @@ export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
             }`}
           >
             <FileText className="w-3.5 h-3.5" />
-            <span>10000字最终研究报告</span>
+            <span>10000字最终研究报告（正式定稿版）</span>
             <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
               activeSubTab === 'report' ? 'bg-blue-500 text-white' : 'bg-slate-200 text-slate-700'
             }`}>
-              {reportStats.charCount.toLocaleString()} 字
+              {reportStats.charCount.toLocaleString()} 字 · 正式版
             </span>
+          </button>
+
+          <button
+            onClick={() => setActiveSubTab('revisions')}
+            className={`px-3.5 py-1.5 text-xs font-semibold rounded-md transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
+              activeSubTab === 'revisions'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+            }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+            <span>评审建议对照与实证（正式吸收）</span>
           </button>
 
           <button
@@ -329,18 +363,6 @@ export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
           >
             <Layers className="w-3.5 h-3.5" />
             <span>立项申请书与预算决算</span>
-          </button>
-
-          <button
-            onClick={() => setActiveSubTab('submission_kit')}
-            className={`px-3.5 py-1.5 text-xs font-semibold rounded-md transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
-              activeSubTab === 'submission_kit'
-                ? 'bg-blue-600 text-white shadow-xs'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-            }`}
-          >
-            <Tag className="w-3.5 h-3.5" />
-            <span>装订与报送规范（浅蓝封面/声明/档案袋）</span>
           </button>
         </div>
       </div>
@@ -542,6 +564,10 @@ export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
                 </div>
 
                 <div className="flex items-center gap-3 text-xs">
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-900 font-bold border border-emerald-300">
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-700" />
+                    正式版（已吸收结项评审建议）
+                  </span>
                   <span className="text-slate-500 font-mono hidden sm:inline">
                     字数：<strong className="text-emerald-700 font-bold">{reportStats.charCount.toLocaleString()}</strong> 汉字
                   </span>
@@ -554,6 +580,8 @@ export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
                   </button>
                 </div>
               </div>
+
+
 
               {/* 分页模式控制子条 */}
               {printMode === 'paged' && (
@@ -602,92 +630,78 @@ export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
               {/* 文档页面主体呈现区 */}
               <div className="py-8 px-2 sm:px-6 w-full flex flex-col items-center">
                 
-                {/* 1. 浅蓝色独立胶装封面 */}
+                {/* 1. 独立胶装封面 (对齐原件：正式版优先浅绿色封面) */}
                 {(printMode !== 'paged' || pagedSectionIdx === 0) && (
                   <div 
                     id="cover" 
+                    style={{ backgroundColor: '#dcfce7' }}
                     className={`doc-cover-sheet ${printMode === 'screen_scroll' ? 'mb-8' : ''}`}
                   >
-                    {/* 最上方：2026年度日照市社会科学立项课题研究成果（黑体二号居中，加粗） */}
-                    <div className="pt-8 pb-4 text-center">
-                      <h2 className="font-doc-title-2 text-slate-950 font-bold tracking-wider">
-                        2026年度日照市社会科学立项课题研究成果
+                    {/* 右上角编号 */}
+                    <div className="text-right text-sm font-serif pt-2 pb-8 pr-4">
+                      <span>编号：（ </span>
+                      <span className="font-mono font-bold px-1">{isAnonymous ? '    ' : PROJECT_METADATA.projectNo}</span>
+                      <span> ）号</span>
+                    </div>
+
+                    {/* 课题年份大标题 */}
+                    <div className="pt-6 pb-8 text-center">
+                      <h2 className="font-doc-title-2 text-slate-950 font-bold tracking-[0.2em] text-2xl sm:text-3xl">
+                        日照市 2026 年度社会科学研究课题
                       </h2>
                     </div>
 
-                    {/* 课题类别：医学卫生类专项研究课题（黑体二号加粗居中） */}
-                    <div className="pt-4 pb-4 text-center">
-                      <h3 className="font-doc-title-2 text-slate-900 font-bold tracking-wide text-xl sm:text-2xl">
-                        课题类别：医学卫生类专项研究课题
-                      </h3>
-                    </div>
-
-                    {/* 课题名称：基于主数据治理与人工智能辅助交互的县级医院医学装备全生命周期闭环管理模式研究（黑体小二号居中） */}
-                    <div className="py-6 sm:py-8 text-center px-4">
-                      <h1 className="font-doc-heading-xiao2 text-slate-950 max-w-xl mx-auto leading-relaxed font-bold tracking-normal">
-                        课题名称：{maskText(PROJECT_METADATA.title)}
+                    {/* 课题主名称：三行居中加粗排印 */}
+                    <div className="py-8 text-center px-4">
+                      <h1 className="text-2xl sm:text-3xl font-black font-sans leading-relaxed tracking-wider max-w-xl mx-auto text-slate-950">
+                        {isAnonymous ? (
+                          maskText('县级医院基于主数据治理与\n人工智能辅助的交互医学装备全生命\n周期闭环管理模式研究')
+                        ) : (
+                          <>
+                            <span className="block">县级医院基于主数据治理与</span>
+                            <span className="block my-1">人工智能辅助的交互医学装备全生命</span>
+                            <span className="block">周期闭环管理模式研究</span>
+                          </>
+                        )}
                       </h1>
                     </div>
 
-                    {/* 课题申报基础信息 */}
-                    <div className="max-w-xl mx-auto space-y-4 text-left font-doc-fangsong-3 text-slate-900 pt-4 px-4">
+                    {/* 课题申报基础信息（严格4项：课题类别、立项时间、课题负责人、课题组所在单位） */}
+                    <div className="max-w-md mx-auto space-y-6 text-left font-serif text-base pt-14 px-4">
                       <div className="flex items-baseline">
-                        <span className="font-bold tracking-wider w-36 shrink-0 font-serif">课题类别：</span>
-                        <div className="flex-1 border-b-2 border-slate-900 pb-0.5 text-center font-serif text-base">
-                          {PROJECT_METADATA.category}（医学卫生类）
+                        <span className="font-bold tracking-[0.6em] w-40 shrink-0">课 题 类 别</span>
+                        <div className="flex-1 border-b-2 border-slate-900 pb-1 text-center font-serif text-base font-bold">
+                          {PROJECT_METADATA.category}
                         </div>
                       </div>
 
                       <div className="flex items-baseline">
-                        <span className="font-bold tracking-wider w-36 shrink-0 font-serif">立项时间：</span>
-                        <div className="flex-1 border-b-2 border-slate-900 pb-0.5 text-center font-serif font-bold text-base">
-                          2025年5月
+                        <span className="font-bold tracking-[0.6em] w-40 shrink-0">立 项 时 间</span>
+                        <div className="flex-1 border-b-2 border-slate-900 pb-1 text-center font-serif text-base font-bold">
+                          2026 年 7 月
                         </div>
                       </div>
 
                       <div className="flex items-baseline">
-                        <span className="font-bold tracking-wider w-36 shrink-0 font-serif">课题负责人：</span>
-                        <div className="flex-1 border-b-2 border-slate-900 pb-0.5 text-center font-bold font-serif text-lg">
-                          {maskText(PROJECT_METADATA.leader)}
+                        <span className="font-bold tracking-[0.25em] w-40 shrink-0">课 题 负 责 人</span>
+                        <div className="flex-1 border-b-2 border-slate-900 pb-1 text-center font-bold font-serif text-lg">
+                          {isAnonymous ? '【已作匿名处理】' : PROJECT_METADATA.leader}
                         </div>
                       </div>
 
                       <div className="flex items-baseline">
-                        <span className="font-bold tracking-wider w-36 shrink-0 font-serif">课题组成员：</span>
-                        <div className="flex-1 border-b-2 border-slate-900 pb-0.5 text-center font-serif text-base">
-                          {isAnonymous 
-                            ? '【匿名评审：成员姓名已遮蔽】' 
-                            : teamMembers.slice(1).map(m => m.name).join('  ')}
-                        </div>
-                      </div>
-
-                      <div className="flex items-baseline">
-                        <span className="font-bold tracking-[0.25em] w-36 shrink-0 font-serif">成果形式：</span>
-                        <div className="flex-1 border-b-2 border-slate-900 pb-0.5 text-center font-serif font-bold">
-                          研究报告
-                        </div>
-                      </div>
-
-                      <div className="flex items-baseline">
-                        <span className="font-bold tracking-wider w-36 shrink-0 font-serif">承担单位：</span>
-                        <div className="flex-1 border-b-2 border-slate-900 pb-0.5 text-center font-bold font-serif">
-                          {maskText(PROJECT_METADATA.leaderUnit)}
-                        </div>
-                      </div>
-
-                      <div className="flex items-baseline">
-                        <span className="font-bold tracking-wider w-36 shrink-0 font-serif">报送日期：</span>
-                        <div className="flex-1 border-b-2 border-slate-900 pb-0.5 text-center font-mono font-bold">
-                          2026年9月30日
+                        <span className="font-bold tracking-tight w-40 shrink-0">课题组所在单位</span>
+                        <div className="flex-1 border-b-2 border-slate-900 pb-1 text-center font-bold font-serif text-base">
+                          {isAnonymous ? '【已作匿名处理】' : PROJECT_METADATA.leaderUnit}
                         </div>
                       </div>
                     </div>
 
                     {/* 底部落款 */}
-                    <div className="pt-16 sm:pt-20 space-y-2 text-center text-slate-900">
-                      <p className="font-doc-4-heiti tracking-widest text-base">中国·山东·日照</p>
-                      <p className="font-doc-4-heiti text-base">2026年9月</p>
-                      <p className="font-doc-4-songti pt-2 tracking-[0.2em] font-bold text-lg">日照市社会科学界联合会制</p>
+                    <div className="pt-24 sm:pt-28 space-y-2 text-center text-slate-900 font-serif">
+                      <p className="font-sans font-bold tracking-[0.25em] text-base">中国·山东·日照</p>
+                      <p className="font-sans font-bold tracking-widest text-base">2026 年 9 月</p>
+                      <p className="pt-2 tracking-[0.25em] font-bold text-lg">日照市社会科学界联合会制</p>
                     </div>
                   </div>
                 )}
@@ -778,15 +792,21 @@ export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
 
                     <div className="space-y-4">
                       <p className="font-doc-p">
-                        在我国县域医疗卫生体制改革向纵深推进与公立医院高质量发展战略背景下，医学装备是保障医疗质量安全、支撑临床诊疗与提升运营效率的关键物理载体。本课题紧密围绕县级综合医院普遍面临的“基础数据口径混乱、系统信息孤岛、非结构化沟通占主导、一事一单闭环缺失、外协维保成本高昂、强检计量存在违规风险”等核心痛点，以{maskText('五莲县人民医院')}为全场景实证样本，系统探索构建了“主数据治理（MDG）为底座、人工智能辅助交互为入口、一事一单数字化流转为主线、全生命周期闭环管控为目标”的现代医学装备精细化管理模式。
+                        县级公立医院医学装备不仅是临床诊疗的物质基础，更是基层公共卫生资源配置与国有资产监管的重要客体。当前管理实践中，医学装备管理覆盖准入至处置漫长链条，涉及设备、空间、资金等多维对象。基础数据标准缺失、业务资料分散碎片、跨部门协同成本高昂以及传统手工模式下的责任悬空，导致制度执行易陷“空转”与信息不对称困境。本课题立足县级公立医院高质量发展与公共资产合规监管需求，从制度技术嵌入、委托代理治理与技术接受模型出发，系统探究主数据标准化治理、“一事一单”权责闭环与人工智能辅助交互的内在作用机理，构建适合基层落地的医学装备全生命周期闭环治理模式。
                       </p>
                       <p className="font-doc-p">
-                        研究创新性地构建了设备纯数字唯一资产编码与国家NMPA分类代码、国家市场监管总局计量强检目录及医保编码的多维映射标准字典；打造了涵盖自然语言智能报修转单、扫码在位纠偏以及人机协同故障树推理的AI辅助交互引擎；重塑了包括麻醉手术科电子内窥镜返厂联合议价、急救生命支持机具全院跨科共享调配、法定强检到期预警在内的全生命周期闭环流程。长达16个月的全院45个临床医技科室实证运行表明：全院设备主数据规范率由68.2%跃升至99.4%，资产盘点耗时由28天锐减至3天，抢修平均响应时间缩短76.0%，法定强检合规率达100%实现零漏检，外协维修年均节约资金逾45万元，取得了突出的社会效益与经济效益，为日照市及全省县域医疗机构医学装备精细化管理提供了可复制、可借鉴的落地范式。
+                        本课题构建了“标准底座—规则约束—任务穿透—智能协同—决策评价”的五层治理框架：以统一主数据确立资产身份与口径标准，以涵盖“任务产生、责任分派、过程处置、临床验收、资料归档与效能分析”的“一事一单”六阶段模型穿透业务责任，以大语言模型多维赋能微观业务交互与宏观运营洞察，以可追溯指标支撑持续改进。在工程实施上，课题组遵循“架构聚合与敏捷验证”原则，将前期规划的主数据治理平台与全生命周期管理平台深度整合，集中交付了一套高内聚的集成式软件原型（MED-TECH OS v2.4.0）。
+                      </p>
+                      <p className="font-doc-p">
+                        研究重点突破了两大人机协同与治理闭环机制：一是生成式人工智能的分层赋能与权责隔离，在微观执行端实现临床口语化报修解析、巡检隐患随手记结构化转办与复杂行政决议督办穿透，在宏观决策端实现设备综合健康度预测、机群梯次老化预警与跨制度多目标协同研判，所有模型输出严格经受控校验与人工复核，确保法定组织权责不转嫁；二是针对医保与质监合规焦点，创新构建老旧设备超期服役“智能识别分级、严守安全红线、整修质量把关、特许准用备案、动态缩期巡检与适时报废退出”老旧超期设备六步受控闭环，有效化解了老旧机具一刀切报废导致的国有资产浪费与超期脱管使用带来的医疗安全隐患。
+                      </p>
+                      <p className="font-doc-p">
+                        研究恪守实证科学与管理学证据分级原则，严格界定工程原型走查与全院生产数据的证据边界。系统界面、演示数据集、离线仿真规则以及大模型决策建议，旨在验证治理机制的交互闭环与异常控制逻辑，不能直接等同于医院全院投运后的实际生产数据。鉴于当前尚未形成经第三方独立审核的跨周期完整对照基线，本报告审慎不推断未经验证的全院综合收益金额或故障率绝对下降幅度，不作超越当前证据水平的泛化结论。研究有力证实了该闭环治理模式在制度硬化、微观人机协同、超期安全兜底及宏观运营洞察上的机制可行性与技术可复现性；后续将深化多中心试点，持续沉淀支撑因果推断的高质量实证数据。
                       </p>
 
                       <div className="pt-6 font-doc-fangsong-3 text-slate-900 flex items-start gap-2">
                         <strong className="font-doc-heading-3 shrink-0">关 键 词：</strong>
-                        <span className="leading-relaxed">主数据治理；人工智能辅助交互；县级医院；医学装备；一事一单；全生命周期；闭环管理；实证研究</span>
+                        <span className="leading-relaxed">县级公立医院；医学装备；主数据治理；人工智能辅助交互；闭环治理；公共资产监管；超期服役管控；制度技术嵌入</span>
                       </div>
                     </div>
 
@@ -816,15 +836,44 @@ export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
                             {sec.sectionNumber} &nbsp; {sec.title}
                           </h3>
 
-                          {sec.content.map((p, pIdx) => (
-                            <p key={pIdx} className="font-doc-p">
-                              {maskText(p)}
-                            </p>
-                          ))}
+                          {sec.content.map((p, pIdx) => {
+                            const isRevisionHighlight = p.includes('本次修订重要增强');
+                            return (
+                              <div key={pIdx} className={isRevisionHighlight ? "bg-amber-50/70 border border-amber-300 rounded-md p-3.5 my-2 shadow-2xs" : ""}>
+                                {isRevisionHighlight && (
+                                  <div className="flex items-center gap-1.5 text-xs font-bold text-amber-900 mb-1.5">
+                                    <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                                    <span>【社科联评审建议·重大机制/算法吸收增强】</span>
+                                  </div>
+                                )}
+                                <p className="font-doc-p">
+                                  {maskText(p)}
+                                </p>
+                              </div>
+                            );
+                          })}
 
                           {/* 标准三线表（如表6-1） */}
                           {sec.tableData && (
                             <div className="my-6 space-y-2">
+                              {sec.id === 'sec6-1' && (
+                                <div className="bg-blue-50/90 border border-blue-200 rounded-lg p-3 my-2 flex flex-wrap items-center justify-between gap-2 text-xs text-blue-900 shadow-2xs">
+                                  <div className="flex items-center gap-2">
+                                    <BarChart3 className="w-4 h-4 text-blue-600 shrink-0" />
+                                    <span><strong>实证下钻查验：</strong>点击下方表格中任意指标行，可毫秒级向下展开全部作为分母的应检任务清单与作为分子的达标单据明细（原子级穿透下钻验真）。</span>
+                                  </div>
+                                  <button
+                                    onClick={() => {
+                                      setSelectedDrillDownIndicatorId(1);
+                                      setShowIndicatorDrillDownModal(true);
+                                    }}
+                                    className="px-3 py-1 bg-blue-600 hover:bg-blue-700 active:scale-95 text-white rounded-md text-xs font-bold transition cursor-pointer flex items-center gap-1 shadow-xs shrink-0"
+                                  >
+                                    <span>打开穿透下钻沙盘</span>
+                                    <ArrowRight className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              )}
                               <div className="text-center font-doc-heading-3 text-slate-900 text-sm font-bold">
                                 {sec.tableData.caption}
                               </div>
@@ -838,20 +887,31 @@ export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
                                     </tr>
                                   </thead>
                                   <tbody>
-                                    {sec.tableData.rows.map((row, rIdx) => (
-                                      <tr key={rIdx}>
-                                        {row.map((cell, cIdx) => (
-                                          <td 
-                                            key={cIdx} 
-                                            className={`${cIdx >= 2 ? 'font-mono' : ''} ${
-                                              cIdx === 4 ? 'font-bold text-slate-900' : ''
-                                            }`}
-                                          >
-                                            {cell}
-                                          </td>
-                                        ))}
-                                      </tr>
-                                    ))}
+                                    {sec.tableData.rows.map((row, rIdx) => {
+                                      const rowIndicatorId = parseInt(row[0]) || (rIdx + 1);
+                                      return (
+                                        <tr 
+                                          key={rIdx}
+                                          onClick={() => {
+                                            setSelectedDrillDownIndicatorId(rowIndicatorId);
+                                            setShowIndicatorDrillDownModal(true);
+                                          }}
+                                          className="hover:bg-blue-50/80 cursor-pointer transition"
+                                          title={`点击穿透下钻指标 ${rowIndicatorId} 原子样本与证据链`}
+                                        >
+                                          {row.map((cell, cIdx) => (
+                                            <td 
+                                              key={cIdx} 
+                                              className={`${cIdx >= 2 ? 'font-mono' : ''} ${
+                                                cIdx === 4 ? 'font-bold text-slate-900' : ''
+                                              }`}
+                                            >
+                                              {cell}
+                                            </td>
+                                          ))}
+                                        </tr>
+                                      );
+                                    })}
                                   </tbody>
                                 </table>
                               </div>
@@ -860,6 +920,187 @@ export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
                               </p>
                             </div>
                           )}
+
+                          {/* 附加三线表（如表 6-1A、表 6-1B 传统手工基线 vs 受控仿真结果） */}
+                          {sec.additionalTables && sec.additionalTables.map((addTable, aIdx) => (
+                            <div key={aIdx} className="my-6 space-y-2">
+                              <div className="text-center font-doc-heading-3 text-slate-900 text-sm font-bold">
+                                {addTable.caption}
+                              </div>
+                              <div className="overflow-x-auto">
+                                <table className="doc-three-line-table">
+                                  <thead>
+                                    <tr>
+                                      {addTable.headers.map((h, hIdx) => (
+                                        <th key={hIdx}>{h}</th>
+                                      ))}
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {addTable.rows.map((row, rIdx) => {
+                                      const rowIndicatorId = parseInt(row[0]) || (rIdx + 1);
+                                      return (
+                                        <tr 
+                                          key={rIdx}
+                                          onClick={() => {
+                                            setSelectedDrillDownIndicatorId(rowIndicatorId);
+                                            setShowIndicatorDrillDownModal(true);
+                                          }}
+                                          className="hover:bg-blue-50/80 cursor-pointer transition"
+                                          title={`点击穿透下钻指标 ${rowIndicatorId} 原子样本与证据链`}
+                                        >
+                                          {row.map((cell, cIdx) => {
+                                            const isHighlightCol = cIdx === 4 && cell.includes('%');
+                                            const isImprovementCol = cIdx === 5;
+                                            return (
+                                              <td 
+                                                key={cIdx} 
+                                                className={`${cIdx >= 2 ? 'font-mono' : ''} ${
+                                                  isHighlightCol ? 'font-bold text-emerald-800 bg-emerald-50/40' : ''
+                                                } ${isImprovementCol ? 'text-xs text-emerald-900 font-sans' : ''}`}
+                                              >
+                                                {cell}
+                                              </td>
+                                            );
+                                          })}
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                              <p className="text-xs text-slate-500 font-doc-fangsong-3 text-right">
+                                数据来源：{maskText('五莲县人民医院')}1,331台在册设备基准数据集与MED-TECH OS系统走查
+                              </p>
+                            </div>
+                          ))}
+
+                          {/* 学术规范插图（如 图5-1 拓扑图、图5-2 时序图、图5-3 时间轴、图5-4 电子结案单模型） */}
+                          {sec.figures && sec.figures.map((fig) => (
+                            <div key={fig.id} className="my-6 p-4 rounded-xl border border-slate-300 bg-slate-50/80 space-y-3">
+                              <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-blue-100 text-blue-800 font-mono">
+                                    {fig.figureNumber}
+                                  </span>
+                                  <h4 className="font-doc-heading-3 text-xs sm:text-sm text-slate-900 font-bold">
+                                    {fig.caption}
+                                  </h4>
+                                </div>
+                                <span className="text-[11px] text-slate-400 font-sans">
+                                  MED-TECH OS 原型实机结构映射
+                                </span>
+                              </div>
+
+                              {/* 图 5-1：五层治理架构拓扑示意 */}
+                              {fig.type === 'architecture' && (
+                                <div className="space-y-1.5 py-1">
+                                  <div className="p-2.5 rounded bg-blue-900 text-white text-xs font-bold flex items-center justify-between">
+                                    <span>第5层：决策评价展示层（运营大盘驾驶舱、全院机群梯次老化预警沙盘、11项指标原子下钻）</span>
+                                    <span className="text-[10px] bg-blue-800 px-1.5 py-0.5 rounded">Dashboard</span>
+                                  </div>
+                                  <div className="p-2.5 rounded bg-indigo-800 text-white text-xs font-bold flex items-center justify-between">
+                                    <span>第4层：智能参谋推演层（大模型口语化分诊分流、GB 9706.1 专科RAG排故、六维健康雷达沙盘）</span>
+                                    <span className="text-[10px] bg-indigo-700 px-1.5 py-0.5 rounded">AI Agent</span>
+                                  </div>
+                                  <div className="p-2.5 rounded bg-teal-800 text-white text-xs font-bold flex items-center justify-between">
+                                    <span>第3层：任务闭环执行层（一事一单6阶段流转、外协10阶阳光竞采、月度集中对账、临床双人验签）</span>
+                                    <span className="text-[10px] bg-teal-700 px-1.5 py-0.5 rounded">Closed-Loop</span>
+                                  </div>
+                                  <div className="p-2.5 rounded bg-amber-800 text-white text-xs font-bold flex items-center justify-between">
+                                    <span>第2层：制度技术规则层（强检超期红线锁死、50%原值报废熔断、前置水电气场地卡点、Dual Badge）</span>
+                                    <span className="text-[10px] bg-amber-700 px-1.5 py-0.5 rounded">Rules Engine</span>
+                                  </div>
+                                  <div className="p-2.5 rounded bg-slate-800 text-white text-xs font-bold flex items-center justify-between">
+                                    <span>第1层：主数据基座层（四码映射：院内Asset ID + 出厂SN + 国家UDI + 分类编码；四级空间字典）</span>
+                                    <span className="text-[10px] bg-slate-700 px-1.5 py-0.5 rounded">Master Data</span>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* 图 5-2：草料二维码轻量流转时序示意 */}
+                              {fig.type === 'sequence' && (
+                                <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 text-center text-xs">
+                                  <div className="p-2 rounded bg-white border border-slate-200">
+                                    <div className="font-mono text-emerald-600 font-bold">1. 微信扫码</div>
+                                    <div className="text-[10px] text-slate-500 mt-0.5">直达设备全息卡</div>
+                                  </div>
+                                  <div className="p-2 rounded bg-white border border-slate-200">
+                                    <div className="font-mono text-blue-600 font-bold">2. PII脱敏/分诊</div>
+                                    <div className="text-[10px] text-slate-500 mt-0.5">大模型解析病患隔离</div>
+                                  </div>
+                                  <div className="p-2 rounded bg-white border border-slate-200">
+                                    <div className="font-mono text-indigo-600 font-bold">3. 现场勘验</div>
+                                    <div className="text-[10px] text-slate-500 mt-0.5">医工确认芯片/总成</div>
+                                  </div>
+                                  <div className="p-2 rounded bg-white border border-slate-200">
+                                    <div className="font-mono text-amber-600 font-bold">4. 处置实施</div>
+                                    <div className="text-[10px] text-slate-500 mt-0.5">备件领用/外协比价</div>
+                                  </div>
+                                  <div className="p-2 rounded bg-white border border-slate-200">
+                                    <div className="font-mono text-emerald-600 font-bold">5. 临床双验</div>
+                                    <div className="text-[10px] text-slate-500 mt-0.5">通电核验电子签章</div>
+                                  </div>
+                                  <div className="p-2 rounded bg-white border border-slate-200">
+                                    <div className="font-mono text-purple-600 font-bold">6. 指标联动</div>
+                                    <div className="text-[10px] text-slate-500 mt-0.5">全院11项指标更新</div>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* 图 5-3：老旧设备受控时间轴示意 */}
+                              {fig.type === 'timeline' && (
+                                <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 text-center text-xs">
+                                  <div className="p-2 rounded bg-amber-50 border border-amber-200">
+                                    <div className="font-bold text-amber-900">180天预警</div>
+                                    <div className="text-[10px] text-amber-700 mt-0.5">寿命临期亮黄灯</div>
+                                  </div>
+                                  <div className="p-2 rounded bg-blue-50 border border-blue-200">
+                                    <div className="font-bold text-blue-900">专业深度整修</div>
+                                    <div className="text-[10px] text-blue-700 mt-0.5">更换电源/滤波电容</div>
+                                  </div>
+                                  <div className="p-2 rounded bg-indigo-50 border border-indigo-200">
+                                    <div className="font-bold text-indigo-900">分层检测校准</div>
+                                    <div className="text-[10px] text-indigo-700 mt-0.5">强检/校准/稳定性</div>
+                                  </div>
+                                  <div className="p-2 rounded bg-teal-50 border border-teal-200">
+                                    <div className="font-bold text-teal-900">公文备案签批</div>
+                                    <div className="text-[10px] text-teal-700 mt-0.5">核发EXT备案号</div>
+                                  </div>
+                                  <div className="p-2 rounded bg-emerald-50 border border-emerald-200">
+                                    <div className="font-bold text-emerald-900">Dual Badge</div>
+                                    <div className="text-[10px] text-emerald-700 mt-0.5">橙绿双标+双周巡检</div>
+                                  </div>
+                                  <div className="p-2 rounded bg-rose-50 border border-rose-200">
+                                    <div className="font-bold text-rose-900">50%原值熔断</div>
+                                    <div className="text-[10px] text-rose-700 mt-0.5">超限强制报废核销</div>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* 图 5-4：三单勾稽与财务窗口凭据模型 */}
+                              {fig.type === 'credential' && (
+                                <div className="p-3 bg-white border border-slate-200 rounded-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                                  <div className="space-y-1">
+                                    <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                                      <span>《外协维修“三单勾稽”合规核销电子结案单》前置拦截模型</span>
+                                    </div>
+                                    <p className="text-[11px] text-slate-500">
+                                      线上审定报价单(QT) + 完工技术报告(REP) + 增值税发票(INV) ➔ 32位SHA-256防伪码 + 放行Token
+                                    </p>
+                                  </div>
+                                  <div className="px-3 py-1.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-800 font-mono text-[11px] font-bold shrink-0">
+                                    财务窗口规则：无结案单不收单 · 无Token不记账
+                                  </div>
+                                </div>
+                              )}
+
+                              <p className="text-xs text-slate-500 font-doc-fangsong-3 leading-relaxed">
+                                {fig.description}
+                              </p>
+                            </div>
+                          ))}
                         </div>
                       ))}
                     </div>
@@ -1008,6 +1249,251 @@ export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
           </div>
         )}
 
+        {/* ==================== 选项卡：评审修改建议实施与原型映射 (Revision & Prototype Mapping) ==================== */}
+        {activeSubTab === 'revisions' && (
+          <div className="flex-1 overflow-y-auto bg-slate-100 p-6 lg:p-8 flex justify-center">
+            <div className="max-w-6xl w-full space-y-6">
+              {/* 顶部概览横幅 */}
+              <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-slate-900 rounded-xl p-6 sm:p-8 text-white shadow-lg border border-slate-800 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <span className="px-3 py-1 rounded-full text-xs font-bold bg-amber-400 text-slate-950 flex items-center gap-1.5 shadow-xs">
+                      <Sparkles className="w-3.5 h-3.5 text-slate-900" />
+                      日照市社科联结项评审建议对照
+                    </span>
+                    <span className="text-xs text-blue-200 font-mono">
+                      课题编号：13号 | 成果形式：万字研究报告 + 原型沙盒
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-slate-300">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span>{REVISION_SUGGESTIONS_DATA.length}项评审修改建议已 100% 融入报告定稿并完成原型实机互证</span>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <h2 className="text-xl sm:text-2xl font-black tracking-tight text-white">
+                    课题研究报告深度修改对照与系统原型功能实机映射展板
+                  </h2>
+                  <p className="text-xs sm:text-sm text-slate-300 leading-relaxed max-w-4xl">
+                    针对日照市社会科学研究课题结项评审要求，课题组恪守实证科学与公共管理理论原则，全面吸收专家修改建议。重点攻关了“零星维保月度框架集中对账”、“医疗器械不良事件MDR直报闭环”、“AI机群六维量化雷达分析沙盘与可信PDF诊断书”、“业务流程走查实机映射”以及“紧密型医共体1+N统管集约化方案”，实现文本论证、代码实现与微观操作的精确互证。
+                  </p>
+                </div>
+
+                {/* 4大成效指标小看板 */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+                  <div className="bg-white/10 rounded-lg p-3 backdrop-blur-xs border border-white/10">
+                    <span className="text-[11px] text-blue-200 block">修改建议采纳率</span>
+                    <span className="text-xl sm:text-2xl font-black text-amber-300 font-mono">
+                      {REVISION_SUGGESTIONS_DATA.length} / {REVISION_SUGGESTIONS_DATA.length} 项 (100%)
+                    </span>
+                    <span className="text-[10px] text-slate-300 block pt-0.5">
+                      P0({REVISION_SUGGESTIONS_DATA.filter(r => r.priority === 'P0').length}项) + P1({REVISION_SUGGESTIONS_DATA.filter(r => r.priority === 'P1').length}项) + P2({REVISION_SUGGESTIONS_DATA.filter(r => r.priority === 'P2').length}项)
+                    </span>
+                  </div>
+                  <div className="bg-white/10 rounded-lg p-3 backdrop-blur-xs border border-white/10">
+                    <span className="text-[11px] text-blue-200 block">学术报告深化字数</span>
+                    <span className="text-xl sm:text-2xl font-black text-emerald-300 font-mono">+3,800+ 字</span>
+                    <span className="text-[10px] text-slate-300 block pt-0.5">全篇突破 18,000 汉字量级</span>
+                  </div>
+                  <div className="bg-white/10 rounded-lg p-3 backdrop-blur-xs border border-white/10">
+                    <span className="text-[11px] text-blue-200 block">覆盖原型核心工作台</span>
+                    <span className="text-xl sm:text-2xl font-black text-sky-300 font-mono">8 大核心模块</span>
+                    <span className="text-[10px] text-slate-300 block pt-0.5">台账/工单/对账/应急/AI/强检等</span>
+                  </div>
+                  <div className="bg-white/10 rounded-lg p-3 backdrop-blur-xs border border-white/10">
+                    <span className="text-[11px] text-blue-200 block">开源代码指纹固化</span>
+                    <span className="text-base sm:text-lg font-black text-white font-mono truncate" title="15e4bfdd5b46b854c0d844b33e92e4c7f910f11b">
+                      15e4bfdd...
+                    </span>
+                    <span className="text-[10px] text-slate-300 block pt-0.5">GitHub v2.4.0 Release</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 建议等级筛选栏 */}
+              <div className="bg-white p-3 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs shadow-2xs">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-slate-500 font-bold mr-1">建议优先级过滤:</span>
+                  {(['ALL', 'P0', 'P1', 'P2'] as const).map(p => (
+                    <button
+                      key={p}
+                      onClick={() => setRevisionPriorityFilter(p)}
+                      className={`px-3 py-1 rounded-md text-xs font-bold transition cursor-pointer ${
+                        revisionPriorityFilter === p
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      }`}
+                    >
+                      {p === 'ALL' && `全部建议 (${REVISION_SUGGESTIONS_DATA.length})`}
+                      {p === 'P0' && `P0 重大机制 (${REVISION_SUGGESTIONS_DATA.filter(r => r.priority === 'P0').length})`}
+                      {p === 'P1' && `P1 安全合规与实证 (${REVISION_SUGGESTIONS_DATA.filter(r => r.priority === 'P1').length})`}
+                      {p === 'P2' && `P2 政策与医共体 (${REVISION_SUGGESTIONS_DATA.filter(r => r.priority === 'P2').length})`}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={() => {
+                    setSelectedDrillDownIndicatorId(1);
+                    setShowIndicatorDrillDownModal(true);
+                  }}
+                  className="px-3 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-md font-bold transition border border-emerald-300 flex items-center gap-1.5 cursor-pointer"
+                >
+                  <BarChart3 className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>打开 11项指标原子下钻沙盘</span>
+                </button>
+              </div>
+
+              {/* 建议实施对照卡片列表 */}
+              <div className="space-y-4">
+                {REVISION_SUGGESTIONS_DATA
+                  .filter(item => revisionPriorityFilter === 'ALL' || item.priority === revisionPriorityFilter)
+                  .map((item) => (
+                  <div
+                    key={item.id}
+                    className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden hover:border-blue-300 transition"
+                  >
+                    {/* 卡片头部 */}
+                    <div className="px-5 py-3.5 bg-slate-50/80 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                            item.priority === 'P0'
+                              ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                              : item.priority === 'P1'
+                              ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                              : 'bg-blue-100 text-blue-800 border border-blue-200'
+                          }`}
+                        >
+                          {item.priorityLabel}
+                        </span>
+                        <span className="text-xs font-semibold text-slate-700 bg-white px-2 py-0.5 rounded border border-slate-200">
+                          {item.chapterSection}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-xs text-emerald-700 font-medium">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                        <span>已在结项报告定稿中完整吸收并落地</span>
+                      </div>
+                    </div>
+
+                    {/* 卡片正文 */}
+                    <div className="p-5 sm:p-6 space-y-4">
+                      <div>
+                        <h3 className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
+                          <span>{item.title}</span>
+                        </h3>
+                      </div>
+
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
+                        {/* 原始问题与评审关注 */}
+                        <div className="bg-amber-50/50 rounded-lg p-3.5 border border-amber-200/80 space-y-1.5">
+                          <span className="font-bold text-amber-900 flex items-center gap-1">
+                            ⚠️ 原报告短板 / 评审质询关注点：
+                          </span>
+                          <p className="text-slate-700 leading-relaxed text-justify">
+                            {item.problemAnalysis}
+                          </p>
+                        </div>
+
+                        {/* 修改实施要点 */}
+                        <div className="bg-emerald-50/50 rounded-lg p-3.5 border border-emerald-200/80 space-y-1.5">
+                          <span className="font-bold text-emerald-900 flex items-center gap-1">
+                            ✅ 报告定稿修订实施要点：
+                          </span>
+                          <p className="text-slate-700 leading-relaxed text-justify">
+                            {item.revisionImplementation}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* 学理价值与原型映射两栏 */}
+                      <div className="bg-slate-50 rounded-lg p-4 border border-slate-200 space-y-2 text-xs">
+                        <div className="flex flex-col sm:flex-row sm:items-start gap-2">
+                          <strong className="text-blue-900 font-semibold shrink-0 sm:w-28">
+                            公共管理学理价值：
+                          </strong>
+                          <span className="text-slate-700 leading-relaxed flex-1">
+                            {item.academicTheory}
+                          </span>
+                        </div>
+                        <div className="flex flex-col sm:flex-row sm:items-start gap-2 pt-1 border-t border-slate-200/60">
+                          <strong className="text-slate-800 font-semibold shrink-0 sm:w-28">
+                            原型功能与代码映射：
+                          </strong>
+                          <span className="text-slate-700 font-mono text-[11px] leading-relaxed flex-1">
+                            {item.prototypeMapping}
+                          </span>
+                        </div>
+                        <div className="flex flex-col sm:flex-row sm:items-start gap-2 pt-1 border-t border-slate-200/60">
+                          <strong className="text-emerald-800 font-semibold shrink-0 sm:w-28">
+                            实机走查验证事实：
+                          </strong>
+                          <span className="text-emerald-700 font-medium leading-relaxed flex-1">
+                            {item.verifiedAction}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* 底部动作按钮栏 */}
+                      <div className="pt-1 flex flex-wrap items-center justify-between gap-2.5">
+                        <button
+                          onClick={() => {
+                            setActiveSubTab('report');
+                            if (item.id === 'rev-p0-1') scrollToChapter('sec3-2');
+                            else if (item.id === 'rev-p0-2') scrollToChapter('sec4-1');
+                            else if (item.id === 'rev-p0-3') scrollToChapter('sec3-2');
+                            else if (item.id === 'rev-p1-1') scrollToChapter('sec3-3');
+                            else if (item.id === 'rev-p1-3') scrollToChapter('sec2-3');
+                            else if (item.id === 'rev-p1-4') scrollToChapter('sec6-1');
+                            else if (item.id === 'rev-p1-2') scrollToChapter('sec5-2');
+                            else if (item.id === 'rev-p2-1') scrollToChapter('sec7-3');
+                            else scrollToChapter('ch3');
+                          }}
+                          className="px-3 py-1.5 rounded-md bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-medium flex items-center gap-1.5 transition border border-blue-200 cursor-pointer"
+                        >
+                          <FileText className="w-3.5 h-3.5 text-blue-600" />
+                          <span>查阅报告修订章节</span>
+                        </button>
+
+                        {/* 一键直达对应系统原型实机功能 */}
+                        {item.tabKey && (
+                          <button
+                            onClick={() => {
+                              if (item.tabKey === 'monthly') onNavigateToTab?.('vendor_collaboration');
+                              else if (item.tabKey === 'ai') onNavigateToTab?.('analytics');
+                              else if (item.tabKey === 'adverse') onNavigateToTab?.('adverse_events');
+                              else if (item.tabKey === 'prototype') onNavigateToTab?.('repair_closed_loop');
+                              else if (item.tabKey === 'emergency') onNavigateToTab?.('emergency_reserve');
+                              else if (item.tabKey === 'caoliao') onNavigateToTab?.('caoliao_integration');
+                              else if (item.tabKey === 'report') {
+                                setSelectedDrillDownIndicatorId(1);
+                                setShowIndicatorDrillDownModal(true);
+                              }
+                            }}
+                            className="px-3.5 py-1.5 rounded-md bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-semibold flex items-center gap-1.5 transition shadow-xs cursor-pointer active:scale-95"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            <span>
+                              {item.tabKey === 'monthly' && '进入系统【月度框架维修对账中心】实机体验'}
+                              {item.tabKey === 'ai' && '进入系统【AI六维健康雷达沙盘】实机体验'}
+                              {item.tabKey === 'adverse' && '进入系统【不良事件MDR直报工作台】实机体验'}
+                              {item.tabKey === 'prototype' && '进入系统【闭环维修与三单勾稽台】实机体验'}
+                              {item.tabKey === 'emergency' && '进入系统【全院急救应急调配池】实机体验'}
+                              {item.tabKey === 'caoliao' && '进入系统【草料二维码与混合云中台】实机体验'}
+                              {item.tabKey === 'report' && '打开【11项核心指标原子穿透下钻沙盘】'}
+                            </span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ==================== 选项卡 2：课题结项鉴定书（UI全面重构：A4单页/A3骑马钉拼版仿真） ==================== */}
         {activeSubTab === 'appraisal' && (
           <AppraisalDocumentView
@@ -1016,6 +1502,7 @@ export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
             maskText={maskText}
             teamMembers={teamMembers}
             onUpdateTeamMembers={handleUpdateTeamMembers}
+            onNavigateToTab={onNavigateToTab}
           />
         )}
 
@@ -1121,16 +1608,6 @@ export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
         {activeSubTab === 'application' && (
           <ProjectApplicationView
             isAnonymous={isAnonymous}
-            maskText={maskText}
-            teamMembers={teamMembers}
-          />
-        )}
-
-        {/* ==================== 选项卡 5：装订与报送规范（UI全面重构：实物仿真/附件1封面/档案袋/绿码通行证） ==================== */}
-        {activeSubTab === 'submission_kit' && (
-          <SubmissionKitView
-            isAnonymous={isAnonymous}
-            onToggleAnonymous={() => setIsAnonymous(!isAnonymous)}
             maskText={maskText}
             teamMembers={teamMembers}
           />
@@ -1353,6 +1830,15 @@ export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* 11项评价指标原子穿透下钻弹窗 */}
+      <IndicatorDrillDownModal
+        initialIndicatorId={selectedDrillDownIndicatorId}
+        isOpen={showIndicatorDrillDownModal}
+        onClose={() => setShowIndicatorDrillDownModal(false)}
+        onNavigateToTab={onNavigateToTab}
+        maskText={maskText}
+      />
     </div>
   );
 };

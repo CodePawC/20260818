@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import { ActiveTab, AuthUser } from '../types';
 import { canAccessTab, isHeadNurse, isDepartmentRestricted, getUserDepartment } from '../utils/authUtils';
+import { MedTechLogo } from './MedTechLogo';
 
 export type { ActiveTab };
 
@@ -209,13 +210,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {
           key: 'partners',
           label: '往来合作单位',
+          nurseLabel: '往来合作单位',
           icon: Building2,
           description: '原厂供应商、第三方维保与检测机构'
         },
         {
           key: 'vendor_collaboration',
           label: '外协维修协同',
-          nurseLabel: userDept ? `【${userDept}】外协协同` : '科室外协协同',
+          nurseLabel: '科室外协协同',
           icon: Scale,
           description: isNurse ? '本科室外协零修工单、换件查验与电子签字' : '供应商报价、多科室联合议价、发票与一案一档归档'
         }
@@ -268,10 +270,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
       items: [
         {
           key: 'system_ops',
-          label: '系统与运维',
-          nurseLabel: '系统与运维',
+          label: '系统运维中心',
+          nurseLabel: '系统运维中心',
           icon: Sliders,
-          description: 'AI大模型配置、数据库灾备管理、前端UI与草料二维码直通'
+          description: 'AI大模型配置、数据库灾备管理、前端UI与草料二维码一体化运维'
         }
       ]
     }
@@ -300,46 +302,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
   return (
     <aside 
       className={`flex-none bg-slate-900 text-slate-300 border-r border-slate-800/90 flex flex-col h-full shrink-0 select-none z-20 transition-all duration-300 ease-in-out relative ${
-        isCollapsed ? 'w-18' : 'w-64'
+        isCollapsed ? 'w-18' : 'w-72'
       }`}
       aria-label="系统主导航菜单"
     >
-      {/* 1. 规范化系统品牌区 (规范名称，去除冗余版本号与闪烁点) */}
-      <div className="h-16 flex items-center px-3.5 border-b border-slate-800 bg-slate-950/90 gap-2.5 shrink-0 overflow-hidden justify-between">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div 
-            onClick={() => setActiveTab('dashboard')}
-            className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-blue-950/50 shrink-0 border border-blue-400/30 cursor-pointer hover:opacity-90 transition"
-            title="返回工作台监控大盘"
-          >
-            <ShieldCheck className="w-5 h-5 text-white" />
-          </div>
-          
-          {!isCollapsed && (
-            <div className="min-w-0 flex-1">
-              <div className="text-[13px] font-bold text-white tracking-tight whitespace-nowrap leading-tight">
-                医学装备管理系统
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* 折叠/展开快捷按钮 */}
-        <button
-          type="button"
-          onClick={toggleCollapsed}
-          className={`p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer shrink-0 ${
-            isCollapsed ? 'mx-auto' : ''
-          }`}
-          title={isCollapsed ? '展开完整菜单栏' : '收起菜单栏为图标模式'}
-          aria-label={isCollapsed ? '展开完整菜单栏' : '收起菜单栏为图标模式'}
+      {/* 1. 规范化系统品牌区（对齐研究报告：MED-TECH OS 医学装备全生命周期闭环管理系统，高辨识度专属专业LOGO） */}
+      <div className="h-16 flex items-center px-4 border-b border-slate-800 bg-slate-950/95 shrink-0">
+        <div 
+          onClick={() => setActiveTab('dashboard')}
+          className="flex items-center gap-2.5 min-w-0 cursor-pointer hover:opacity-95 transition w-full"
+          title="MED-TECH OS 医学装备全生命周期闭环管理系统"
         >
           {isCollapsed ? (
-            <PanelLeftOpen className="w-4 h-4 text-blue-400" />
+            <div className="mx-auto flex items-center justify-center">
+              <MedTechLogo size="md" variant="icon" />
+            </div>
           ) : (
-            <PanelLeftClose className="w-4 h-4 text-slate-400 hover:text-white" />
+            <MedTechLogo size="md" variant="horizontal" />
           )}
-        </button>
+        </div>
       </div>
 
       {/* 2. 规范快捷搜索框 (仅在展开时显示，去除了无效的多余展开/收起按钮行) */}
@@ -468,11 +449,27 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
       </nav>
 
-      {/* 底部已根据需求完全移除：
-          1. 删除了「7×24H 医工急救热线」卡片
-          2. 删除了与右上角完全重复的「当前登录人员」信息卡片
-          3. 使得菜单栏回归纯粹、规范、专注的导航体验
-      */}
+      {/* 底部折叠/展开操作栏（符合桌面端规范，使顶部品牌区保持独立纯粹） */}
+      <div className="p-2.5 border-t border-slate-800/80 bg-slate-950/60 shrink-0">
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition cursor-pointer text-xs font-medium ${
+            isCollapsed ? 'justify-center px-0' : ''
+          }`}
+          title={isCollapsed ? '展开完整导航菜单' : '收起导航菜单为图标模式'}
+          aria-label={isCollapsed ? '展开完整导航菜单' : '收起导航菜单为图标模式'}
+        >
+          {isCollapsed ? (
+            <PanelLeftOpen className="w-4 h-4 text-blue-400" />
+          ) : (
+            <>
+              <PanelLeftClose className="w-4 h-4 text-slate-400" />
+              <span>收起侧边菜单</span>
+            </>
+          )}
+        </button>
+      </div>
     </aside>
   );
 };

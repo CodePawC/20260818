@@ -150,6 +150,8 @@ export const Header: React.FC<HeaderProps> = ({
         return { title: '系统更新与前端 UI 视觉设计配置', badge: '主题色板定制 / 院区品牌标识 / 热插拔特性开关 / 在线热更新', category: '系统与运维' };
       case 'caoliao_integration':
         return { title: '草料二维码官方数据库联动接口', badge: '阿里云 RDS · 1602个活码 · 现场扫码与医院工单实时联动', category: '系统与运维' };
+      case 'caoliao_sync_settings':
+        return { title: '草料二维码同步设置', badge: 'OpenAPI 凭据 · API Key · 分类目录映射规则 · 双向闭环', category: '系统设置与运维' };
       default:
         return { title: '设备资产台账', badge: '全院设备资产全息管理', category: '技术资产与库房' };
     }
@@ -167,7 +169,7 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="w-1.5 h-1.5 rounded-full bg-blue-600"></span>
             <span>五莲县人民医院</span>
             <span className="text-slate-300">/</span>
-            <span className="text-slate-600">{currentUser.organization || '医学工程保障中心'}</span>
+            <span className="text-slate-600">医学装备全生命周期闭环管理系统 (MED-TECH OS)</span>
           </div>
           <div className="flex items-center gap-2 mt-0.5">
             <h1 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight truncate whitespace-nowrap">

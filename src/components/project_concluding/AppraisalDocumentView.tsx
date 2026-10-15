@@ -19,7 +19,8 @@ import {
   ClipboardList, 
   X,
   BookOpen,
-  FileText
+  FileText,
+  Sparkles
 } from 'lucide-react';
 import { 
   PROJECT_METADATA, 
@@ -34,12 +35,16 @@ import {
   parsePastedTeamText 
 } from '../../utils/projectTeamStore';
 
+import { ActiveTab } from '../../types';
+import { AppraisalActionWorkbench } from './AppraisalActionWorkbench';
+
 interface AppraisalDocumentViewProps {
   isAnonymous: boolean;
   onToggleAnonymous: () => void;
   maskText: (text: string) => string;
   teamMembers?: ResearchTeamMember[];
   onUpdateTeamMembers?: (members: ResearchTeamMember[]) => void;
+  onNavigateToTab?: (tab: ActiveTab) => void;
 }
 
 export const AppraisalDocumentView: React.FC<AppraisalDocumentViewProps> = ({
@@ -47,8 +52,11 @@ export const AppraisalDocumentView: React.FC<AppraisalDocumentViewProps> = ({
   onToggleAnonymous,
   maskText,
   teamMembers,
-  onUpdateTeamMembers
+  onUpdateTeamMembers,
+  onNavigateToTab
 }) => {
+  // 浏览子板块：鉴定书规范印件 vs 评审意见逐项完善沙盘
+  const [docSubTab, setDocSubTab] = useState<'official_doc' | 'perfection_workbench'>('official_doc');
   // 浏览模式：默认采用分页模式浏览（避免滚动条）
   const [viewMode, setViewMode] = useState<'pagination' | 'continuous' | 'a3_spread'>('pagination');
   const [activePage, setActivePage] = useState<number>(1);
@@ -166,12 +174,34 @@ export const AppraisalDocumentView: React.FC<AppraisalDocumentViewProps> = ({
     <div className="flex-1 flex flex-col h-full bg-slate-200/90 select-text overflow-y-auto">
       {/* 顶部公文工具控制栏 */}
       <div className="sticky top-0 z-30 bg-white/95 backdrop-blur-xs border-b border-slate-300 px-4 sm:px-8 py-2.5 flex flex-wrap items-center justify-between gap-3 shadow-xs">
-        <div className="flex items-center gap-3">
-          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-sm text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300">
-            <Award className="w-3.5 h-3.5 text-amber-700" />
-            官方制式结项鉴定书
-          </span>
-          <div className="hidden sm:flex items-center gap-1 text-xs text-slate-500 font-mono">
+        <div className="flex flex-wrap items-center gap-3">
+          {/* 子板块切换 */}
+          <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs">
+            <button
+              onClick={() => setDocSubTab('official_doc')}
+              className={`px-3 py-1.5 rounded-md font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                docSubTab === 'official_doc'
+                  ? 'bg-amber-600 text-white shadow-xs'
+                  : 'text-slate-700 hover:text-slate-900'
+              }`}
+            >
+              <Award className="w-3.5 h-3.5" />
+              <span>官方制式结项鉴定书（4页规范印件）</span>
+            </button>
+            <button
+              onClick={() => setDocSubTab('perfection_workbench')}
+              className={`px-3 py-1.5 rounded-md font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                docSubTab === 'perfection_workbench'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-700 hover:text-slate-900'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span>评审意见逐项完善与持续演练工作台（3项不足+3项深入研究）</span>
+            </button>
+          </div>
+
+          <div className="hidden lg:flex items-center gap-1 text-xs text-slate-500 font-mono">
             <span>编号：<strong>{isAnonymous ? '【保密编号】' : PROJECT_METADATA.projectNo}</strong></span>
             <span>·</span>
             <span>立项：<strong>{PROJECT_METADATA.approvalDate}</strong></span>
@@ -265,9 +295,18 @@ export const AppraisalDocumentView: React.FC<AppraisalDocumentViewProps> = ({
         </div>
       </div>
 
-      {/* 分页模式控制条（专用于分页浏览，不使用页面纵向滚动条） */}
-      {viewMode === 'pagination' && (
-        <div className="sticky top-[49px] z-20 bg-slate-100/95 backdrop-blur-xs border-b border-slate-300 px-4 py-2 flex flex-wrap items-center justify-between gap-3 shadow-2xs">
+      {/* 分页模式控制条与正文呈现区 / 评审完善沙盘 */}
+      {docSubTab === 'perfection_workbench' ? (
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-100 flex justify-center">
+          <div className="max-w-6xl w-full">
+            <AppraisalActionWorkbench onNavigateToTab={onNavigateToTab} maskText={maskText} />
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* 分页模式控制条（专用于分页浏览，不使用页面纵向滚动条） */}
+          {viewMode === 'pagination' && (
+            <div className="sticky top-[49px] z-20 bg-slate-100/95 backdrop-blur-xs border-b border-slate-300 px-4 py-2 flex flex-wrap items-center justify-between gap-3 shadow-2xs">
           <div className="flex items-center gap-2">
             <button
               onClick={() => setActivePage(p => Math.max(1, p - 1))}
@@ -564,9 +603,9 @@ export const AppraisalDocumentView: React.FC<AppraisalDocumentViewProps> = ({
                     </h2>
                   </div>
 
-                  {/* 总结报告正文：第四、五部分 */}
+                  {/* 总结报告正文：第四、五、六部分（含尚需深入研究的问题） */}
                   <div className="mt-4 space-y-4 text-xs font-serif text-slate-800 leading-relaxed text-justify">
-                    {OFFICIAL_APPRAISAL_SUMMARY_REPORT.sections.slice(3, 5).map((section, sIdx) => (
+                    {OFFICIAL_APPRAISAL_SUMMARY_REPORT.sections.slice(3).map((section, sIdx) => (
                       <div key={sIdx} className="space-y-1.5 pb-2 border-b border-slate-100 last:border-b-0">
                         <h3 className="font-bold text-slate-950 font-sans text-sm flex items-center gap-1.5">
                           <span className="w-5 h-5 rounded-full bg-slate-900 text-white inline-flex items-center justify-center text-xs">
@@ -809,6 +848,8 @@ export const AppraisalDocumentView: React.FC<AppraisalDocumentViewProps> = ({
         )}
 
       </div>
+        </>
+      )}
 
       {/* 成员在线查看与核准弹窗 */}
       {showEditTeamModal && (

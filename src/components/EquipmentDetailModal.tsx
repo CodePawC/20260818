@@ -50,7 +50,9 @@ import {
   Camera,
   Upload,
   Maximize2,
-  Minimize2
+  Minimize2,
+  Video,
+  Play
 } from 'lucide-react';
 import { loadStoredWorkOrders } from '../utils/dispatchData';
 import { EngineeringWorkOrder } from '../types/dispatchTypes';
@@ -163,7 +165,25 @@ export const EquipmentDetailModal: React.FC<EquipmentDetailModalProps> = ({
   // 维修履历专用状态：流转追踪弹窗、打印弹窗与二级过滤
   const [selectedTrackingOrder, setSelectedTrackingOrder] = useState<EngineeringWorkOrder | null>(null);
   const [selectedPrintOrder, setSelectedPrintOrder] = useState<EngineeringWorkOrder | null>(null);
-  const [repairSubTab, setRepairSubTab] = useState<'all' | 'vendor_collab' | 'work_orders' | 'routine'>('all');
+  const [repairSubTab, setRepairSubTab] = useState<'all' | 'vendor_collab' | 'work_orders' | 'routine' | 'caoliao'>('all');
+  const [caoliaoLiveRepairs, setCaoliaoLiveRepairs] = useState<any[]>([]);
+  const [detailVideoModalUrl, setDetailVideoModalUrl] = useState<string | null>(null);
+
+  // 实时直连草料 RDS 数据库
+  useEffect(() => {
+    if (!equipment) return;
+    const lookupKey = equipment.codeId || equipment.id;
+    if (lookupKey) {
+      fetch(`/api/caoliao/equipment-repairs/${lookupKey}`)
+        .then(res => res.json())
+        .then(json => {
+          if (json.success && json.repairs) {
+            setCaoliaoLiveRepairs(json.repairs);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [equipment?.id, equipment?.codeId]);
 
   // 获取与当前设备匹配的工单全集
   const allStoredOrders = useMemo(() => {
@@ -256,6 +276,7 @@ export const EquipmentDetailModal: React.FC<EquipmentDetailModalProps> = ({
     (equipment.repairRecords?.length || 0) +
     totalLoanRecords +
     (equipment.statusLogs?.length || 0) +
+    caoliaoLiveRepairs.filter(cl => !(equipment.repairRecords || []).some(r => r.recordNo === cl.recordNo || r.id === `REP-CL-${cl.recordNo || cl.recordId}`)).length +
     (equipment.status === '停用/报废' ? 1 : 0);
 
   const catInfo = resolveMainCategory(equipment.categoryNo, equipment.category, `${equipment.name || ''} ${equipment.level2Category || ''} ${equipment.level1Category || ''}`);
@@ -383,9 +404,16 @@ export const EquipmentDetailModal: React.FC<EquipmentDetailModalProps> = ({
                       className="text-emerald-700 hover:text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-1.5 py-0.5 rounded text-[11px] inline-flex items-center gap-1 transition"
                       title="打开草料云端官方活码"
                     >
+                      <QrCode className="w-3 h-3 text-emerald-600" />
                       <span>草料活码</span>
-                      <ExternalLink className="w-3 h-3" />
+                      <ExternalLink className="w-2.5 h-2.5" />
                     </a>
+                  )}
+                  {caoliaoLiveRepairs.length > 0 && (
+                    <span className="bg-rose-50 text-rose-700 border border-rose-200 px-1.5 py-0.5 rounded text-[11px] font-bold flex items-center gap-1" title="草料官方数据库检测到现场扫码报修记录">
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+                      <span>草料扫码报修: {caoliaoLiveRepairs.length}条</span>
+                    </span>
                   )}
                 </span>
                 {equipment.internalNo && (
@@ -1942,6 +1970,19 @@ export const EquipmentDetailModal: React.FC<EquipmentDetailModalProps> = ({
                   >
                     常规维保/巡检档案 ({(equipment.repairRecords || []).length})
                   </button>
+                  {equipment.codeId && (
+                    <button
+                      onClick={() => setRepairSubTab('caoliao')}
+                      className={`px-3 py-1 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1 ${
+                        repairSubTab === 'caoliao'
+                          ? 'bg-emerald-600 text-white shadow-2xs'
+                          : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100 border border-emerald-300'
+                      }`}
+                    >
+                      <QrCode className="w-3.5 h-3.5" />
+                      <span>草料扫码直报 ({caoliaoLiveRepairs.length || (equipment.repairRecords || []).filter(r => r.source === 'caoliao' || r.repairType?.includes('草料')).length})</span>
+                    </button>
+                  )}
                 </div>
 
                 <button
@@ -2248,60 +2289,154 @@ export const EquipmentDetailModal: React.FC<EquipmentDetailModalProps> = ({
                     </div>
                   )}
 
-                  {/* ====== 2. 常规维保/巡检历史记录列表 ====== */}
-                  {(repairSubTab === 'all' || repairSubTab === 'routine') && (equipment.repairRecords || []).length > 0 && (
+                  {/* ====== 2. 常规维保/巡检历史记录与草料扫码报修列表 ====== */}
+                  {(repairSubTab === 'all' || repairSubTab === 'routine' || repairSubTab === 'caoliao') && (
                     <div className="space-y-3">
-                      <div className="flex items-center justify-between">
+                      <div className="flex items-center justify-between flex-wrap gap-2">
                         <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                           <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
-                          <span>常规维保、预防性保养及校准档案 ({(equipment.repairRecords || []).length})</span>
+                          <span>常规维保、预防性保养及草料扫码直报档案 ({(equipment.repairRecords || []).length + caoliaoLiveRepairs.filter(cl => !(equipment.repairRecords || []).some(r => r.id === `REP-CL-${cl.recordNo || cl.recordId}`)).length})</span>
                         </span>
                         <span className="text-2xs text-slate-400">
-                          历史台账自维记录与原厂定期巡检存档
+                          包含院内自维、原厂巡检及阿里云 RDS 草料二维码现场实时报修
                         </span>
                       </div>
 
-                      {equipment.repairRecords?.map((record) => (
-                        <div key={record.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-2.5">
-                          <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                            <div className="flex items-center gap-2">
-                              <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-                                record.repairType === '紧急故障维修' ? 'bg-rose-100 text-rose-700' : 'bg-blue-100 text-blue-700'
-                              }`}>
-                                {record.repairType}
-                              </span>
-                              <span className="font-mono text-xs text-slate-400">{record.id}</span>
-                              <span className="text-xs text-slate-500 font-medium">{record.faultDate}</span>
+                      {/* 渲染本地设备记录 */}
+                      {equipment.repairRecords
+                        ?.filter(record => {
+                          if (repairSubTab === 'caoliao') return record.repairType?.includes('草料') || record.source === 'caoliao' || record.id?.startsWith('REP-CL');
+                          if (repairSubTab === 'routine') return !record.repairType?.includes('草料') && record.source !== 'caoliao';
+                          return true;
+                        })
+                        .map((record) => {
+                          const isCaoliao = record.repairType?.includes('草料') || record.source === 'caoliao' || record.id?.startsWith('REP-CL');
+                          return (
+                            <div key={record.id} className={`p-4 rounded-xl border shadow-2xs space-y-2.5 ${
+                              isCaoliao ? 'bg-emerald-50/30 border-emerald-300' : 'bg-white border-slate-200'
+                            }`}>
+                              <div className="flex items-center justify-between border-b border-slate-100 pb-2 flex-wrap gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  {isCaoliao ? (
+                                    <span className="px-2 py-0.5 rounded text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                                      <QrCode className="w-3.5 h-3.5 text-emerald-600" />
+                                      <span>草料二维码现场报修</span>
+                                    </span>
+                                  ) : (
+                                    <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                                      record.repairType === '紧急故障维修' ? 'bg-rose-100 text-rose-700' : 'bg-blue-100 text-blue-700'
+                                    }`}>
+                                      {record.repairType}
+                                    </span>
+                                  )}
+                                  <span className="font-mono text-xs text-slate-500 font-bold bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">{record.id}</span>
+                                  <span className="text-xs text-slate-500 font-medium">{record.faultDate}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-2xs font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 flex items-center gap-1">
+                                    <Check className="w-3 h-3 text-emerald-600 stroke-[3]" />
+                                    <span>质检验收合格 (5.0★)</span>
+                                  </span>
+                                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                                    record.status === '已完成' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                                  }`}>
+                                    {record.status}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <p className="text-xs text-slate-800 font-medium">
+                                故障现象/事由: <span className="text-slate-700">{record.faultDescription}</span>
+                              </p>
+
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs text-slate-600 bg-slate-50/90 p-2.5 rounded-lg border border-slate-100">
+                                <div>{isCaoliao ? '报修人员' : '维保工程师'}: <strong className="text-slate-800">{record.reporterName || record.technician}</strong></div>
+                                {isCaoliao && record.reporterPhone ? (
+                                  <div>联系手机: <strong className="text-slate-800 font-mono">{record.reporterPhone}</strong></div>
+                                ) : (
+                                  <div>维修支出: <strong className="text-slate-900 font-mono notranslate" translate="no">￥{(record.cost || 0).toLocaleString()}</strong></div>
+                                )}
+                                <div>更换配件: <strong className="text-slate-800">{record.partsReplaced || '无'}</strong></div>
+                                <div>完成日期: <strong className="text-slate-800 font-mono">{record.completionDate || '推进中'}</strong></div>
+                              </div>
+
+                              {/* 现场多媒体佐证 */}
+                              {(record.videoUrl || record.photoUrl) && (
+                                <div className="flex items-center justify-between bg-emerald-100/40 p-2.5 rounded-lg border border-emerald-200 text-xs flex-wrap gap-2">
+                                  <span className="text-emerald-900 font-medium flex items-center gap-1">
+                                    <Video className="w-3.5 h-3.5 text-emerald-700" />
+                                    <span>扫码现场填报录像/照片凭据</span>
+                                  </span>
+                                  <div className="flex items-center gap-2">
+                                    {record.videoUrl && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setDetailVideoModalUrl(record.videoUrl!)}
+                                        className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded text-2xs font-bold flex items-center gap-1 transition cursor-pointer"
+                                      >
+                                        <Play className="w-3 h-3 fill-current" />
+                                        <span>播放现场故障视频</span>
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+
+                              <p className="text-xs text-slate-600 pt-1">
+                                <strong>修复方案与结论:</strong> {record.resolution}
+                              </p>
                             </div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-2xs font-mono text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 flex items-center gap-1">
-                                <Check className="w-3 h-3 text-emerald-600 stroke-[3]" />
-                                <span>质检验收合格 (5.0★)</span>
-                              </span>
-                              <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
-                                record.status === '已完成' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
-                              }`}>
-                                {record.status}
+                          );
+                        })}
+
+                      {/* 若本地未包含该草料记录，实时补充渲染从 RDS 直查到的工单 */}
+                      {caoliaoLiveRepairs
+                        .filter(cl => !(equipment.repairRecords || []).some(r => r.id === `REP-CL-${cl.recordNo || cl.recordId}`))
+                        .map(cl => (
+                          <div key={cl.recordId} className="p-4 rounded-xl border border-emerald-300 bg-emerald-50/40 shadow-2xs space-y-2.5">
+                            <div className="flex items-center justify-between border-b border-emerald-200 pb-2 flex-wrap gap-2">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="px-2 py-0.5 rounded text-xs font-bold bg-emerald-200 text-emerald-900 border border-emerald-400 flex items-center gap-1">
+                                  <QrCode className="w-3.5 h-3.5 text-emerald-700" />
+                                  <span>草料二维码官方实时直报 (RDS)</span>
+                                </span>
+                                <span className="font-mono text-xs text-slate-700 font-bold bg-white px-1.5 py-0.5 rounded border border-slate-200">单号: {cl.recordNo || cl.recordId}</span>
+                                <span className="text-xs text-slate-500 font-medium">{cl.recordTime}</span>
+                              </div>
+                              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                                {cl.processStatus || '待响应'}
                               </span>
                             </div>
+
+                            <p className="text-xs text-slate-800 font-medium">
+                              故障表现: <span className="text-slate-900 font-bold">{cl.faultDescription}</span>
+                            </p>
+
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs text-slate-600 bg-white p-2.5 rounded-lg border border-emerald-100">
+                              <div>现场报修人: <strong className="text-slate-900">{cl.reporterName}</strong></div>
+                              <div>联系手机: <strong className="text-slate-900 font-mono">{cl.reporterPhone || '未留'}</strong></div>
+                              <div>渠道来源: <strong className="text-slate-800">{cl.createSource}</strong></div>
+                              <div>活码ID: <strong className="text-emerald-700 font-mono">{cl.codeId}</strong></div>
+                            </div>
+
+                            {cl.videoUrl && (
+                              <div className="flex items-center justify-between bg-emerald-100/50 p-2.5 rounded-lg border border-emerald-200 text-xs flex-wrap gap-2">
+                                <span className="text-emerald-950 font-medium flex items-center gap-1">
+                                  <Video className="w-3.5 h-3.5 text-rose-600" />
+                                  <span>手机移动端实拍故障视频已就绪</span>
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setDetailVideoModalUrl(cl.videoUrl)}
+                                  className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded text-2xs font-bold flex items-center gap-1 transition cursor-pointer"
+                                >
+                                  <Play className="w-3 h-3 fill-current" />
+                                  <span>播放现场故障视频 (MP4)</span>
+                                </button>
+                              </div>
+                            )}
                           </div>
-
-                          <p className="text-xs text-slate-800 font-medium">
-                            故障现象/事由: <span className="text-slate-700">{record.faultDescription}</span>
-                          </p>
-
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs text-slate-600 bg-slate-50 p-2.5 rounded-lg">
-                            <div>维保工程师: <strong className="text-slate-800">{record.technician}</strong></div>
-                            <div>维修支出: <strong className="text-slate-900 font-mono notranslate" translate="no">￥{(record.cost || 0).toLocaleString()}</strong></div>
-                            <div>更换配件: <strong className="text-slate-800">{record.partsReplaced || '无'}</strong></div>
-                            <div>完成日期: <strong className="text-slate-800 font-mono">{record.completionDate || '推进中'}</strong></div>
-                          </div>
-
-                          <p className="text-xs text-slate-600 pt-1">
-                            <strong>修复方案与结论:</strong> {record.resolution}
-                          </p>
-                        </div>
-                      ))}
+                        ))}
                     </div>
                   )}
                 </div>
@@ -3198,6 +3333,52 @@ export const EquipmentDetailModal: React.FC<EquipmentDetailModalProps> = ({
         initialViewMode={acceptanceModalInitialTab}
         onClose={() => setShowAcceptanceModal(false)}
       />
+
+      {/* 草料扫码报修现场故障录像弹窗 */}
+      {detailVideoModalUrl && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl overflow-hidden max-w-2xl w-full shadow-2xl space-y-3">
+            <div className="p-4 bg-slate-800/90 border-b border-slate-700 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-white font-bold text-sm">
+                <Video className="w-4 h-4 text-rose-500" />
+                <span>草料移动端现场扫码填报故障视频 (MP4)</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDetailVideoModalUrl(null)}
+                className="w-7 h-7 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 flex items-center justify-center transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4">
+              <div className="rounded-xl overflow-hidden bg-black flex items-center justify-center aspect-video">
+                <video
+                  controls
+                  autoPlay
+                  src={detailVideoModalUrl}
+                  className="max-h-full max-w-full"
+                >
+                  您的浏览器暂不支持此视频播放。
+                </video>
+              </div>
+              <div className="flex items-center justify-between text-xs text-slate-400 mt-3">
+                <span className="truncate max-w-md font-mono text-[11px]">{detailVideoModalUrl}</span>
+                <a
+                  href={detailVideoModalUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-emerald-400 hover:underline flex items-center gap-1 shrink-0 font-bold"
+                >
+                  <span>新窗口播放</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

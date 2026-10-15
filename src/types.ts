@@ -19,7 +19,43 @@ export interface MetrologyCatalogueItem {
   notes?: string;
 }
 
-export type ActiveTab = 'welcome' | 'ledger' | 'dashboard' | 'maintenance' | 'repairs' | 'dispatch' | 'parts_inventory' | 'adverse_events' | 'emergency_reserve' | 'tracking' | 'analytics' | 'roi' | 'ai' | 'partners' | 'master_data' | 'approvals' | 'mobile_inspection' | 'vendor_collaboration' | 'factory_repair_workflow' | 'repair_closed_loop' | 'regulations' | 'project_concluding' | 'ai_config' | 'database_backup' | 'system_update' | 'system_ops' | 'caoliao_integration';
+export type ActiveTab = 'welcome' | 'ledger' | 'dashboard' | 'maintenance' | 'repairs' | 'dispatch' | 'parts_inventory' | 'adverse_events' | 'emergency_reserve' | 'tracking' | 'analytics' | 'roi' | 'ai' | 'partners' | 'master_data' | 'approvals' | 'mobile_inspection' | 'vendor_collaboration' | 'factory_repair_workflow' | 'repair_closed_loop' | 'regulations' | 'project_concluding' | 'ai_config' | 'database_backup' | 'system_update' | 'system_ops' | 'caoliao_integration' | 'caoliao_sync_settings';
+
+// ==================== 草料二维码接口对接与分类映射规则配置 ====================
+export interface CaoliaoCategoryMappingRule {
+  id: string;
+  sourceCategoryCode: string; // 院内分类代码 (e.g. "07", "08", "06", "10")
+  sourceCategoryName: string; // 院内分类名称 (e.g. "医用诊察和监护器械")
+  targetCaoliaoDirectory: string; // 草料目标分类目录 (e.g. "医用诊察和监护器械", "医疗设备")
+  targetTemplateId: string; // 草料活码模板ID (e.g. "131886095")
+  targetTemplateName: string; // 草料活码模板名称 (e.g. "医疗设备标准码")
+  qrColorTheme: 'emerald' | 'blue' | 'rose' | 'amber' | 'purple' | 'slate'; // 标签主题色
+  labelSpec: '60x40' | '80x50' | '100x70' | 'compact_round'; // 标签打印规格
+  repairFormId: string; // 关联草料报修表单ID (e.g. "table_d233")
+  autoSyncRepair: boolean; // 是否自动拉取该分类的报修单
+  enabled: boolean; // 是否启用该映射规则
+  priority: number; // 规则优先级
+  matchedCount?: number; // 院内匹配到的设备台数
+  notes?: string; // 备注说明
+}
+
+export interface CaoliaoSyncConfig {
+  apiKey: string; // 草料 OpenAPI 密钥
+  corpId: string; // 草料企业租户 ID (e.g. "cli_9833874")
+  apiBaseUrl: string; // 接口接入地址 (e.g. "https://openapi.clewm.net/v2")
+  connectionMode: 'rds_and_api' | 'api_only' | 'rds_direct'; // 对接模式
+  autoSyncIntervalMinutes: number; // 定时同步频率 (分钟: 0为手动, 15, 30, 60, 1440)
+  enableAutoPullRepairs: boolean; // 自动拉取现场扫码报修
+  enableAutoPushStatus: boolean; // 自动将院内维保状态回写草料活码
+  enableAutoCreateQr: boolean; // 自动为新设备建码
+  defaultDirectory: string; // 默认草料目录
+  defaultTemplateId: string; // 默认草料模板 ID
+  categoryMappings: CaoliaoCategoryMappingRule[]; // 分类映射规则
+  lastSyncTime?: string; // 最近同步时间
+  lastTestTime?: string; // 最近测试时间
+  lastTestStatus?: 'success' | 'failed' | 'untested'; // 最近测试状态
+  lastTestMessage?: string; // 测试反馈
+}
 
 // ==================== 移动扫码巡检与快速盘点 (Mobile Inspection & Inventory Audit) ====================
 export type InspectionAuditResult = 'normal_present' | 'location_discrepancy' | 'fault_reported' | 'accessory_missing' | 'calibration_expired';

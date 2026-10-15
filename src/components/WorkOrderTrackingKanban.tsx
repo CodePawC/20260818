@@ -25,7 +25,8 @@ import {
   Layers,
   Sparkles,
   Check,
-  HelpCircle
+  HelpCircle,
+  QrCode
 } from 'lucide-react';
 
 interface WorkOrderTrackingKanbanProps {
@@ -250,6 +251,12 @@ export const WorkOrderTrackingKanban: React.FC<WorkOrderTrackingKanbanProps> = (
                             <span className="font-mono text-2xs font-bold text-slate-700 shrink-0">
                               {order.id}
                             </span>
+                            {(order.source === 'caoliao' || order.id.startsWith('WO-CL-')) && (
+                              <span className="px-1 py-0.2 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0 flex items-center gap-0.5" title="草料微信扫码报修">
+                                <QrCode className="w-2.5 h-2.5" />
+                                <span>草料</span>
+                              </span>
+                            )}
                             <span className="text-slate-300 text-2xs">·</span>
                             <span className="text-2xs font-medium text-slate-600 truncate">
                               {order.department}

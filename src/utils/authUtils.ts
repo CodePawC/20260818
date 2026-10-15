@@ -300,7 +300,8 @@ export function canAccessTab(user: AuthUser | null | undefined, tab: ActiveTab):
     case 'database_backup':
     case 'system_update':
     case 'caoliao_integration':
-      // 系统运维配置、AI模型配置与数据备份、草料二维码接口：医工管理与系统运维均可访问配置
+    case 'caoliao_sync_settings':
+      // 系统运维配置、AI模型配置与数据备份、草料二维码接口及同步设置：医工管理与系统运维均可访问配置
       return true;
 
     default:

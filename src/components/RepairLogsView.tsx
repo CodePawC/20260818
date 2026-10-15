@@ -29,8 +29,11 @@ import {
   ChevronRight,
   UserCheck,
   Phone,
-  FileText
+  FileText,
+  QrCode
 } from 'lucide-react';
+import { CaoliaoRepairIntegrationOverview } from './CaoliaoRepairIntegrationOverview';
+import { ActiveTab } from '../types';
 import { isHeadNurse, isClinicalStaff, isDepartmentRestricted, getUserDepartment, canAccessTab } from '../utils/authUtils';
 import { ApprovalApplication } from '../types/approvalTypes';
 import { Pagination } from './Pagination';
@@ -80,6 +83,8 @@ interface RepairLogsViewProps {
   onViewPartner?: (partnerName: string) => void;
   onNavigateToApprovals?: (data: Partial<ApprovalApplication>) => void;
   onOpenStatusChange?: (device: MedicalEquipment) => void;
+  onViewEquipmentDetails?: (item: any, initialTab?: string) => void;
+  onNavigateToTab?: (tab: ActiveTab) => void;
 }
 
 export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
@@ -89,8 +94,11 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
   onOpenAiDiagnose,
   onViewPartner,
   onNavigateToApprovals,
-  onOpenStatusChange
+  onOpenStatusChange,
+  onViewEquipmentDetails,
+  onNavigateToTab
 }) => {
+  const [showCaoliaoOverview, setShowCaoliaoOverview] = useState<boolean>(true);
   const [searchKey, setSearchKey] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<'ALL' | '处理中' | '待配件' | '已完成' | 'PENDING_SIGN'>('ALL');
   const [selectedCategory, setSelectedCategory] = useState<'ALL' | 'framework_sporadic' | 'standard'>('ALL');
@@ -574,6 +582,21 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
 
           <button
             type="button"
+            onClick={() => setShowCaoliaoOverview(!showCaoliaoOverview)}
+            className={`px-2.5 py-1.5 rounded-md text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-2xs ${
+              showCaoliaoOverview
+                ? 'bg-teal-700 text-white hover:bg-teal-800'
+                : 'bg-teal-50 text-teal-800 border border-teal-300 hover:bg-teal-100'
+            }`}
+            title="查看草料二维码扫码报修实时接入状态与智能预处理建议"
+          >
+            <QrCode className="w-3.5 h-3.5 text-teal-300" />
+            <span>草料维保集成概览</span>
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+          </button>
+
+          <button
+            type="button"
             onClick={onOpenRepairModal}
             className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition active:scale-95 cursor-pointer"
           >
@@ -619,6 +642,22 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
             <span>生成财务请款单</span>
             <ArrowUpRight className="w-3 h-3" />
           </button>
+        </div>
+      )}
+
+      {/* 草料二维码维保集成概览组件 (直接显示最近接入的草料报修实时状态与预处理建议) */}
+      {showCaoliaoOverview && (
+        <div className="mx-3 mt-2.5 mb-1.5">
+          <CaoliaoRepairIntegrationOverview
+            currentUser={currentUser}
+            equipmentList={equipmentList}
+            onViewEquipmentDetails={onViewEquipmentDetails}
+            onOpenAiDiagnose={onOpenAiDiagnose}
+            onNavigateToTab={onNavigateToTab}
+            onRepairSynced={() => {
+              // 重新同步或静默更新
+            }}
+          />
         </div>
       )}
 

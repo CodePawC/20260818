@@ -13,30 +13,54 @@ import {
   Settings,
   Server,
   ArrowRight,
-  QrCode
+  QrCode,
+  KeyRound,
+  Link2
 } from 'lucide-react';
 import { AiConfigView } from './AiConfigView';
 import { DatabaseBackupView } from './DatabaseBackupView';
 import { SystemUpdateConfigView } from './SystemUpdateConfigView';
 import { CaoliaoIntegrationView } from './CaoliaoIntegrationView';
+import { CaoliaoSyncSettingsView } from './CaoliaoSyncSettingsView';
 import { ActiveTab } from '../types';
 
 interface SystemOpsUnifiedViewProps {
-  initialSubTab?: 'ai_config' | 'database_backup' | 'system_update' | 'caoliao_integration';
+  initialSubTab?: 'ai_config' | 'database_backup' | 'system_update' | 'caoliao_hub' | 'caoliao_integration' | 'caoliao_sync_settings';
   onNavigateTab?: (tab: ActiveTab) => void;
+  onViewEquipmentDetails?: (item: any, initialTab?: string) => void;
 }
 
 export const SystemOpsUnifiedView: React.FC<SystemOpsUnifiedViewProps> = ({
   initialSubTab = 'ai_config',
-  onNavigateTab
+  onNavigateTab,
+  onViewEquipmentDetails
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'ai_config' | 'database_backup' | 'system_update' | 'caoliao_integration'>(() => {
-    return initialSubTab;
+  // 顶层四大运维支柱 Tab
+  const [activeSubTab, setActiveSubTab] = useState<'ai_config' | 'database_backup' | 'system_update' | 'caoliao_hub'>(() => {
+    if (initialSubTab === 'caoliao_integration' || initialSubTab === 'caoliao_sync_settings' || initialSubTab === 'caoliao_hub') {
+      return 'caoliao_hub';
+    }
+    return (initialSubTab as any) || 'ai_config';
+  });
+
+  // 草料二维码一体化专区内的子切换：'sync_settings' (OpenAPI凭据与22大类映射规则) vs 'rds_linkage' (阿里云RDS数据库与扫码报修联动)
+  const [caoliaoViewMode, setCaoliaoViewMode] = useState<'sync_settings' | 'rds_linkage'>(() => {
+    return initialSubTab === 'caoliao_integration' ? 'rds_linkage' : 'sync_settings';
   });
 
   useEffect(() => {
     if (initialSubTab) {
-      setActiveSubTab(initialSubTab);
+      if (initialSubTab === 'caoliao_sync_settings') {
+        setActiveSubTab('caoliao_hub');
+        setCaoliaoViewMode('sync_settings');
+      } else if (initialSubTab === 'caoliao_integration') {
+        setActiveSubTab('caoliao_hub');
+        setCaoliaoViewMode('rds_linkage');
+      } else if (initialSubTab === 'caoliao_hub') {
+        setActiveSubTab('caoliao_hub');
+      } else {
+        setActiveSubTab(initialSubTab as any);
+      }
     }
   }, [initialSubTab]);
 
@@ -66,12 +90,12 @@ export const SystemOpsUnifiedView: React.FC<SystemOpsUnifiedViewProps> = ({
       activeColor: 'border-purple-600 text-purple-700 bg-purple-50/50'
     },
     {
-      id: 'caoliao_integration' as const,
-      name: '草料二维码报修接口',
-      badge: '阿里云 RDS · 1602个活码 · 扫码联动',
+      id: 'caoliao_hub' as const,
+      name: '草料二维码对接与同步',
+      badge: 'OpenAPI · 阿里云RDS · 分类映射',
       icon: QrCode,
-      desc: '五莲县医院官方草料 MySQL 数据库直通、设备活码解析与扫码联动闭环',
-      activeColor: 'border-emerald-600 text-emerald-700 bg-emerald-50/50'
+      desc: '草料开放平台 API Key、22大类设备活码映射规则与官方 MySQL 数据库扫码联动一体化管理',
+      activeColor: 'border-teal-600 text-teal-700 bg-teal-50/50'
     }
   ];
 
@@ -94,7 +118,7 @@ export const SystemOpsUnifiedView: React.FC<SystemOpsUnifiedViewProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                五莲县人民医院医学装备 AI 智能引擎、多源数据库灾难备份与前端 UI 视觉更新一体化管理
+                五莲县人民医院医学装备 AI 智能引擎、多源数据库灾难备份、前端 UI 更新与草料二维码一体化对接
               </p>
             </div>
           </div>
@@ -108,7 +132,7 @@ export const SystemOpsUnifiedView: React.FC<SystemOpsUnifiedViewProps> = ({
           </div>
         </div>
 
-        {/* 三合一子菜单切换标签栏 */}
+        {/* 顶部四大支柱模块切换标签栏（已消除重复） */}
         <div className="w-full px-4 sm:px-6 lg:px-8">
           <div className="flex gap-2 overflow-x-auto pb-0">
             {tabsConfig.map(tab => {
@@ -158,9 +182,67 @@ export const SystemOpsUnifiedView: React.FC<SystemOpsUnifiedViewProps> = ({
           </div>
         )}
 
-        {activeSubTab === 'caoliao_integration' && (
-          <div className="animate-in fade-in duration-150 w-full">
-            <CaoliaoIntegrationView />
+        {activeSubTab === 'caoliao_hub' && (
+          <div className="animate-in fade-in duration-150 w-full space-y-4">
+            {/* 草料二维码一体化子分栏切换 Bar */}
+            <div className="bg-white p-2 sm:p-2.5 rounded-xl border border-slate-200 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-lg">
+                <button
+                  type="button"
+                  onClick={() => setCaoliaoViewMode('sync_settings')}
+                  className={`px-3.5 py-1.5 rounded-md text-xs font-bold flex items-center gap-2 transition cursor-pointer ${
+                    caoliaoViewMode === 'sync_settings'
+                      ? 'bg-white text-teal-800 shadow-xs border border-slate-200'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <KeyRound className="w-3.5 h-3.5 text-teal-600" />
+                  <span>草料 OpenAPI 密钥与设备分类映射规则</span>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-teal-50 text-teal-700 font-mono">22大类映射</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCaoliaoViewMode('rds_linkage')}
+                  className={`px-3.5 py-1.5 rounded-md text-xs font-bold flex items-center gap-2 transition cursor-pointer ${
+                    caoliaoViewMode === 'rds_linkage'
+                      ? 'bg-white text-emerald-800 shadow-xs border border-slate-200'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Link2 className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>阿里云 RDS 数据库直通与现场扫码联动</span>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-700 font-mono">1602个活码</span>
+                </button>
+              </div>
+
+              <div className="text-2xs text-slate-500 hidden md:flex items-center gap-2 px-2 font-medium">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span>草料开放平台 OpenAPI & 阿里云 RDS 专线双通道就绪</span>
+              </div>
+            </div>
+
+            {/* 子视图呈现 */}
+            {caoliaoViewMode === 'sync_settings' ? (
+              <CaoliaoSyncSettingsView 
+                onNavigateTab={onNavigateTab} 
+                onOpenLedgerWithCategory={(categoryNo) => {
+                  if (onNavigateTab) {
+                    onNavigateTab('ledger');
+                  }
+                }}
+              />
+            ) : (
+              <CaoliaoIntegrationView 
+                onViewEquipmentDetails={onViewEquipmentDetails} 
+                onNavigateTab={(tab) => {
+                  if (tab === 'caoliao_sync_settings') {
+                    setCaoliaoViewMode('sync_settings');
+                  } else if (onNavigateTab) {
+                    onNavigateTab(tab);
+                  }
+                }}
+              />
+            )}
           </div>
         )}
       </div>

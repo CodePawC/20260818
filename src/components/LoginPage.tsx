@@ -34,6 +34,7 @@ import {
   getEmergencyTierBadgeStyle,
   inferStakeholderCluster
 } from '../utils/staffRolesData';
+import { MedTechLogo } from './MedTechLogo';
 
 interface LoginPageProps {
   onLogin: (user: AuthUser) => void;
@@ -144,18 +145,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onLoginAsVendor, 
       {/* 顶部环境与品牌状态条 */}
       <div className="bg-slate-950/80 border-b border-slate-800/80 px-4 md:px-8 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white shadow-md">
-            <ShieldCheck className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="text-sm md:text-base font-bold text-white tracking-tight flex items-center gap-2">
-              <span>五莲县公立医疗集团</span>
-              <span className="text-xs font-normal text-slate-400">|</span>
-              <span className="text-xs md:text-sm font-semibold text-indigo-300">医疗设备资产全生命周期智慧管理平台</span>
-            </div>
-            <p className="text-[11px] text-slate-400 hidden sm:block">
-              国家计量强检规范 (JJG/JJF) · 医疗器械唯一标识 (UDI) · 医院等级评审标杆系统
-            </p>
+          <MedTechLogo size="lg" variant="horizontal" />
+          <div className="hidden lg:block border-l border-slate-800 pl-3">
+            <span className="text-xs font-semibold text-slate-400 block">
+              五莲县人民医院 · 日照市社科重点课题实证成果
+            </span>
+            <span className="text-[10px] text-slate-500 block">
+              国家计量强检规范 (JJG/JJF) · 医疗器械唯一标识 (UDI) · 全生命周期闭环管控
+            </span>
           </div>
         </div>
 

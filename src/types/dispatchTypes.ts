@@ -70,6 +70,12 @@ export interface EngineeringWorkOrder {
   faultDescription: string;
   status: WorkOrderStatus;
   biomedicalGroup: BiomedicalGroup;
+  source?: 'caoliao' | 'manual' | 'inspection' | 'pm';
+  caoliaoRecordId?: number;
+  caoliaoRecordNo?: string;
+  caoliaoCodeId?: string;
+  photoUrl?: string;
+  videoUrl?: string;
 
   // 派工与调度信息
   dispatcherName?: string;

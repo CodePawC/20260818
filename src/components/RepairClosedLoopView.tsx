@@ -28,8 +28,10 @@ import {
   Tag,
   X,
   LayoutList,
-  LayoutGrid
+  LayoutGrid,
+  QrCode
 } from 'lucide-react';
+import { CaoliaoRepairIntegrationOverview } from './CaoliaoRepairIntegrationOverview';
 import { ClosedLoopRepairTask, OnsiteVerificationRecord, FactoryRepairApplicationForm } from '../types/closedLoopRepairTypes';
 import { getClosedLoopTasks, saveClosedLoopTasks } from '../utils/closedLoopRepairData';
 import { MedicalEquipment, AuthUser } from '../types';
@@ -92,6 +94,7 @@ export const RepairClosedLoopView: React.FC<RepairClosedLoopViewProps> = ({
   const [selectedUrgencyFilter, setSelectedUrgencyFilter] = useState<string>('all');
   const [selectedStageFilter, setSelectedStageFilter] = useState<string>('all');
   const [showFlowchart, setShowFlowchart] = useState<boolean>(true);
+  const [showCaoliaoOverview, setShowCaoliaoOverview] = useState<boolean>(true);
 
   // Pagination & Sorting & Density & Columns & Selection (Referencing Equipment Ledger Table)
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -708,6 +711,20 @@ export const RepairClosedLoopView: React.FC<RepairClosedLoopViewProps> = ({
             )}
 
             <button
+              onClick={() => setShowCaoliaoOverview(!showCaoliaoOverview)}
+              className={`px-3 py-2 rounded-xl text-xs font-bold border transition-colors flex items-center space-x-1.5 ${
+                showCaoliaoOverview
+                  ? 'bg-teal-700 border-teal-600 text-white shadow-sm'
+                  : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+              }`}
+              title="查看草料二维码扫码报修实时接入状态与智能预处理建议"
+            >
+              <QrCode className="w-4 h-4 text-teal-400" />
+              <span>{showCaoliaoOverview ? '收起草料维保集成' : '草料维保集成概览'}</span>
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse ml-0.5" />
+            </button>
+
+            <button
               onClick={() => setIsNewReportModalOpen(true)}
               className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-gradient-to-r from-teal-600 to-teal-700 hover:from-teal-700 hover:to-teal-800 shadow-md hover:shadow-lg transition-all flex items-center space-x-1.5"
             >
@@ -931,6 +948,16 @@ export const RepairClosedLoopView: React.FC<RepairClosedLoopViewProps> = ({
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* 草料二维码维保集成概览组件 (直接显示最近接入的草料报修实时状态与预处理建议) */}
+        {showCaoliaoOverview && (
+          <div className="mb-4">
+            <CaoliaoRepairIntegrationOverview
+              currentUser={currentUser}
+              equipmentList={equipmentList}
+            />
           </div>
         )}
 

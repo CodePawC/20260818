@@ -47,7 +47,7 @@ export const ProjectApplicationView: React.FC<ProjectApplicationViewProps> = ({
             课题立项申请书原件
           </span>
           <span className="text-xs text-slate-500 font-mono hidden sm:inline">
-            100% 对齐官方申报扫描底册 · 真实人员严谨录入（课题组共 9 人）
+            100% 对齐官方申报扫描底册 · 真实人员严谨录入（课题组共 8 人）
           </span>
         </div>
 
@@ -115,8 +115,9 @@ export const ProjectApplicationView: React.FC<ProjectApplicationViewProps> = ({
             { p: 1, label: '封面' },
             { p: 2, label: '申请人承诺' },
             { p: 3, label: '单位承诺' },
-            { p: 4, label: '一、课题组基本情况 (重点)' },
-            { p: 5, label: '二、设计论证(背景)' },
+            { p: 4, label: '一、课题组基本情况 (第1页)' },
+            { p: 5, label: '课题组成员 (第2页)' },
+            { p: 6, label: '二、设计论证 (第1页)' },
             { p: 9, label: '阶段性计划' },
             { p: 10, label: '三、经费预算' },
             { p: 11, label: '四、单位审核意见' },
@@ -138,7 +139,7 @@ export const ProjectApplicationView: React.FC<ProjectApplicationViewProps> = ({
           ))}
         </div>
         <div className="text-[11px] font-mono text-indigo-300">
-          课题组成员严格按照申报附件真实名单录入：吴耀宝、严金光、王治权、王方鑫、葛晓燕、王增祝、杨志峰、胡云飞（共8人，含负责人共9人）
+          课题组成员严格按照申报附件真实名单录入：吴耀宝、严金光、胡云飞、王方鑫、葛晓燕、王增祝、杨志峰（共7人，含负责人崔伟共8人）
         </div>
       </div>
 
@@ -167,14 +168,14 @@ export const ProjectApplicationView: React.FC<ProjectApplicationViewProps> = ({
                 <div className="flex items-baseline">
                   <span className="w-28 shrink-0 font-bold tracking-wider">课题类别</span>
                   <div className="flex-1 border-b border-slate-900 pb-1 text-center font-bold">
-                    数字健康与创新
+                    专项研究课题
                   </div>
                 </div>
 
                 <div className="flex items-start">
                   <span className="w-28 shrink-0 font-bold tracking-wider pt-1">课题名称</span>
                   <div className="flex-1 border-b border-slate-900 pb-1 text-center font-bold text-sm leading-relaxed">
-                    基于主数据治理与人工智能辅助交互的县级医院医学装备全生命周期闭环管理模式研究
+                    {maskText(PROJECT_METADATA.title)}
                   </div>
                 </div>
 
@@ -226,7 +227,7 @@ export const ProjectApplicationView: React.FC<ProjectApplicationViewProps> = ({
 
                 <div className="pt-32 text-right space-y-3 font-serif pr-8">
                   <div className="text-base">
-                    申请人（签字）：<strong className="underline decoration-slate-400 font-sans ml-2 text-lg">{maskText('崔伟')}</strong>
+                    申请人（签字）：
                   </div>
                   <div className="text-base">
                     2026 年 5 月 10 日
@@ -258,13 +259,6 @@ export const ProjectApplicationView: React.FC<ProjectApplicationViewProps> = ({
                   </div>
                   <div className="text-base">
                     2026 年 5 月 10 日
-                  </div>
-
-                  {/* 红色仿真公章 */}
-                  <div className="absolute top-24 right-4 w-28 h-28 official-red-stamp pointer-events-none flex flex-col items-center justify-center p-2 text-center">
-                    <span className="text-[10px] font-bold tracking-tighter leading-none mb-1">五莲县人民医院</span>
-                    <span className="text-xl leading-none">★</span>
-                    <span className="text-[9px] font-bold tracking-widest leading-none mt-1">公 司 专 用</span>
                   </div>
                 </div>
               </div>
@@ -365,12 +359,12 @@ export const ProjectApplicationView: React.FC<ProjectApplicationViewProps> = ({
           )}
 
           {/* ============================================================== */}
-          {/* Page 5: 成员续表 (王增祝、杨志峰、胡云飞) + 二、课题设计论证 (背景) */}
+          {/* Page 5: 成员续表 (王增祝、杨志峰) + 二、课题设计论证 (背景)       */}
           {/* ============================================================== */}
           {(viewMode === 'continuous' || currentPage === 5) && (
             <div id="app-page-5" className="doc-appraisal-sheet flex flex-col justify-between text-slate-900 font-serif">
               <div className="space-y-4">
-                {/* 成员续表 */}
+                {/* 成员续表 (王增祝、杨志峰) */}
                 <div className="border border-slate-900 overflow-hidden text-xs">
                   <div className="bg-slate-100 font-bold text-center py-1 border-b border-slate-900 text-xs font-sans text-slate-800">
                     课题组主要成员情况（续表）
@@ -677,22 +671,15 @@ export const ProjectApplicationView: React.FC<ProjectApplicationViewProps> = ({
                 </div>
 
                 {/* 签章区 */}
-                <div className="pt-12 text-right space-y-3 font-serif pr-8 relative">
+                <div className="pt-12 text-right space-y-3 font-serif pr-8">
                   <div className="text-sm">
-                    单位负责人签字：<strong className="underline decoration-slate-400 font-sans ml-2">{maskText('吴耀宝')}</strong>
+                    单位负责人签字：
                   </div>
                   <div className="text-sm">
                     公 章
                   </div>
                   <div className="text-sm font-mono">
                     2026 年 5 月 10 日
-                  </div>
-
-                  {/* 红色仿真公章 */}
-                  <div className="absolute bottom-4 right-4 w-28 h-28 official-red-stamp pointer-events-none flex flex-col items-center justify-center p-2 text-center">
-                    <span className="text-[10px] font-bold tracking-tighter leading-none mb-1">五莲县人民医院</span>
-                    <span className="text-xl leading-none">★</span>
-                    <span className="text-[9px] font-bold tracking-widest leading-none mt-1">公 司 专 用</span>
                   </div>
                 </div>
               </div>
