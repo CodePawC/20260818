@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useMemo } from 'react';
 import jsPDF from 'jspdf';
 import { toJpeg } from 'html-to-image';
 import {
@@ -22,8 +22,14 @@ import {
   History,
   FileSignature
 } from 'lucide-react';
-import { RegulationItem, RegulationLevel, RegulationRevisionRecord } from '../types/regulationTypes';
+import { RegulationItem, RegulationLevel, RegulationRevisionRecord, RegulationCategory } from '../types/regulationTypes';
 import { getRegulationWorkflow } from '../utils/regulationWorkflowPresets';
+import { 
+  sortRegulationsByLifecycle, 
+  REGULATION_CATEGORY_ORDER, 
+  COMPILATION_CATEGORY_METAS,
+  CompilationCategoryMeta 
+} from '../utils/regulationData';
 
 const LEVEL_MAP: Record<RegulationLevel, { label: string; color: string }> = {
   national: { label: '国家法规', color: 'bg-red-50 text-red-700 border-red-200' },
@@ -42,11 +48,14 @@ interface RegulationCompilationPdfModalProps {
 }
 
 /**
- * 清理制度标题外层的书名号 《 》
+ * 清理制度标题外层的书名号 《 》以及可能残留的医院名称前缀（医院名称在红头公文头已呈现）
  */
 const cleanRegulationTitle = (title: string): string => {
   if (!title) return '';
-  return title.replace(/^《+|》+$/g, '').trim();
+  return title
+    .replace(/^《+|》+$/g, '')
+    .replace(/^五莲县人民医院/, '')
+    .trim();
 };
 
 /**
@@ -110,14 +119,71 @@ export const RegulationCompilationPdfModal: React.FC<RegulationCompilationPdfMod
   const [viewMode, setViewMode] = useState<'all' | 'single'>('all');
   const [selectedSingleId, setSelectedSingleId] = useState<string>('');
 
-  if (!isOpen) return null;
+  // 根据分类过滤要汇编成册的制度，并严格执行“按类排序、总体到局部（法规依据->准入->运行->强检->闭环->质控->调配->外协->处置->培训->应急）”宏观全生命周期排序原则
+  const targetRegulations = useMemo(() => {
+    const raw = filterCategory === 'all'
+      ? regulations
+      : regulations.filter(r => r.category === filterCategory);
+    return sortRegulationsByLifecycle(raw);
+  }, [regulations, filterCategory]);
 
-  // 根据分类过滤要汇编成册的制度
-  const targetRegulations = filterCategory === 'all'
-    ? regulations
-    : regulations.filter(r => r.category === filterCategory);
+  // 分类下拉筛选菜单：严格遵循总体到局部的业务分类先后顺序
+  const categories = useMemo(() => {
+    const existing = new Set(regulations.map(r => r.category));
+    return REGULATION_CATEGORY_ORDER.filter(cat => existing.has(cat));
+  }, [regulations]);
 
-  const categories = Array.from(new Set(regulations.map(r => r.category)));
+  // 组织目录分编结构：按业务类别分编分组，严格保持“从总体到局部”顺序
+  const groupedCatalogue = useMemo(() => {
+    const groups: {
+      category: RegulationCategory;
+      meta: CompilationCategoryMeta;
+      items: { reg: RegulationItem; globalIndex: number; docPageNum: number }[];
+    }[] = [];
+
+    const map = new Map<RegulationCategory, { reg: RegulationItem; globalIndex: number; docPageNum: number }[]>();
+
+    targetRegulations.forEach((reg, idx) => {
+      const docPageNum = (includeCover ? 3 : 1) + idx + 1;
+      if (!map.has(reg.category)) {
+        map.set(reg.category, []);
+      }
+      map.get(reg.category)!.push({ reg, globalIndex: idx, docPageNum });
+    });
+
+    REGULATION_CATEGORY_ORDER.forEach(cat => {
+      if (map.has(cat)) {
+        groups.push({
+          category: cat,
+          meta: COMPILATION_CATEGORY_METAS[cat] || {
+            partNumber: '专篇',
+            partTitle: cat,
+            subtitle: '',
+            badgeColor: 'border-slate-300 text-slate-800 bg-slate-50'
+          },
+          items: map.get(cat)!
+        });
+      }
+    });
+
+    // 兜底非标准分类
+    map.forEach((items, cat) => {
+      if (!REGULATION_CATEGORY_ORDER.includes(cat)) {
+        groups.push({
+          category: cat,
+          meta: {
+            partNumber: '补充编',
+            partTitle: cat,
+            subtitle: '专项管理规程',
+            badgeColor: 'border-slate-300 text-slate-800 bg-slate-50'
+          },
+          items
+        });
+      }
+    });
+
+    return groups;
+  }, [targetRegulations, includeCover]);
 
   // 计算总物理页数（封面 + 前言 + 目录 + 制度篇数）
   const totalA4Pages = (includeCover ? 2 : 0) + 1 + targetRegulations.length;
@@ -256,6 +322,8 @@ export const RegulationCompilationPdfModal: React.FC<RegulationCompilationPdfMod
     month: 'long',
     day: 'numeric'
   });
+
+  if (!isOpen) return null;
 
   return (
     <div 
@@ -730,37 +798,65 @@ export const RegulationCompilationPdfModal: React.FC<RegulationCompilationPdfMod
                     </p>
                   </div>
 
-                  <div className="divide-y divide-slate-200 text-xs sm:text-[13px] font-sans">
-                    {targetRegulations.map((reg, idx) => {
-                      const docPageNum = (includeCover ? 3 : 1) + idx + 1;
-                      return (
-                        <div 
-                          key={reg.id} 
-                          onClick={() => handleScrollToPage(`page-reg-${reg.id}`)}
-                          className="py-2.5 flex items-center justify-between gap-3 hover:bg-slate-50/80 px-2 rounded transition-colors cursor-pointer"
-                        >
-                          <div className="flex items-baseline gap-2 flex-1 min-w-0">
-                            <span className="font-mono text-slate-500 w-6 shrink-0 text-right font-bold tracking-tight text-xs">
-                              {String(idx + 1).padStart(2, '0')}.
+                  <div className="space-y-3 text-xs font-sans">
+                    {groupedCatalogue.map((group) => (
+                      <div key={group.category} className="chapter-group">
+                        {/* 编次与分类标题条 */}
+                        <div className="flex items-center justify-between gap-2 pb-1 mb-1 border-b border-slate-300 bg-slate-50/80 px-2 py-0.5 rounded-xs">
+                          <div className="flex items-center gap-2 min-w-0 flex-wrap sm:flex-nowrap">
+                            <span className="font-serif font-bold text-slate-900 tracking-wider text-xs whitespace-nowrap">
+                              【{group.meta.partNumber}·{group.category}】{group.meta.partTitle}
                             </span>
-                            <span className="font-bold text-slate-900 break-words leading-snug tracking-tight">
-                              {cleanRegulationTitle(reg.title)}
-                            </span>
-                            <span className="text-slate-400 text-[11px] shrink-0 font-mono hidden sm:inline tracking-tighter">
-                              [{reg.docNumber}]
+                            <span className="text-[10px] text-slate-500 font-sans">
+                              ({group.meta.subtitle})
                             </span>
                           </div>
-                          <div className="flex items-center gap-2.5 shrink-0">
-                            <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-[11px] font-medium border border-slate-200 shrink-0 whitespace-nowrap tracking-tight">
-                              {reg.category}
-                            </span>
-                            <span className="text-slate-700 text-xs font-mono font-bold whitespace-nowrap shrink-0 text-right min-w-[64px] tracking-tight">
-                              第 {docPageNum} 页
-                            </span>
-                          </div>
+                          <span className="text-[10px] text-slate-400 font-mono shrink-0">
+                            共 {group.items.length} 篇
+                          </span>
                         </div>
-                      );
-                    })}
+
+                        {/* 该编下的制度项列表（完整呈现制度名称，严禁省略号截断） */}
+                        <div className="space-y-0.5 pl-1">
+                          {group.items.map(({ reg, globalIndex, docPageNum }) => {
+                            const levelMeta = LEVEL_MAP[reg.level] || { label: '制度', color: 'bg-slate-100 text-slate-700 border-slate-200' };
+                            return (
+                              <div 
+                                key={reg.id} 
+                                onClick={() => handleScrollToPage(`page-reg-${reg.id}`)}
+                                className="py-1 px-1.5 flex items-baseline justify-between gap-2 hover:bg-blue-50/80 rounded transition-colors cursor-pointer group"
+                              >
+                                <div className="flex items-baseline gap-2 flex-1 min-w-0">
+                                  <span className="font-mono text-slate-400 w-5 shrink-0 text-right font-semibold text-[11px] self-start mt-0.5">
+                                    {String(globalIndex + 1).padStart(2, '0')}.
+                                  </span>
+                                  <div className="flex-1 min-w-0 flex flex-wrap items-baseline gap-x-2">
+                                    <span className="font-bold text-slate-900 group-hover:text-blue-700 tracking-tight leading-snug text-xs sm:text-[12px] break-words whitespace-normal">
+                                      {cleanRegulationTitle(reg.title)}
+                                    </span>
+                                    <span className="text-slate-400 text-[10px] shrink-0 font-mono tracking-tighter whitespace-nowrap">
+                                      [{reg.docNumber}]
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* 导引虚线 */}
+                                <div className="flex-1 mx-2 border-b border-dotted border-slate-300 hidden md:block shrink min-w-[20px] self-center" />
+
+                                <div className="flex items-center gap-2 shrink-0 self-center">
+                                  <span className={`px-1.5 py-0.2 rounded text-[10px] font-medium border ${levelMeta.color} shrink-0 whitespace-nowrap`}>
+                                    {levelMeta.label}
+                                  </span>
+                                  <span className="text-slate-700 text-xs font-mono font-bold whitespace-nowrap shrink-0 text-right min-w-[58px]">
+                                    第 {docPageNum} 页
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
 

@@ -107,29 +107,29 @@ export const UserNavMenu: React.FC<UserNavMenuProps> = ({
         title="点击查看当前登录身份与切换角色"
       >
         {/* 头像 */}
-        <div className="w-7 h-7 rounded-full bg-indigo-600 text-white font-bold text-xs flex items-center justify-center shadow-xs shrink-0 ring-2 ring-white">
+        <div className="w-7.5 h-7.5 rounded-full bg-indigo-600 text-white font-bold text-xs flex items-center justify-center shadow-xs shrink-0 ring-2 ring-white">
           {currentUser.isAdmin ? '管' : (currentUser.name ? currentUser.name[0] : '用')}
         </div>
 
         {/* 姓名与角色信息 */}
-        <div className="text-left hidden sm:block max-w-[130px]">
+        <div className="text-left hidden sm:block max-w-[140px]">
           <div className="flex items-center gap-1.5 leading-none">
-            <span className="text-xs font-bold text-slate-800 group-hover:text-indigo-600 transition truncate">
+            <span className="text-sm font-bold text-slate-800 group-hover:text-indigo-600 transition truncate">
               {currentUser.name}
             </span>
           </div>
-          <div className="text-[10.5px] text-slate-500 mt-1 leading-none truncate">
+          <div className="text-xs text-slate-500 mt-1 leading-none truncate">
             {currentUser.role}
           </div>
         </div>
 
         {/* 科室/机构徽标 */}
-        <span className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-medium bg-white text-slate-600 border border-slate-200 shadow-2xs">
-          <Building2 className="w-3 h-3 text-slate-400" />
-          <span className="truncate max-w-[90px]">{currentUser.departmentName || currentUser.organization}</span>
+        <span className="hidden md:inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-white text-slate-600 border border-slate-200 shadow-2xs">
+          <Building2 className="w-3.5 h-3.5 text-slate-400" />
+          <span className="truncate max-w-[100px]">{currentUser.departmentName || currentUser.organization}</span>
         </span>
 
-        <ChevronDown className={`w-3.5 h-3.5 text-slate-400 group-hover:text-slate-600 transition-transform duration-200 shrink-0 ${isOpen ? 'rotate-180 text-indigo-600' : ''}`} />
+        <ChevronDown className={`w-4 h-4 text-slate-400 group-hover:text-slate-600 transition-transform duration-200 shrink-0 ${isOpen ? 'rotate-180 text-indigo-600' : ''}`} />
       </button>
 
       {/* 统一重构后的专业卡片式下拉面板 */}

@@ -4,35 +4,86 @@
   --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "WenQuanYi Micro Hei", "Noto Sans SC", "Source Han Sans SC", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   
-  /* Strict Chinese Typography Scale: Minimum 14px (0.875rem) */
-  --text-xs: 0.875rem; /* 14px - Absolute floor for Chinese legibility */
-  --text-xs--line-height: 1.45rem;
+  /* Unified Generous Typography Scale: Ensure comfortable, strain-free Chinese browsing */
+  --text-2xs: 0.8125rem; /* 13px at 16px base / 14.6px in large mode */
+  --text-2xs--line-height: 1.25rem;
+
+  --text-xs: 0.875rem; /* 14px at 16px base / 15.75px in large mode - Badges, metadata, tags */
+  --text-xs--line-height: 1.3rem; /* 21px */
   
-  --text-sm: 0.9375rem; /* 15px */
-  --text-sm--line-height: 1.5rem;
+  --text-sm: 0.9375rem; /* 15px at 16px base / 16.9px in large mode - Standard body, tables, inputs */
+  --text-sm--line-height: 1.5rem; /* 24px */
   
-  --text-base: 1rem; /* 16px */
-  --text-base--line-height: 1.6rem;
+  --text-base: 1.0625rem; /* 17px at 16px base / 19.1px in large mode - Card titles, subheadings */
+  --text-base--line-height: 1.65rem; /* 26px */
   
-  --text-lg: 1.125rem; /* 18px */
-  --text-lg--line-height: 1.65rem;
+  --text-lg: 1.25rem; /* 20px - Section titles, modal headers */
+  --text-lg--line-height: 1.8rem; /* 29px */
   
-  --text-xl: 1.25rem; /* 20px */
-  --text-xl--line-height: 1.75rem;
+  --text-xl: 1.5rem; /* 24px - Page titles */
+  --text-xl--line-height: 2.1rem; /* 34px */
   
-  --text-2xl: 1.5rem; /* 24px */
-  --text-2xl--line-height: 2rem;
+  --text-2xl: 1.875rem; /* 30px - KPI figures, key metrics */
+  --text-2xl--line-height: 2.35rem; /* 38px */
   
-  --text-3xl: 1.875rem; /* 30px */
-  --text-3xl--line-height: 2.25rem;
+  --text-3xl: 2.25rem; /* 36px - Hero metric callouts */
+  --text-3xl--line-height: 2.85rem; /* 46px */
 }
 
 @layer base {
   :root {
     font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "WenQuanYi Micro Hei", "Noto Sans SC", "Source Han Sans SC", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     font-feature-settings: "tnum" 1, "cv02" 1, "cv03" 1, "cv04" 1;
-    font-size: 15px;
+    font-size: 18px;
   }
+
+  html[data-font-scale="standard"] {
+    font-size: 16.5px;
+  }
+
+  html[data-font-scale="large"],
+  :root:not([data-font-scale]) {
+    font-size: 18px;
+  }
+
+  html[data-font-scale="extra_large"] {
+    font-size: 20px;
+  }
+}
+
+/* Elevate micro typography across the entire system to comfortable, clear Chinese legibility (no eye strain) */
+:where(
+  [class*="text-[6px]"],
+  [class*="text-[7px]"],
+  [class*="text-[7.5px]"],
+  [class*="text-[8px]"],
+  [class*="text-[8.5px]"],
+  [class*="text-[9px]"],
+  [class*="text-[9.5px]"],
+  [class*="text-[10px]"],
+  [class*="text-[10.5px]"],
+  .text-2xs
+):not(svg):not(text):not(tspan):not(.recharts-text):not(.recharts-cartesian-axis-tick-value):not(#printable-loan-voucher *):not(.acceptance-a4-doc *):not(#equipment-acceptance-a4-sheet *):not(#training-acceptance-a4-sheet *) {
+  font-size: 0.8125rem !important; /* 13px at 16px / 14.6px at 18px base */
+  line-height: 1.35;
+}
+
+:where(
+  [class*="text-[11px]"],
+  [class*="text-[11.5px]"],
+  [class*="text-[12px]"],
+  [class*="text-[12.5px]"]
+):not(svg):not(text):not(tspan):not(.recharts-text):not(.recharts-cartesian-axis-tick-value):not(#printable-loan-voucher *):not(.acceptance-a4-doc *):not(#equipment-acceptance-a4-sheet *):not(#training-acceptance-a4-sheet *) {
+  font-size: 0.875rem !important; /* 14px at 16px / 15.75px at 18px base */
+  line-height: 1.4;
+}
+
+:where(
+  [class*="text-[13px]"],
+  [class*="text-[13.5px]"]
+):not(svg):not(text):not(tspan):not(.recharts-text):not(.recharts-cartesian-axis-tick-value):not(#printable-loan-voucher *):not(.acceptance-a4-doc *):not(#equipment-acceptance-a4-sheet *):not(#training-acceptance-a4-sheet *) {
+  font-size: 0.9375rem !important; /* 15px at 16px / 16.9px at 18px base */
+  line-height: 1.45;
 }
 
 html,
@@ -51,69 +102,40 @@ body,
   background-color: #f8fafc;
   line-height: 1.55;
   letter-spacing: 0.005em;
-  font-size: 15px;
 }
 
-/* Enforce Chinese Font Hierarchy & ≥ 14px Floor */
+/* Enforce Monospace for numbers and codes */
 code, kbd, samp, pre, .font-mono {
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
   font-feature-settings: "tnum" 1;
 }
 
-/* Force minimum font size of 14px for all subtext, micro tags, badges, notes, and pagination */
-.text-xs,
-[class*="text-[9px]"],
-[class*="text-[10px]"],
-[class*="text-[10.5px]"],
-[class*="text-[11px]"],
-[class*="text-[11.5px]"],
-[class*="text-[12px]"],
-[class*="text-[12.5px]"],
-[class*="text-[13px]"],
-[class*="text-[13.5px]"] {
-  font-size: 14px !important;
-  line-height: 1.45 !important;
+/* Recharts Tooltip Anti-Collision & Display Standardization (Fixes chart hover scrambling) */
+.recharts-tooltip-wrapper {
+  pointer-events: none !important;
+  z-index: 9999 !important;
 }
 
-.text-sm {
-  font-size: 15px !important;
-  line-height: 1.5 !important;
+.recharts-tooltip-wrapper * {
+  pointer-events: none !important;
 }
 
-.text-base {
-  font-size: 16px !important;
-  line-height: 1.6 !important;
+.recharts-default-tooltip {
+  display: block !important;
+  pointer-events: none !important;
+  white-space: normal !important;
 }
 
-.text-lg {
-  font-size: 18px !important;
-  line-height: 1.6 !important;
-}
-
-.text-xl {
-  font-size: 20px !important;
-  line-height: 1.5 !important;
-}
-
-.text-2xl {
-  font-size: 24px !important;
-  line-height: 1.4 !important;
-}
-
-.text-3xl {
-  font-size: 28px !important;
-  line-height: 1.35 !important;
-}
-
-/* Enhanced table headers & label contrast */
+/* Unified Table Typography */
 th {
-  font-size: 14px !important;
-  font-weight: 700 !important;
-  color: #1e293b !important;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  color: #334155;
 }
 
 td {
-  font-size: 14px !important;
+  font-size: 0.9375rem;
+  color: #0f172a;
 }
 
 /* Scoped rules for administrative document tables (e.g. Overdue Equipment Approval Dossier) */
@@ -145,11 +167,8 @@ td {
   word-break: break-word !important;
 }
 
-/* Badges and pills: ensure comfortable padding for 14px text */
-.badge,
-[class*="rounded-full"][class*="text-"],
-[class*="rounded"][class*="text-"] {
-  min-height: 22px;
+/* Badges and pills: proper inline-flex with adequate padding */
+.badge {
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
@@ -181,6 +200,18 @@ a, button {
 * {
   scrollbar-width: thin;
   scrollbar-color: #64748b #f1f5f9;
+}
+
+/* Zero-scrollbar clean display for left sidebar and compact menus */
+.sidebar-no-scrollbar {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
+}
+
+.sidebar-no-scrollbar::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 
 ::-webkit-scrollbar {

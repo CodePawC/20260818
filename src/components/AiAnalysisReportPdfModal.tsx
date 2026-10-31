@@ -33,6 +33,7 @@ import {
   generateLocalDimensionAnalysis,
   generateLocalBatchFleetAnalysis
 } from '../utils/aiDimensionEngine';
+import { EquipmentRadarChart } from './EquipmentRadarChart';
 
 interface AiAnalysisReportPdfModalProps {
   isOpen: boolean;
@@ -844,35 +845,50 @@ ${currentAnalysisResult.riskWarnings.map((w, i) => `${i + 1}. ${w}`).join('\n')}
                   <div className="mt-3.5">
                     <div className="flex items-center gap-1.5 pb-1 border-b border-slate-200 text-xs font-bold text-slate-800">
                       <Activity className="w-3.5 h-3.5 text-slate-600" />
-                      <span>三、健康与效益评分</span>
+                      <span>三、健康与效益多维雷达评分</span>
                     </div>
 
-                    {/* Score Pills */}
-                    <div className="mt-2 grid grid-cols-5 gap-2 text-center text-xs">
-                      <div className="p-1.5 rounded border border-slate-200 bg-white">
-                        <span className="text-[11px] text-slate-500 block">运行安全</span>
-                        <strong className="text-sm font-mono text-slate-900">{currentAnalysisResult.radarScores.safetyScore}</strong>
-                        <span className="text-[10px] text-slate-400 block">/ 100分</span>
+                    {/* Radar Chart & Score Pills */}
+                    <div className="mt-2 flex flex-col sm:flex-row items-center gap-3 bg-slate-50/50 p-2 rounded-lg border border-slate-200">
+                      <div className="shrink-0 flex justify-center">
+                        <EquipmentRadarChart
+                          scores={currentAnalysisResult.radarScores}
+                          size="sm"
+                        />
                       </div>
-                      <div className="p-1.5 rounded border border-slate-200 bg-white">
-                        <span className="text-[11px] text-slate-500 block">稳定程度</span>
-                        <strong className="text-sm font-mono text-slate-900">{currentAnalysisResult.radarScores.reliabilityScore}</strong>
-                        <span className="text-[10px] text-slate-400 block">/ 100分</span>
-                      </div>
-                      <div className="p-1.5 rounded border border-slate-200 bg-white">
-                        <span className="text-[11px] text-slate-500 block">使用效益</span>
-                        <strong className="text-sm font-mono text-slate-900">{currentAnalysisResult.radarScores.roiHealthScore}</strong>
-                        <span className="text-[10px] text-slate-400 block">/ 100分</span>
-                      </div>
-                      <div className="p-1.5 rounded border border-slate-200 bg-white">
-                        <span className="text-[11px] text-slate-500 block">定期检测</span>
-                        <strong className="text-sm font-mono text-slate-900">{currentAnalysisResult.radarScores.complianceScore}</strong>
-                        <span className="text-[10px] text-slate-400 block">/ 100分</span>
-                      </div>
-                      <div className="p-1.5 rounded border border-slate-200 bg-white">
-                        <span className="text-[11px] text-slate-500 block">设备新旧</span>
-                        <strong className="text-sm font-mono text-slate-900">{currentAnalysisResult.radarScores.modernityScore}</strong>
-                        <span className="text-[10px] text-slate-400 block">/ 100分</span>
+                      <div className="flex-1 w-full grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-center text-xs">
+                        <div className="p-1.5 rounded border border-slate-200 bg-white">
+                          <span className="text-[10px] text-slate-500 block">运行安全</span>
+                          <strong className="text-sm font-mono text-blue-700">{currentAnalysisResult.radarScores.safetyScore}</strong>
+                          <span className="text-[10px] text-slate-400 block">/ 100分</span>
+                        </div>
+                        <div className="p-1.5 rounded border border-slate-200 bg-white">
+                          <span className="text-[10px] text-slate-500 block">稳定程度</span>
+                          <strong className="text-sm font-mono text-indigo-700">{currentAnalysisResult.radarScores.reliabilityScore}</strong>
+                          <span className="text-[10px] text-slate-400 block">/ 100分</span>
+                        </div>
+                        <div className="p-1.5 rounded border border-slate-200 bg-white">
+                          <span className="text-[10px] text-slate-500 block">使用效益</span>
+                          <strong className="text-sm font-mono text-emerald-700">{currentAnalysisResult.radarScores.roiHealthScore}</strong>
+                          <span className="text-[10px] text-slate-400 block">/ 100分</span>
+                        </div>
+                        <div className="p-1.5 rounded border border-slate-200 bg-white">
+                          <span className="text-[10px] text-slate-500 block">定期检测</span>
+                          <strong className="text-sm font-mono text-purple-700">{currentAnalysisResult.radarScores.complianceScore}</strong>
+                          <span className="text-[10px] text-slate-400 block">/ 100分</span>
+                        </div>
+                        <div className="p-1.5 rounded border border-slate-200 bg-white">
+                          <span className="text-[10px] text-slate-500 block">设备新旧</span>
+                          <strong className="text-sm font-mono text-amber-700">{currentAnalysisResult.radarScores.modernityScore}</strong>
+                          <span className="text-[10px] text-slate-400 block">/ 100分</span>
+                        </div>
+                        <div className="p-1.5 rounded border border-blue-200 bg-blue-50/70">
+                          <span className="text-[10px] text-blue-700 block font-semibold">综合评级</span>
+                          <strong className="text-xs text-blue-900 block mt-0.5">
+                            {currentAnalysisResult.verdictTag?.text || '安全受控'}
+                          </strong>
+                          <span className="text-[9px] text-blue-600 block">AI专家诊断</span>
+                        </div>
                       </div>
                     </div>
 

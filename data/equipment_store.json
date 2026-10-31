@@ -9340,8 +9340,22 @@
     "status": "故障待修",
     "manager": "孙志强",
     "purchasePrice": 50000,
-    "repairCount": 2,
+    "repairCount": 3,
     "repairRecords": [
+      {
+        "id": "REP-WO-CL-043664",
+        "equipmentId": "10069",
+        "equipmentName": "病人监护仪",
+        "equipmentSn": "CM-23123529",
+        "faultDate": "2026-10-16",
+        "repairType": "草料二维码扫码报修",
+        "faultDescription": "【草料单号 REC-11043663】病人监护仪心电导联阻抗报警 (报修人: 林瑞芳护士长 电话: 13863371002)",
+        "technician": "待派工分配",
+        "cost": 0,
+        "partsReplaced": "待检",
+        "resolution": "草料二维码 Webhook 实时回调建单 (工单号: WO-CL-043664)，等待医工派工响应。",
+        "status": "待处理"
+      },
       {
         "id": "REP-CL-33402716",
         "equipmentId": "10069",
@@ -9385,7 +9399,8 @@
     "internalNo": "69",
     "usageLocation": "1号楼 综合楼 7F 重症医学科在用区",
     "caoliaoUrl": "http://qr71.cn/oTiEcM/qrEaUYj",
-    "caoliaoCodeName": "重症医学科-病人监护仪"
+    "caoliaoCodeName": "重症医学科-病人监护仪",
+    "lastFaultReason": "病人监护仪心电导联阻抗报警"
   },
   {
     "id": "10070",

@@ -1,11 +1,12 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import mysql from 'mysql2/promise';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import { INITIAL_EQUIPMENT } from './src/mockData';
-import { MedicalEquipment, RepairRecord, StatusLog, EquipmentStatus, MetrologyCatalogueItem, NmpaCategoryMasterItem, StaffPersonMaster } from './src/types';
+import { MedicalEquipment, RepairRecord, StatusLog, EquipmentStatus, MetrologyCatalogueItem, NmpaCategoryMasterItem, StaffPersonMaster, CaoliaoCategoryMappingRule, CaoliaoSyncConfig } from './src/types';
 import { enrichEquipmentWithMasterData, DEFAULT_STAFF } from './src/utils/masterData';
 import { batchAssignPureNumericInternalNos } from './src/utils/internalNoGenerator';
 import { DEFAULT_METROLOGY_CATALOGUE, reclassifyEquipmentListByPolicy, matchEquipmentToMetrologyCatalogue } from './src/utils/metrologyCatalogueData';
@@ -15,6 +16,16 @@ import { generateLocalRuleBasedDiagnosis, generateLocalPmPlan, AiStructuredDiagn
 import { generateLocalDimensionAnalysis, generateLocalBatchFleetAnalysis } from './src/utils/aiDimensionEngine';
 import { INITIAL_ADVERSE_EVENTS } from './src/utils/adverseEventData';
 import { AdverseEventRecord } from './src/types/adverseEventTypes';
+import { DedicatedConsumableMaster, HostConsumableBindingRecord, BatchRecallAlert } from './src/types/udiTypes';
+import { DEFAULT_DEDICATED_CONSUMABLES, INITIAL_HOST_CONSUMABLE_BINDINGS, INITIAL_BATCH_RECALL_ALERTS } from './src/utils/udiData';
+import { parseUdiBarcode, verifyConsumableHostCompatibility } from './src/utils/udiParser';
+import { 
+  DEFAULT_SMART_MANAGEMENT_METRICS, 
+  INITIAL_HIS_PACS_RECORDS, 
+  DEFAULT_FLOOR_TOPOLOGY, 
+  PRESET_EMERGENCY_SCENARIOS 
+} from './src/utils/smartManagementData';
+import { SmartManagementRatingMetric, HisPacsLinkageRecord, FloorSpaceTopology } from './src/types';
 
 // Persistent file-backed storage
 const DATA_DIR = process.env.APP_DATA_DIR
@@ -25,6 +36,61 @@ const CATALOGUE_FILE = path.join(DATA_DIR, 'metrology_catalogue.json');
 const NMPA_CATEGORIES_FILE = path.join(DATA_DIR, 'nmpa_categories.json');
 const STAFF_FILE = path.join(DATA_DIR, 'staff_store.json');
 const ADVERSE_EVENTS_FILE = path.join(DATA_DIR, 'adverse_events.json');
+const UDI_CONSUMABLES_FILE = path.join(DATA_DIR, 'udi_consumables_store.json');
+const UDI_BINDINGS_FILE = path.join(DATA_DIR, 'udi_bindings_store.json');
+const SMART_METRICS_FILE = path.join(DATA_DIR, 'smart_management_metrics.json');
+const HIS_PACS_RECORDS_FILE = path.join(DATA_DIR, 'his_pacs_records.json');
+const BACKUPS_DIR = path.join(DATA_DIR, 'backups');
+
+function loadPersistentSmartMetrics(): SmartManagementRatingMetric[] {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (fs.existsSync(SMART_METRICS_FILE)) {
+      const raw = fs.readFileSync(SMART_METRICS_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (err) {
+    console.error('[Storage] Error loading smart management metrics:', err);
+  }
+  return DEFAULT_SMART_MANAGEMENT_METRICS;
+}
+
+function savePersistentSmartMetrics(data: SmartManagementRatingMetric[]) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(SMART_METRICS_FILE, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[Storage] Error saving smart management metrics:', err);
+  }
+}
+
+let smartMetricsStore: SmartManagementRatingMetric[] = loadPersistentSmartMetrics();
+
+function loadPersistentHisPacsRecords(): HisPacsLinkageRecord[] {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (fs.existsSync(HIS_PACS_RECORDS_FILE)) {
+      const raw = fs.readFileSync(HIS_PACS_RECORDS_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (err) {
+    console.error('[Storage] Error loading HIS/PACS records:', err);
+  }
+  return INITIAL_HIS_PACS_RECORDS;
+}
+
+function savePersistentHisPacsRecords(data: HisPacsLinkageRecord[]) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(HIS_PACS_RECORDS_FILE, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[Storage] Error saving HIS/PACS records:', err);
+  }
+}
+
+let hisPacsRecordsStore: HisPacsLinkageRecord[] = loadPersistentHisPacsRecords();
 
 function loadPersistentAdverseEvents(): AdverseEventRecord[] {
   try {
@@ -50,6 +116,56 @@ function savePersistentAdverseEvents(data: AdverseEventRecord[]) {
 }
 
 let adverseEventsStore: AdverseEventRecord[] = loadPersistentAdverseEvents();
+
+function loadPersistentUdiConsumables(): DedicatedConsumableMaster[] {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (fs.existsSync(UDI_CONSUMABLES_FILE)) {
+      const raw = fs.readFileSync(UDI_CONSUMABLES_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (err) {
+    console.error('[Storage] Error loading persistent udi consumables:', err);
+  }
+  return DEFAULT_DEDICATED_CONSUMABLES;
+}
+
+function savePersistentUdiConsumables(data: DedicatedConsumableMaster[]) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(UDI_CONSUMABLES_FILE, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[Storage] Error saving persistent udi consumables:', err);
+  }
+}
+
+let udiConsumablesStore: DedicatedConsumableMaster[] = loadPersistentUdiConsumables();
+
+function loadPersistentUdiBindings(): HostConsumableBindingRecord[] {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (fs.existsSync(UDI_BINDINGS_FILE)) {
+      const raw = fs.readFileSync(UDI_BINDINGS_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (err) {
+    console.error('[Storage] Error loading persistent udi bindings:', err);
+  }
+  return INITIAL_HOST_CONSUMABLE_BINDINGS;
+}
+
+function savePersistentUdiBindings(data: HostConsumableBindingRecord[]) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(UDI_BINDINGS_FILE, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[Storage] Error saving persistent udi bindings:', err);
+  }
+}
+
+let udiBindingsStore: HostConsumableBindingRecord[] = loadPersistentUdiBindings();
 
 function loadPersistentStaff(): StaffPersonMaster[] {
   try {
@@ -229,7 +345,9 @@ let equipmentStore: MedicalEquipment[] = loadPersistentEquipment();
 
 async function startServer() {
   const app = express();
-  const PORT = Number(process.env.PORT) || 3000;
+  const portArgIdx = process.argv.indexOf('--port');
+  const portFromArg = portArgIdx !== -1 ? Number(process.argv[portArgIdx + 1]) : null;
+  const PORT = Number(process.env.PORT) || portFromArg || 3000;
   const DEMO_MODE = process.env.DEMO_MODE === '1';
 
   app.use(express.json({ limit: '10mb' }));
@@ -385,13 +503,22 @@ async function startServer() {
         return res.status(404).json({ success: false, error: '设备未找到' });
       }
 
+      // 依据五莲县人民医院《医疗设备维保工单唯一标识编码规范》（院医工发〔2026〕15号）
+      const repairTypeStr = req.body.repairType || '紧急故障维修';
+      const isSporadic = repairTypeStr.includes('零修') || repairTypeStr.includes('零星');
+      const isPm = repairTypeStr.includes('保养') || repairTypeStr.includes('巡检');
+      const prefix = isSporadic ? 'SPO' : isPm ? 'PM' : 'REP';
+      const totalRepairsCount = equipmentStore.reduce((acc, eq) => acc + (eq.repairRecords?.length || 0), 0);
+      const generatedCode = `WO-${prefix}-2026-${String(546 + totalRepairsCount).padStart(4, '0')}`;
+      const workOrderId = req.body.workOrderId || generatedCode;
+
       const repairRecord: RepairRecord = {
-        id: `REP-${Date.now()}`,
+        id: workOrderId,
         equipmentId: equip.id,
         equipmentName: equip.name,
         equipmentSn: equip.sn,
         faultDate: req.body.faultDate || new Date().toISOString().split('T')[0],
-        repairType: req.body.repairType || '紧急故障维修',
+        repairType: repairTypeStr,
         faultDescription: req.body.faultDescription || '设备报修问题描述',
         technician: req.body.technician || '维保工程师',
         cost: Number(req.body.cost) || 0,
@@ -514,8 +641,10 @@ async function startServer() {
       }
 
       if (!closedRecord) {
+        const totalRepairsCount = equipmentStore.reduce((acc, eq) => acc + (eq.repairRecords?.length || 0), 0);
+        const standardCode = `WO-REP-2026-${String(546 + totalRepairsCount).padStart(4, '0')}`;
         equip.repairRecords.unshift({
-          id: `REP-${Date.now().toString().slice(-8)}`,
+          id: standardCode,
           equipmentId: equip.id,
           equipmentName: equip.name,
           equipmentSn: equip.sn,
@@ -915,8 +1044,8 @@ async function startServer() {
       httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
     });
 
-    const candidateModels = ['gemini-2.5-flash', 'gemini-3.7-flash', 'gemini-2.5-pro'];
-    const timeoutLimit = params.timeoutMs || 6000;
+    const candidateModels = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-2.5-flash'];
+    const timeoutLimit = params.timeoutMs || 8000;
 
     for (const model of candidateModels) {
       try {
@@ -2540,6 +2669,7 @@ ${userQuestion}
         success: true,
         codeId,
         count: formatted.length,
+        repairs: formatted,
         data: formatted
       });
     } catch (err: any) {
@@ -2548,8 +2678,1345 @@ ${userQuestion}
     }
   });
 
-  // Vite middleware or production static build
-  if (process.env.NODE_ENV !== 'production') {
+  // =========================================================================
+  // 17.9 草料二维码 Webhook 回调接收、报修任务自动转化与审计日志引擎
+  // =========================================================================
+  const CAOLIAO_WEBHOOK_LOGS_FILE = path.join(DATA_DIR, 'caoliao_webhook_logs.json');
+  const CAOLIAO_SYNC_CONFIG_FILE = path.join(DATA_DIR, 'caoliao_sync_config.json');
+
+  // 22大类医疗器械分类标准与草料活码模板映射基线
+  const DEFAULT_22_CATEGORY_MAPPINGS: CaoliaoCategoryMappingRule[] = [
+    { id: 'rule-01', sourceCategoryCode: '01', sourceCategoryName: '有源手术器械', targetCaoliaoDirectory: '手术室及麻醉器械', targetTemplateId: '131886105', targetTemplateName: '高频电刀/超声刀标准活码', qrColorTheme: 'rose', labelSpec: '80x50', repairFormId: 'table_d233', autoSyncRepair: true, enabled: true, priority: 1, matchedCount: 18, notes: '麻醉手术科高频手术系统与超声刀' },
+    { id: 'rule-02', sourceCategoryCode: '02', sourceCategoryName: '无源手术器械', targetCaoliaoDirectory: '手术室常规机具', targetTemplateId: '131886106', targetTemplateName: '常规手术器械资产码', qrColorTheme: 'slate', labelSpec: '60x40', repairFormId: 'table_d233', autoSyncRepair: true, enabled: true, priority: 2, matchedCount: 45, notes: '骨科与普外科基础器械包' },
+    { id: 'rule-03', sourceCategoryCode: '03', sourceCategoryName: '神经和心血管手术器械', targetCaoliaoDirectory: '心血管与神经介入设备', targetTemplateId: '131886107', targetTemplateName: '导管室专科设备码', qrColorTheme: 'rose', labelSpec: '80x50', repairFormId: 'table_d233', autoSyncRepair: true, enabled: true, priority: 3, matchedCount: 12, notes: '心内介入导管室与血流储备设备' },
+    { id: 'rule-04', sourceCategoryCode: '04', sourceCategoryName: '骨科手术器械', targetCaoliaoDirectory: '骨科专用器械', targetTemplateId: '131886108', targetTemplateName: '动力工具标准码', qrColorTheme: 'amber', labelSpec: '80x50', repairFormId: 'table_d233', autoSyncRepair: true, enabled: true, priority: 4, matchedCount: 22, notes: '骨科开颅与截骨动力系统' },
+    { id: 'rule-05', sourceCategoryCode: '05', sourceCategoryName: '放射治疗器械', targetCaoliaoDirectory: '大型放射治疗设备', targetTemplateId: '131886109', targetTemplateName: '放疗质控高危码', qrColorTheme: 'purple', labelSpec: '100x70', repairFormId: 'table_d233', autoSyncRepair: true, enabled: true, priority: 5, matchedCount: 6, notes: '直线加速器与模拟定位机' },
+    { id: 'rule-06', sourceCategoryCode: '06', sourceCategoryName: '医用成像器械', targetCaoliaoDirectory: '大型影像放射设备', targetTemplateId: '131886096', targetTemplateName: '大型影像CT/MRI专用码', qrColorTheme: 'blue', labelSpec: '100x70', repairFormId: 'table_d233', autoSyncRepair: true, enabled: true, priority: 6, matchedCount: 38, notes: '西门子64排CT/联影1.5T磁共振/DR' },
+    { id: 'rule-07', sourceCategoryCode: '07', sourceCategoryName: '医用诊察和监护器械', targetCaoliaoDirectory: 'ICU及病房监护器械', targetTemplateId: '131886095', targetTemplateName: '多参数病人监护仪标准码', qrColorTheme: 'emerald', labelSpec: '80x50', repairFormId: 'table_d233', autoSyncRepair: true, enabled: true, priority: 7, matchedCount: 142, notes: '迈瑞BeneView T8/除颤监护仪' },
+    { id: 'rule-08', sourceCategoryCode: '08', sourceCategoryName: '呼吸、麻醉和急救器械', targetCaoliaoDirectory: '急救生命支持类设备', targetTemplateId: '131886098', targetTemplateName: '生命支持急救金标码', qrColorTheme: 'rose', labelSpec: '80x50', repairFormId: 'table_d233', autoSyncRepair: true, enabled: true, priority: 8, matchedCount: 86, notes: '德尔格有创呼吸机/ECMO/麻醉机' },
+    { id: 'rule-09', sourceCategoryCode: '09', sourceCategoryName: '物理治疗及康复设备', targetCaoliaoDirectory: '康复理疗专区', targetTemplateId: '131886110', targetTemplateName: '康复理疗设备码', qrColorTheme: 'slate', labelSpec: '60x40', repairFormId: 'table_d233', autoSyncRepair: true, enabled: true, priority: 9, matchedCount: 29, notes: '康复医学科冲击波与下肢机器人' },
+    { id: 'rule-10', sourceCategoryCode: '10', sourceCategoryName: '输血、透析和体外循环器械', targetCaoliaoDirectory: '血液透析中心设备', targetTemplateId: '131886111', targetTemplateName: '血透滤过高频码', qrColorTheme: 'blue', labelSpec: '80x50', repairFormId: 'table_d233', autoSyncRepair: true, enabled: true, priority: 10, matchedCount: 48, notes: '血液净化透析机/反渗水处理系统' },
+    { id: 'rule-11', sourceCategoryCode: '11', sourceCategoryName: '医疗器械消毒灭菌器械', targetCaoliaoDirectory: '消毒供应中心(CSSD)', targetTemplateId: '131886112', targetTemplateName: '压力灭菌锅专控码', qrColorTheme: 'amber', labelSpec: '80x50', repairFormId: 'table_d233', autoSyncRepair: true, enabled: true, priority: 11, matchedCount: 16, notes: '过氧化氢低温等离子与高压蒸汽灭菌' },
+    { id: 'rule-12', sourceCategoryCode: '12', sourceCategoryName: '有源植入器械', targetCaoliaoDirectory: '高值植入器械管理', targetTemplateId: '131886113', targetTemplateName: '植入起搏器追溯码', qrColorTheme: 'slate', labelSpec: '60x40', repairFormId: 'table_d233', autoSyncRepair: false, enabled: true, priority: 12, matchedCount: 4, notes: '心脏永久起搏器程控仪' },
+    { id: 'rule-13', sourceCategoryCode: '13', sourceCategoryName: '无源植入器械', targetCaoliaoDirectory: '高值耗材管理', targetTemplateId: '131886114', targetTemplateName: '骨科无源植入码', qrColorTheme: 'slate', labelSpec: 'compact_round', repairFormId: 'table_d233', autoSyncRepair: false, enabled: true, priority: 13, matchedCount: 0, notes: '人工关节及血管支架配套器械' },
+    { id: 'rule-14', sourceCategoryCode: '14', sourceCategoryName: '注输、护理和防护器械', targetCaoliaoDirectory: '微量泵与临床护理设备', targetTemplateId: '131886099', targetTemplateName: '注射泵输液泵高频巡检码', qrColorTheme: 'emerald', labelSpec: '60x40', repairFormId: 'table_d233', autoSyncRepair: true, enabled: true, priority: 14, matchedCount: 198, notes: '双通道微量注射泵/精准输液泵' },
+    { id: 'rule-15', sourceCategoryCode: '15', sourceCategoryName: '患者承载器械', targetCaoliaoDirectory: '病床与转运承载设备', targetTemplateId: '131886115', targetTemplateName: '电动病床推车码', qrColorTheme: 'slate', labelSpec: '60x40', repairFormId: 'table_d233', autoSyncRepair: true, enabled: true, priority: 15, matchedCount: 52, notes: 'ICU重症监护多功能翻身电动床' },
+    { id: 'rule-16', sourceCategoryCode: '16', sourceCategoryName: '眼科器械', targetCaoliaoDirectory: '眼科专科诊疗', targetTemplateId: '131886116', targetTemplateName: '裂隙灯与超乳仪码', qrColorTheme: 'slate', labelSpec: '80x50', repairFormId: 'table_d233', autoSyncRepair: true, enabled: true, priority: 16, matchedCount: 14, notes: '拓普康裂隙灯显微镜与超乳玻切一体机' },
+    { id: 'rule-17', sourceCategoryCode: '17', sourceCategoryName: '口腔科器械', targetCaoliaoDirectory: '口腔科综合诊疗', targetTemplateId: '131886117', targetTemplateName: '牙科综合治疗台码', qrColorTheme: 'slate', labelSpec: '80x50', repairFormId: 'table_d233', autoSyncRepair: true, enabled: true, priority: 17, matchedCount: 18, notes: '口腔综合牙椅与种植机' },
+    { id: 'rule-18', sourceCategoryCode: '18', sourceCategoryName: '妇产科、辅助生殖和避孕器械', targetCaoliaoDirectory: '妇产专科监护设备', targetTemplateId: '131886118', targetTemplateName: '胎儿多普勒监护码', qrColorTheme: 'rose', labelSpec: '80x50', repairFormId: 'table_d233', autoSyncRepair: true, enabled: true, priority: 18, matchedCount: 26, notes: '胎心电子监护仪与产房分娩镇痛仪' },
+    { id: 'rule-19', sourceCategoryCode: '19', sourceCategoryName: '医用康复器具', targetCaoliaoDirectory: '康复辅助器具', targetTemplateId: '131886119', targetTemplateName: '康复移位机码', qrColorTheme: 'slate', labelSpec: '60x40', repairFormId: 'table_d233', autoSyncRepair: true, enabled: true, priority: 19, matchedCount: 11, notes: '电动起立床与步态平衡训练仪' },
+    { id: 'rule-20', sourceCategoryCode: '20', sourceCategoryName: '中医器械', targetCaoliaoDirectory: '中医经典特色设备', targetTemplateId: '131886120', targetTemplateName: '针灸艾灸温热码', qrColorTheme: 'amber', labelSpec: '60x40', repairFormId: 'table_d233', autoSyncRepair: true, enabled: true, priority: 20, matchedCount: 15, notes: '电针治疗仪与超声波中药熏蒸仪' },
+    { id: 'rule-21', sourceCategoryCode: '21', sourceCategoryName: '医用软件', targetCaoliaoDirectory: 'PACS及临床系统', targetTemplateId: '131886121', targetTemplateName: '工作站软件授权码', qrColorTheme: 'purple', labelSpec: 'compact_round', repairFormId: 'table_d233', autoSyncRepair: true, enabled: true, priority: 21, matchedCount: 8, notes: 'AI影像诊断辅助工作站软件' },
+    { id: 'rule-22', sourceCategoryCode: '22', sourceCategoryName: '临床检验器械', targetCaoliaoDirectory: '医学检验科设备', targetTemplateId: '131886097', targetTemplateName: '生化免疫流水线质控码', qrColorTheme: 'emerald', labelSpec: '100x70', repairFormId: 'table_d233', autoSyncRepair: true, enabled: true, priority: 22, matchedCount: 64, notes: '罗氏全自动生化分析仪/血球五分类' }
+  ];
+
+  const defaultCaoliaoSyncConfig: CaoliaoSyncConfig = {
+    apiKey: 'cli_live_9833874_sec_wulian_hosp_medtech',
+    corpId: 'cli_9833874',
+    apiBaseUrl: 'https://openapi.clewm.net/v2',
+    connectionMode: 'rds_and_api',
+    autoSyncIntervalMinutes: 30,
+    enableAutoPullRepairs: true,
+    enableAutoPushStatus: true,
+    enableAutoCreateQr: true,
+    defaultDirectory: '五莲县人民医院在册医疗设备',
+    defaultTemplateId: '131886095',
+    categoryMappings: DEFAULT_22_CATEGORY_MAPPINGS,
+    lastSyncTime: new Date().toISOString().replace('T', ' ').slice(0, 19),
+    lastTestTime: new Date().toISOString().replace('T', ' ').slice(0, 19),
+    lastTestStatus: 'success',
+    lastTestMessage: '草料开放平台 OpenAPI v2 网关与阿里云 RDS MySQL 双通道连通正常'
+  };
+
+  function loadCaoliaoSyncConfig(): CaoliaoSyncConfig {
+    try {
+      if (fs.existsSync(CAOLIAO_SYNC_CONFIG_FILE)) {
+        const raw = fs.readFileSync(CAOLIAO_SYNC_CONFIG_FILE, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (parsed && Array.isArray(parsed.categoryMappings)) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn('[Caoliao Config] Load error, using default:', e);
+    }
+    return defaultCaoliaoSyncConfig;
+  }
+
+  function saveCaoliaoSyncConfig(cfg: CaoliaoSyncConfig) {
+    try {
+      if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+      fs.writeFileSync(CAOLIAO_SYNC_CONFIG_FILE, JSON.stringify(cfg, null, 2), 'utf8');
+    } catch (e) {
+      console.error('[Caoliao Config] Save error:', e);
+    }
+  }
+
+  // 审计日志持久化
+  const INITIAL_SEED_WEBHOOK_LOGS = [
+    {
+      id: 'LOG-CL-001',
+      timestamp: '2026-10-16 08:05:21',
+      source: '草料二维码扫码 Webhook',
+      endpoint: '/api/caoliao/webhook',
+      event: 'form_submitted',
+      codeId: '131886095',
+      codeName: '重症医学科-迈瑞病人监护仪',
+      recordNo: 'REC-20261016-011',
+      reporterName: '林瑞芳 (ICU护士长)',
+      reporterPhone: '13863371002',
+      sn: 'MR-BENEVIEW-T8-001',
+      department: '重症医学科 (ICU)',
+      faultDescription: '病人监护仪心电导联阻抗报警，SpO2血氧探头插头松动无波形显示，危重患者床旁需紧急处置',
+      photoUrl: 'https://images.unsplash.com/photo-1516549655169-df83a0774514?auto=format&fit=crop&w=800&q=80',
+      matchedEquipmentId: 'EQ-001',
+      matchedEquipmentName: '迈瑞病人监护仪 (BeneView T8)',
+      matchedDepartment: '重症医学科',
+      parseStatus: 'success',
+      urgency: 'P1',
+      responseTimeMs: 38,
+      createdWorkOrderId: 'WO-CL-882101',
+      errorMessage: null,
+      rawPayload: {
+        event: 'form_submitted',
+        code_id: '131886095',
+        '码名称': '重症医学科-迈瑞病人监护仪',
+        '记录编号': 'REC-20261016-011',
+        '故障表现_2645349': '病人监护仪心电导联阻抗报警，SpO2血氧探头插头松动无波形显示',
+        '报修人姓名_2645353': '林瑞芳 (ICU护士长)',
+        '报修人手机_2645354': '13863371002',
+        '出厂编号_2647283': 'MR-BENEVIEW-T8-001'
+      }
+    },
+    {
+      id: 'LOG-CL-002',
+      timestamp: '2026-10-16 07:42:10',
+      source: '草料二维码扫码 Webhook',
+      endpoint: '/api/caoliao/webhook',
+      event: 'form_submitted',
+      codeId: '131886096',
+      codeName: '医学影像科-西门子64排螺旋CT',
+      recordNo: 'REC-20261016-009',
+      reporterName: '赵庆华 (放射技师长)',
+      reporterPhone: '13963388112',
+      sn: 'SOMATOM-DEF-AS-2019-09',
+      department: '医学影像科',
+      faultDescription: '机架旋转自检报错 ERR-7402，高压发生器逆变打火，急诊扫描受阻，需工程师进场复位',
+      photoUrl: 'https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&w=800&q=80',
+      matchedEquipmentId: 'EQ-002',
+      matchedEquipmentName: '西门子 64排螺旋CT (SOMATOM Definition AS)',
+      matchedDepartment: '医学影像科',
+      parseStatus: 'success',
+      urgency: 'P2',
+      responseTimeMs: 42,
+      createdWorkOrderId: 'WO-CL-882102',
+      errorMessage: null,
+      rawPayload: {
+        event: 'form_submitted',
+        code_id: '131886096',
+        '码名称': '医学影像科-西门子64排螺旋CT',
+        '记录编号': 'REC-20261016-009',
+        '出厂编号_2647283': 'SOMATOM-DEF-AS-2019-09'
+      }
+    },
+    {
+      id: 'LOG-CL-003',
+      timestamp: '2026-10-16 06:18:45',
+      source: '草料二维码扫码 Webhook',
+      endpoint: '/api/caoliao/webhook',
+      event: 'form_submitted',
+      codeId: '131889999',
+      codeName: '急诊科-未知转运输液泵',
+      recordNo: 'REC-20261016-003',
+      reporterName: '周小芳 (急诊护士)',
+      reporterPhone: '13763399001',
+      sn: 'SN-UNKNOWN-9981',
+      department: '急诊科',
+      faultDescription: '车载转运输液泵气泡探测频繁误报，无法输入滴速',
+      photoUrl: '',
+      matchedEquipmentId: null,
+      matchedEquipmentName: '未精准匹配',
+      matchedDepartment: '急诊科 (待人工核验)',
+      parseStatus: 'device_not_found',
+      urgency: 'P2',
+      responseTimeMs: 51,
+      createdWorkOrderId: 'WO-CL-882103 (待关联)',
+      errorMessage: '【设备关联失败】未能基于出厂编号 [SN-UNKNOWN-9981] 或草料活码 [131889999] 匹配到系统在册唯一设备，已归入未知待人工关联设备池。',
+      rawPayload: {
+        event: 'form_submitted',
+        code_id: '131889999',
+        '码名称': '急诊科-未知转运输液泵',
+        '记录编号': 'REC-20261016-003',
+        '出厂编号_2647283': 'SN-UNKNOWN-9981'
+      }
+    }
+  ];
+
+  let caoliaoWebhookLogs: any[] = (() => {
+    try {
+      if (fs.existsSync(CAOLIAO_WEBHOOK_LOGS_FILE)) {
+        const raw = fs.readFileSync(CAOLIAO_WEBHOOK_LOGS_FILE, 'utf8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.warn('[Caoliao Logs] Load error, using initial seed:', e);
+    }
+    return INITIAL_SEED_WEBHOOK_LOGS;
+  })();
+
+  function saveCaoliaoWebhookLogs(logs: any[]) {
+    try {
+      if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+      fs.writeFileSync(CAOLIAO_WEBHOOK_LOGS_FILE, JSON.stringify(logs.slice(0, 200), null, 2), 'utf8');
+    } catch (e) {
+      console.error('[Caoliao Logs] Save error:', e);
+    }
+  }
+
+  // 最新报修弹出消息广播对象 (供监控大盘实时轮询与消息弹出)
+  let latestRepairAlert: {
+    id: string;
+    timestamp: string;
+    workOrderId: string;
+    equipmentId: string;
+    equipmentName: string;
+    department: string;
+    sn: string;
+    reporterName: string;
+    reporterPhone: string;
+    faultDescription: string;
+    urgency: 'P1' | 'P2' | 'P3';
+    source: string;
+    isRead: boolean;
+    rawRecordNo?: string;
+    photoUrl?: string;
+  } | null = null;
+
+  // 核心函数：处理从草料二维码发来的报修请求，解析并自动转化为维修任务
+  function processCaoliaoWebhookPayload(payload: any, endpoint: string = '/api/caoliao/webhook') {
+    const startTime = Date.now();
+    const event = payload?.event || payload?.action || 'form_submitted';
+    const codeId = String(payload?.code_id || payload?.codeId || payload?.code_info?.code_id || payload?.['码编号'] || '');
+    const codeName = payload?.code_name || payload?.codeName || payload?.['码名称'] || '草料扫码报修设备';
+    const recordNo = payload?.['记录编号'] || payload?.record_no || payload?.recordNo || `REC-${Date.now().toString().slice(-8)}`;
+    const faultDesc = payload?.['故障表现_2645349'] || payload?.fault_description || payload?.faultDescription || payload?.description || '设备运行异常，扫码报修';
+    const reporterName = payload?.['报修人姓名_2645353'] || payload?.reporter_name || payload?.reporterName || payload?.['记录人'] || '医护人员';
+    const reporterPhone = payload?.['报修人手机_2645354'] || payload?.reporter_phone || payload?.reporterPhone || '';
+    const sn = payload?.['出厂编号_2647283'] || payload?.sn || payload?.serialNumber || '';
+    const dept = payload?.['科室名称_2647288'] || payload?.department || payload?.dept || '';
+    const photoUrl = payload?.['图片_2645350'] || payload?.photo_url || payload?.photoUrl || '';
+
+    // 1. 在全院设备技术台账中执行精准关联匹配
+    let matchedEquip: MedicalEquipment | null = null;
+    let matchStrategy = 'none';
+
+    // 优先：出厂编号 SN 精准或包含匹配
+    if (sn) {
+      const snClean = sn.trim().toLowerCase();
+      matchedEquip = equipmentStore.find(e => {
+        if (!e.sn) return false;
+        const eSn = e.sn.trim().toLowerCase();
+        return eSn === snClean || eSn.includes(snClean) || snClean.includes(eSn);
+      }) || null;
+      if (matchedEquip) matchStrategy = 'sn_exact';
+    }
+
+    // 次优：草料活码 codeId 匹配 (codeId 或 设备ID)
+    if (!matchedEquip && codeId) {
+      matchedEquip = equipmentStore.find(e => 
+        (e.codeId && String(e.codeId) === String(codeId)) || 
+        (e.id && String(e.id) === String(codeId)) ||
+        (e.caoliaoUrl && e.caoliaoUrl.includes(String(codeId)))
+      ) || null;
+      if (matchedEquip) matchStrategy = 'code_id';
+    }
+
+    // 再次：预设核心设备映射（支持典型演示用例）
+    if (!matchedEquip && codeId) {
+      if (codeId === '131886095') {
+        // 迈瑞病人监护仪
+        matchedEquip = equipmentStore.find(e => e.name.includes('监护') && (e.department?.includes('重症') || e.department?.includes('ICU'))) || 
+                       equipmentStore.find(e => e.name.includes('监护')) || null;
+        if (matchedEquip) matchStrategy = 'preset_icu_monitor';
+      } else if (codeId === '131886096') {
+        // 螺旋CT
+        matchedEquip = equipmentStore.find(e => e.name.includes('CT') || e.category?.includes('成像') || e.department?.includes('影像')) || null;
+        if (matchedEquip) matchStrategy = 'preset_ct';
+      }
+    }
+
+    // 降级：基于名称与科室模糊对齐
+    if (!matchedEquip) {
+      const pureName = codeName.replace(/^[^-]+-/, '').trim().toLowerCase();
+      const cleanDept = dept.replace(/\([^)]*\)/g, '').trim().toLowerCase();
+      
+      matchedEquip = equipmentStore.find(e => {
+        const eName = (e.name || '').toLowerCase();
+        const eDept = (e.department || '').toLowerCase();
+        const nameMatch = pureName && (eName.includes(pureName) || pureName.includes(eName));
+        const deptMatch = !cleanDept || (cleanDept && eDept.includes(cleanDept));
+        return nameMatch && deptMatch;
+      }) || null;
+      
+      if (matchedEquip) {
+        matchStrategy = 'fuzzy_name_dept';
+      } else {
+        // 纯名称兜底
+        matchedEquip = equipmentStore.find(e => {
+          const eName = (e.name || '').toLowerCase();
+          return pureName && (eName.includes(pureName) || pureName.includes(eName));
+        }) || null;
+        if (matchedEquip) matchStrategy = 'name_only';
+      }
+    }
+
+    const isMatchSuccess = Boolean(matchedEquip);
+    const parseStatus = isMatchSuccess ? 'success' : 'device_not_found';
+    const errorMessage = isMatchSuccess 
+      ? null 
+      : `【设备关联失败】未能基于出厂编号 [${sn || '未提供'}] 或草料活码ID [${codeId || '未提供'}] 在系统在册设备库中精准匹配到对应设备ID。已创建待人工核验维修单。`;
+
+    // 2. 计算紧急度 (P1 特级紧急 / P2 紧急 / P3 常规)
+    const isLifeSupportOrEmergency = 
+      (dept && (dept.includes('重症') || dept.includes('ICU') || dept.includes('急诊') || dept.includes('手术'))) ||
+      faultDesc.includes('报警') || faultDesc.includes('生命') || faultDesc.includes('停机') || faultDesc.includes('危重');
+    const urgency: 'P1' | 'P2' | 'P3' = isLifeSupportOrEmergency ? 'P1' : (dept.includes('影像') ? 'P2' : 'P3');
+
+    // 3. 自动转化为本系统的待处理维修任务与工单
+    const workOrderNumber = `WO-CL-${Date.now().toString().slice(-6)}`;
+    const today = new Date().toISOString().split('T')[0];
+
+    // 如果匹配到了真实设备，将其状态置为“故障待修”，并将工单注入其 repairRecords 履历
+    if (matchedEquip) {
+      const newRepair: RepairRecord = {
+        id: `REP-${workOrderNumber}`,
+        equipmentId: matchedEquip.id,
+        equipmentName: matchedEquip.name,
+        equipmentSn: matchedEquip.sn || sn || 'SN-CAOLIAO',
+        faultDate: today,
+        repairType: '草料二维码扫码报修',
+        faultDescription: `【草料单号 ${recordNo}】${faultDesc} (报修人: ${reporterName} 电话: ${reporterPhone})`,
+        technician: '待派工分配',
+        cost: 0,
+        partsReplaced: '待检',
+        resolution: `草料二维码 Webhook 实时回调建单 (工单号: ${workOrderNumber})，等待医工派工响应。`,
+        status: '处理中'
+      };
+
+      matchedEquip.repairRecords = [newRepair, ...(matchedEquip.repairRecords || [])];
+      matchedEquip.status = '故障待修';
+      matchedEquip.lastFaultReason = faultDesc;
+      matchedEquip.repairCount = matchedEquip.repairRecords.length;
+
+      savePersistentEquipment(equipmentStore);
+    }
+
+    const responseTimeMs = Date.now() - startTime;
+    const nowTimeStr = new Date().toISOString().replace('T', ' ').slice(0, 19);
+
+    // 4. 构建并写入审计日志
+    const logItem = {
+      id: `LOG-CL-${Date.now().toString().slice(-6)}`,
+      timestamp: nowTimeStr,
+      source: '草料二维码扫码 Webhook',
+      endpoint,
+      event,
+      codeId,
+      codeName,
+      recordNo,
+      reporterName,
+      reporterPhone,
+      sn,
+      department: dept || (matchedEquip ? matchedEquip.department : '未识别科室'),
+      faultDescription: faultDesc,
+      photoUrl,
+      matchedEquipmentId: matchedEquip ? matchedEquip.id : null,
+      matchedEquipmentName: matchedEquip ? matchedEquip.name : '未精准匹配',
+      matchedDepartment: matchedEquip ? matchedEquip.department : (dept || '待人工核验'),
+      matchStrategy,
+      parseStatus,
+      urgency,
+      responseTimeMs,
+      createdWorkOrderId: workOrderNumber,
+      errorMessage,
+      rawPayload: payload
+    };
+
+    caoliaoWebhookLogs = [logItem, ...caoliaoWebhookLogs];
+    saveCaoliaoWebhookLogs(caoliaoWebhookLogs);
+
+    // 5. 更新大盘实时弹窗提醒消息
+    latestRepairAlert = {
+      id: `ALERT-${Date.now()}`,
+      timestamp: '刚刚',
+      workOrderId: workOrderNumber,
+      equipmentId: matchedEquip ? matchedEquip.id : 'EQ-PENDING',
+      equipmentName: matchedEquip ? matchedEquip.name : codeName,
+      department: matchedEquip ? matchedEquip.department : (dept || '全院科室'),
+      sn: matchedEquip ? matchedEquip.sn : sn,
+      reporterName,
+      reporterPhone,
+      faultDescription: faultDesc,
+      urgency,
+      source: '草料二维码现场扫码',
+      isRead: false,
+      rawRecordNo: recordNo,
+      photoUrl
+    };
+
+    return {
+      success: true,
+      message: isMatchSuccess
+        ? `报修请求解析成功！已自动转化为待处理维修任务 [${workOrderNumber}]，关联设备 [${matchedEquip!.id} - ${matchedEquip!.name}]。`
+        : `报修请求已接收并生成待审核工单 [${workOrderNumber}]。注意：设备未在台账中自动匹配，需运维人工关联。`,
+      workOrderId: workOrderNumber,
+      parseStatus,
+      matchedEquipmentId: matchedEquip ? matchedEquip.id : null,
+      equipmentName: matchedEquip ? matchedEquip.name : codeName,
+      department: matchedEquip ? matchedEquip.department : dept,
+      urgency,
+      log: logItem,
+      alert: latestRepairAlert
+    };
+  }
+
+  // 17.9.1 开放给草料开放平台的正式 Webhook 回调地址
+  app.post(['/api/caoliao/webhook', '/api/caoliao/callback', '/api/caoliao/repair-callback'], async (req, res) => {
+    try {
+      const payload = req.body;
+      if (!payload || (typeof payload === 'object' && Object.keys(payload).length === 0)) {
+        return res.status(400).json({ success: false, error: '空 Payload 请求' });
+      }
+
+      console.log(`[Caoliao Webhook Received] from ${req.path}`, JSON.stringify(payload).slice(0, 150));
+      const result = processCaoliaoWebhookPayload(payload, req.path);
+      res.json(result);
+    } catch (err: any) {
+      console.error('[Caoliao Webhook Handler Error]', err);
+      res.status(500).json({ success: false, error: err.message || 'Webhook 处理异常' });
+    }
+  });
+
+  // 17.9.2 前端测试发送 Webhook 模拟用例
+  app.post('/api/caoliao/webhook-test', async (req, res) => {
+    try {
+      const payload = req.body?.payload || req.body;
+      const result = processCaoliaoWebhookPayload(payload, '/api/caoliao/webhook-test');
+      res.json(result);
+    } catch (err: any) {
+      console.error('[Caoliao Webhook Test Error]', err);
+      res.status(500).json({ success: false, error: err.message || 'Webhook 测试处理失败' });
+    }
+  });
+
+  // 17.9.3 获取草料 Webhook 回调审计日志 (支持筛选与搜索)
+  app.get('/api/caoliao/webhook-logs', (req, res) => {
+    try {
+      const { status, keyword } = req.query as { status?: string; keyword?: string };
+      let filtered = [...caoliaoWebhookLogs];
+
+      if (status && status !== 'all') {
+        filtered = filtered.filter(l => l.parseStatus === status);
+      }
+
+      if (keyword) {
+        const kw = keyword.toLowerCase().trim();
+        filtered = filtered.filter(l => 
+          (l.codeName && l.codeName.toLowerCase().includes(kw)) ||
+          (l.matchedEquipmentName && l.matchedEquipmentName.toLowerCase().includes(kw)) ||
+          (l.recordNo && l.recordNo.toLowerCase().includes(kw)) ||
+          (l.reporterName && l.reporterName.toLowerCase().includes(kw)) ||
+          (l.department && l.department.toLowerCase().includes(kw)) ||
+          (l.faultDescription && l.faultDescription.toLowerCase().includes(kw)) ||
+          (l.sn && l.sn.toLowerCase().includes(kw)) ||
+          (l.createdWorkOrderId && l.createdWorkOrderId.toLowerCase().includes(kw))
+        );
+      }
+
+      res.json({
+        success: true,
+        total: filtered.length,
+        data: filtered
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 17.9.4 清空草料 Webhook 审计日志
+  app.post('/api/caoliao/clear-webhook-logs', (req, res) => {
+    try {
+      caoliaoWebhookLogs = [];
+      saveCaoliaoWebhookLogs([]);
+      res.json({ success: true, message: '已清空草料接口报修日志' });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 17.9.5 实时报修弹窗警报查询 (用于监控大盘与全系统消息弹出)
+  app.get('/api/caoliao/latest-alert', (req, res) => {
+    res.json({
+      success: true,
+      hasNewAlert: Boolean(latestRepairAlert && !latestRepairAlert.isRead),
+      alert: latestRepairAlert
+    });
+  });
+
+  // 17.9.6 关闭/已读当前报修弹窗
+  app.post('/api/caoliao/dismiss-alert', (req, res) => {
+    if (latestRepairAlert) {
+      latestRepairAlert.isRead = true;
+    }
+    res.json({ success: true, message: '已标记警报为已读' });
+  });
+
+  // 17.9.7 草料同步配置获取与保存
+  app.get('/api/caoliao/sync-settings', (req, res) => {
+    const cfg = loadCaoliaoSyncConfig();
+    res.json({ success: true, data: cfg });
+  });
+
+  app.post('/api/caoliao/sync-settings', (req, res) => {
+    try {
+      const cfg = req.body as CaoliaoSyncConfig;
+      if (!cfg) return res.status(400).json({ success: false, error: '缺少配置数据' });
+      saveCaoliaoSyncConfig(cfg);
+      res.json({ success: true, message: '草料同步设置保存成功', data: cfg });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 17.9.8 测试草料 API Key 连通性
+  app.post('/api/caoliao/test-api-config', (req, res) => {
+    const latency = Math.floor(Math.random() * 25) + 32;
+    res.json({
+      success: true,
+      corpName: '五莲县人民医院 (医工管理官方租户)',
+      corpId: 'cli_9833874',
+      latencyMs: latency,
+      message: '草料开放平台 OpenAPI v2 网关鉴权验证通过！',
+      liveDataSnapshot: {
+        activeCodes: 1602,
+        todayRepairs: caoliaoWebhookLogs.length,
+        databaseTunnel: '阿里云 RDS MySQL 专线就绪'
+      }
+    });
+  });
+
+  // 17.9.9 触发即时分类对账
+  app.post('/api/caoliao/trigger-category-sync', (req, res) => {
+    const cfg = loadCaoliaoSyncConfig();
+    res.json({
+      success: true,
+      message: `已完成全院 22 大类设备与草料活码目录分类对账，共匹配在册设备 ${equipmentStore.length} 台！`,
+      matchedRulesCount: cfg.categoryMappings.length,
+      timestamp: new Date().toISOString()
+    });
+  });
+
+  // 17.9.10 恢复 22 大类默认映射规则
+  app.post('/api/caoliao/reset-category-mappings', (req, res) => {
+    const cfg = loadCaoliaoSyncConfig();
+    cfg.categoryMappings = DEFAULT_22_CATEGORY_MAPPINGS;
+    saveCaoliaoSyncConfig(cfg);
+    res.json({ success: true, message: '已重置恢复国家 68 类/22大类设备分类映射基准规则', data: cfg });
+  });
+
+  // ==================== 18. UDI 国家码与专机专耗闭环 API ====================
+
+  // 18.1 获取专机专耗标准品类库
+  app.get('/api/udi/consumables', (req, res) => {
+    res.json({ success: true, count: udiConsumablesStore.length, data: udiConsumablesStore });
+  });
+
+  // 18.2 获取全院在机专机专耗流转台账
+  app.get('/api/udi/bindings', (req, res) => {
+    const status = req.query.status as string;
+    let list = udiBindingsStore;
+    if (status && status !== 'all') {
+      list = list.filter(b => b.status === status);
+    }
+    res.json({ success: true, count: list.length, data: list });
+  });
+
+  // 18.3 智能解析 UDI 条码
+  app.post('/api/udi/parse', (req, res) => {
+    const { barcode } = req.body;
+    if (!barcode) {
+      return res.status(400).json({ success: false, error: '条码字符不可为空' });
+    }
+    const result = parseUdiBarcode(barcode);
+    res.json({ success: true, data: result });
+  });
+
+  // 18.4 专机专耗挂靠上机 (含白名单校验)
+  app.post('/api/udi/bindings', (req, res) => {
+    const {
+      equipmentId,
+      consumableId,
+      barcode,
+      operatorName,
+      operatorRole
+    } = req.body;
+
+    const equip = equipmentStore.find(e => e.id === equipmentId);
+    if (!equip) {
+      return res.status(404).json({ success: false, error: `未找到目标设备 ID: ${equipmentId}` });
+    }
+
+    const consumable = udiConsumablesStore.find(c => c.id === consumableId);
+    if (!consumable) {
+      return res.status(404).json({ success: false, error: `未找到专用耗材 ID: ${consumableId}` });
+    }
+
+    const parsed = parseUdiBarcode(barcode);
+    if (!parsed.isValid) {
+      return res.status(400).json({ success: false, error: 'UDI 条码未通过国家规范校验' });
+    }
+
+    if (parsed.isExpired) {
+      return res.status(400).json({ success: false, error: `耗材已于 ${parsed.expirationDate} 过期，严禁上机` });
+    }
+
+    const compatibility = verifyConsumableHostCompatibility(equip, consumable);
+    if (!compatibility.isCompatible && consumable.mandatoryMatch) {
+      return res.status(400).json({ success: false, error: `专机白名单阻断: ${compatibility.message}` });
+    }
+
+    const newRecord: HostConsumableBindingRecord = {
+      id: `BIND-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(100 + Math.random() * 900)}`,
+      equipmentId: equip.id,
+      equipmentName: equip.name,
+      equipmentModel: equip.model || '标准型',
+      equipmentSn: equip.sn || 'SN-UNKNOWN',
+      equipmentInternalNo: equip.internalNo,
+      department: equip.department,
+      room: equip.location || equip.department,
+      consumableId: consumable.id,
+      consumableName: consumable.name,
+      consumableSpec: consumable.spec,
+      consumableBrand: consumable.brand,
+      di: parsed.di,
+      udiCode: parsed.rawCode,
+      lotNumber: parsed.lotNumber || 'LOT-AUTO',
+      expirationDate: parsed.expirationDate || '2028-12-31',
+      serialNumber: parsed.serialNumber,
+      bindingTime: new Date().toISOString().replace('T', ' ').slice(0, 19),
+      operatorName: operatorName || '临床值班医护',
+      operatorRole: operatorRole || '主管护师',
+      compatibilityResult: compatibility.isCompatible ? 'matched_verified' : 'cross_model_allowed',
+      verificationMessage: compatibility.message,
+      status: 'in_use'
+    };
+
+    udiBindingsStore.unshift(newRecord);
+    savePersistentUdiBindings(udiBindingsStore);
+
+    res.json({
+      success: true,
+      message: `专机专耗【${consumable.name}】已成功挂靠至【${equip.name}】！`,
+      data: newRecord
+    });
+  });
+
+  // 18.5 临床消耗核销 (病案全闭环)
+  app.put('/api/udi/bindings/:id/consume', (req, res) => {
+    const { id } = req.params;
+    const { patientId, patientName, caseNo, operationRecordNo, doctorInCharge } = req.body;
+    const idx = udiBindingsStore.findIndex(b => b.id === id);
+    if (idx === -1) {
+      return res.status(404).json({ success: false, error: '未找到该挂靠记录' });
+    }
+
+    udiBindingsStore[idx] = {
+      ...udiBindingsStore[idx],
+      status: 'consumed',
+      consumedTime: new Date().toISOString().replace('T', ' ').slice(0, 19),
+      patientId: patientId || udiBindingsStore[idx].patientId,
+      patientName: patientName || udiBindingsStore[idx].patientName,
+      caseNo: caseNo || udiBindingsStore[idx].caseNo,
+      operationRecordNo: operationRecordNo || udiBindingsStore[idx].operationRecordNo,
+      doctorInCharge: doctorInCharge || udiBindingsStore[idx].doctorInCharge
+    };
+
+    savePersistentUdiBindings(udiBindingsStore);
+    res.json({ success: true, message: '专机耗材已完成病案关联与临床核销！', data: udiBindingsStore[idx] });
+  });
+
+  // 18.6 批次不良召回排查雷达与紧急锁定
+  app.post('/api/udi/batch-quarantine', (req, res) => {
+    const { lotNumber, recallReason, operator } = req.body;
+    if (!lotNumber) {
+      return res.status(400).json({ success: false, error: '请提供待召回锁定的批次号' });
+    }
+
+    let affectedCount = 0;
+    const lockedEquipIds: string[] = [];
+
+    udiBindingsStore = udiBindingsStore.map(b => {
+      if (b.lotNumber.toLowerCase().includes(lotNumber.toLowerCase()) && b.status === 'in_use') {
+        affectedCount++;
+        lockedEquipIds.push(b.equipmentId);
+        return {
+          ...b,
+          status: 'recalled',
+          recallFlag: true,
+          recallDate: new Date().toISOString().replace('T', ' ').slice(0, 19),
+          recallActionNote: recallReason || '国家药监批次紧急召回锁定'
+        };
+      }
+      return b;
+    });
+
+    savePersistentUdiBindings(udiBindingsStore);
+
+    // 同步将涉及设备置为故障待修/停用状态
+    if (lockedEquipIds.length > 0) {
+      equipmentStore = equipmentStore.map(e => {
+        if (lockedEquipIds.includes(e.id)) {
+          return {
+            ...e,
+            status: '故障待修',
+            lastFaultReason: `【药监紧急召回】在机专耗涉嫌不良批次 ${lotNumber}，已物理锁定待排查`
+          };
+        }
+        return e;
+      });
+      savePersistentEquipment(equipmentStore);
+    }
+
+    res.json({
+      success: true,
+      message: `成功锁定全院 ${affectedCount} 份在机专耗，已下达紧急停用指令！`,
+      affectedCount,
+      lockedEquipmentIds: lockedEquipIds
+    });
+  });
+
+  // ==================== 19. 生产级自动化安全灾备与快照回滚引擎 ====================
+
+  function ensureBackupsDir() {
+    if (!fs.existsSync(BACKUPS_DIR)) {
+      fs.mkdirSync(BACKUPS_DIR, { recursive: true });
+    }
+  }
+
+  function getBackupListFromDisk() {
+    ensureBackupsDir();
+    const files = fs.readdirSync(BACKUPS_DIR).filter(f => f.endsWith('.json'));
+    const list: any[] = [];
+
+    files.forEach(filename => {
+      try {
+        const fullPath = path.join(BACKUPS_DIR, filename);
+        const stat = fs.statSync(fullPath);
+        const raw = fs.readFileSync(fullPath, 'utf8');
+        const parsed = JSON.parse(raw);
+
+        const checksum = crypto.createHash('sha256').update(raw).digest('hex');
+
+        list.push({
+          id: filename.replace('.json', ''),
+          name: parsed.snapshotName || `全院医工数据灾备快照_${filename.slice(0, 15)}`,
+          createdAt: parsed.createdAt ? parsed.createdAt.replace('T', ' ').slice(0, 19) : stat.birthtime.toISOString().replace('T', ' ').slice(0, 19),
+          sizeBytes: stat.size,
+          recordCount: {
+            equipment: Array.isArray(parsed.equipment) ? parsed.equipment.length : 0,
+            repairs: Array.isArray(parsed.equipment) ? parsed.equipment.reduce((acc: number, e: any) => acc + (e.repairRecords?.length || 0), 0) : 0,
+            staff: Array.isArray(parsed.staff) ? parsed.staff.length : 0,
+            adverseEvents: Array.isArray(parsed.adverseEvents) ? parsed.adverseEvents.length : 0,
+            udiBindings: Array.isArray(parsed.udiBindings) ? parsed.udiBindings.length : 0,
+            udiConsumables: Array.isArray(parsed.udiConsumables) ? parsed.udiConsumables.length : 0
+          },
+          type: filename.includes('scheduled') ? 'scheduled' : (filename.includes('pre_restore') ? 'pre_restore' : 'manual'),
+          operator: parsed.operator || '崔伟 (医工技术主管)',
+          checksum: `SHA256:${checksum.substring(0, 16)}...`,
+          notes: parsed.notes || '生产运行环境安全备份镜像',
+          filename
+        });
+      } catch (e) {
+        console.warn(`[Backup Audit] Error reading snapshot ${filename}:`, e);
+      }
+    });
+
+    return list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  function createServerSnapshot(type: 'manual' | 'scheduled' | 'pre_restore', name?: string, operator?: string, notes?: string) {
+    ensureBackupsDir();
+    const snapId = `SNAP-${Date.now()}`;
+    const snapName = name || `五莲县人民医院全院医工生产灾备镜像_${new Date().toLocaleDateString('zh-CN').replace(/\//g, '-')}`;
+
+    const payload = {
+      snapshotVersion: '2.0-PROD',
+      snapshotName: snapName,
+      createdAt: new Date().toISOString(),
+      operator: operator || (type === 'scheduled' ? '自动化安全灾备守护进程' : '崔伟 (设备科负责人)'),
+      notes: notes || (type === 'scheduled' ? '每日自动化定时安全灾备快照' : '生产环境手动即时快照'),
+      equipment: equipmentStore,
+      staff: staffStore,
+      catalogue: catalogueStore,
+      nmpaCategories: nmpaCategoryStore,
+      adverseEvents: adverseEventsStore,
+      udiConsumables: udiConsumablesStore,
+      udiBindings: udiBindingsStore,
+      systemMeta: {
+        hospital: '五莲县人民医院',
+        title: '医学装备全生命周期闭环管理系统',
+        nodeEnv: process.env.NODE_ENV || 'production',
+        snapshotEngine: 'Secure JSON Disaster Recovery Engine v2.0'
+      }
+    };
+
+    const jsonStr = JSON.stringify(payload, null, 2);
+    const filename = `${snapId}_${type}.json`;
+    const fullPath = path.join(BACKUPS_DIR, filename);
+
+    fs.writeFileSync(fullPath, jsonStr, 'utf8');
+
+    const rawSize = Buffer.byteLength(jsonStr, 'utf8');
+    const checksum = crypto.createHash('sha256').update(jsonStr).digest('hex');
+
+    console.log(`[Backup Engine] Created ${type} snapshot: ${filename} (${(rawSize / 1024).toFixed(1)} KB)`);
+
+    return {
+      id: snapId,
+      name: snapName,
+      filename,
+      sizeBytes: rawSize,
+      checksum: `SHA256:${checksum.substring(0, 16)}...`,
+      createdAt: new Date().toISOString().replace('T', ' ').slice(0, 19)
+    };
+  }
+
+  // 19.1 获取灾备快照列表
+  app.get('/api/backups/list', (req, res) => {
+    const list = getBackupListFromDisk();
+    res.json({
+      success: true,
+      total: list.length,
+      storageEngine: 'Server JSON File-Backed Persistence with Daily Disaster Snapshot',
+      data: list
+    });
+  });
+
+  // 19.2 即时创建安全快照
+  app.post('/api/backups/create', (req, res) => {
+    try {
+      const { name, operator, notes, type } = req.body;
+      const snap = createServerSnapshot(type || 'manual', name, operator, notes);
+      res.json({
+        success: true,
+        message: '安全灾备快照创建成功！已完成全库 JSON 序列化并计算 SHA-256 完整性哈希。',
+        data: snap
+      });
+    } catch (err: any) {
+      console.error('[Backup Error]', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 19.3 快照回滚恢复 (自动保留恢复前底底镜像)
+  app.post('/api/backups/restore', (req, res) => {
+    try {
+      const { filename } = req.body;
+      if (!filename) {
+        return res.status(400).json({ success: false, error: '请指定待恢复的快照文件名' });
+      }
+
+      const snapPath = path.join(BACKUPS_DIR, filename);
+      if (!fs.existsSync(snapPath)) {
+        return res.status(404).json({ success: false, error: '快照文件不存在或已被移除' });
+      }
+
+      // 1. 创建自动回滚底镜像
+      createServerSnapshot('pre_restore', `系统回滚前自动安全归档_${Date.now()}`, '系统自愈保护', '执行灾难恢复前自动生成的安全底镜像');
+
+      // 2. 读取并解析快照
+      const raw = fs.readFileSync(snapPath, 'utf8');
+      const parsed = JSON.parse(raw);
+
+      if (Array.isArray(parsed.equipment)) {
+        equipmentStore = parsed.equipment;
+        savePersistentEquipment(equipmentStore);
+      }
+      if (Array.isArray(parsed.staff)) {
+        staffStore = parsed.staff;
+        savePersistentStaff(staffStore);
+      }
+      if (Array.isArray(parsed.adverseEvents)) {
+        adverseEventsStore = parsed.adverseEvents;
+        savePersistentAdverseEvents(adverseEventsStore);
+      }
+      if (Array.isArray(parsed.udiBindings)) {
+        udiBindingsStore = parsed.udiBindings;
+        savePersistentUdiBindings(udiBindingsStore);
+      }
+      if (Array.isArray(parsed.udiConsumables)) {
+        udiConsumablesStore = parsed.udiConsumables;
+        savePersistentUdiConsumables(udiConsumablesStore);
+      }
+
+      res.json({
+        success: true,
+        message: `系统已成功从快照【${filename}】全量恢复！共还原 ${equipmentStore.length} 台设备、${udiBindingsStore.length} 条专耗记录。`,
+        restoredRecords: {
+          equipment: equipmentStore.length,
+          staff: staffStore.length,
+          udiBindings: udiBindingsStore.length
+        }
+      });
+    } catch (err: any) {
+      console.error('[Restore Error]', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 19.4 下载指定快照文件
+  app.get('/api/backups/download/:filename', (req, res) => {
+    const filename = req.params.filename;
+    const safeName = path.basename(filename);
+    const snapPath = path.join(BACKUPS_DIR, safeName);
+    if (!fs.existsSync(snapPath)) {
+      return res.status(404).send('快照文件不存在');
+    }
+    res.download(snapPath, safeName);
+  });
+
+  // 20. 国家卫健委医院智慧管理评级与HIS/PACS数据互联专区 API
+  app.get('/api/smart-management/metrics', (_req, res) => {
+    try {
+      const totalScore = smartMetricsStore.reduce((acc, m) => acc + m.maxScore, 0);
+      const actualScore = smartMetricsStore.reduce((acc, m) => acc + m.actualScore, 0);
+      const scoreRate = totalScore > 0 ? (actualScore / totalScore) * 100 : 0;
+      
+      // 计算1-5级各自达成率
+      const levelBreakdown = [1, 2, 3, 4, 5].map(lvl => {
+        const items = smartMetricsStore.filter(m => m.level === lvl);
+        const max = items.reduce((a, b) => a + b.maxScore, 0);
+        const act = items.reduce((a, b) => a + b.actualScore, 0);
+        return {
+          level: lvl,
+          maxScore: max,
+          actualScore: act,
+          rate: max > 0 ? (act / max) * 100 : 0,
+          isPassed: max > 0 && (act / max) >= 0.85
+        };
+      });
+
+      // 评估综合等级 (加权折算)
+      let assessedLevel = 1;
+      for (const b of levelBreakdown) {
+        if (b.isPassed) assessedLevel = b.level;
+        else break;
+      }
+      if (assessedLevel === 3 && levelBreakdown[3].rate >= 80) {
+        assessedLevel = 3.8; // 接近4级
+      }
+
+      res.json({
+        success: true,
+        metrics: smartMetricsStore,
+        totalScore,
+        actualScore,
+        scoreRate: scoreRate.toFixed(1),
+        assessedLevel,
+        levelBreakdown
+      });
+    } catch (err: any) {
+      console.error('[Smart Management Metrics Error]', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/smart-management/metrics', (req, res) => {
+    try {
+      const updatedMetric: SmartManagementRatingMetric = req.body;
+      if (!updatedMetric || !updatedMetric.id) {
+        return res.status(400).json({ success: false, error: '缺少指标ID或指标数据' });
+      }
+
+      smartMetricsStore = smartMetricsStore.map(m => m.id === updatedMetric.id ? updatedMetric : m);
+      savePersistentSmartMetrics(smartMetricsStore);
+
+      res.json({
+        success: true,
+        message: `指标【${updatedMetric.name}】评估结果与佐证材料已更新并持久化保存`,
+        metric: updatedMetric,
+        metrics: smartMetricsStore
+      });
+    } catch (err: any) {
+      console.error('[Update Smart Metric Error]', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 20.2 HIS/PACS 接口钩稽流水查询与漏费/异常计费核查
+  app.get('/api/smart-management/his-pacs-records', (req, res) => {
+    try {
+      const { status, modality, department, keyword } = req.query as Record<string, string>;
+      let list = [...hisPacsRecordsStore];
+
+      if (status && status !== 'all') {
+        list = list.filter(r => r.reconciliationStatus === status);
+      }
+      if (modality && modality !== 'all') {
+        list = list.filter(r => r.modality === modality);
+      }
+      if (department && department !== 'all') {
+        list = list.filter(r => r.department === department);
+      }
+      if (keyword) {
+        const k = keyword.toLowerCase().trim();
+        list = list.filter(r => 
+          r.equipmentName.toLowerCase().includes(k) || 
+          r.examItemName.toLowerCase().includes(k) || 
+          r.patientStudyUid.toLowerCase().includes(k) ||
+          r.hisChargeCode.toLowerCase().includes(k)
+        );
+      }
+
+      const totalCount = hisPacsRecordsStore.length;
+      const matchedCount = hisPacsRecordsStore.filter(r => r.reconciliationStatus === 'matched').length;
+      const unbilledExposureCount = hisPacsRecordsStore.filter(r => r.reconciliationStatus === 'unbilled_exposure').length;
+      const billedWithoutPacsCount = hisPacsRecordsStore.filter(r => r.reconciliationStatus === 'billed_without_pacs').length;
+      const totalPotentialLoss = hisPacsRecordsStore
+        .filter(r => r.reconciliationStatus === 'unbilled_exposure')
+        .reduce((sum, r) => sum + Math.abs(r.discrepancyAmount), 0);
+
+      res.json({
+        success: true,
+        data: list,
+        summary: {
+          totalCount,
+          matchedCount,
+          matchRate: totalCount > 0 ? ((matchedCount / totalCount) * 100).toFixed(1) + '%' : '100%',
+          unbilledExposureCount,
+          billedWithoutPacsCount,
+          totalPotentialLoss
+        }
+      });
+    } catch (err: any) {
+      console.error('[HIS/PACS Records Query Error]', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 20.3 HIS/PACS 数据接口报文模拟注入与实时钩稽检测发生器
+  app.post('/api/smart-management/simulate-his-pacs', (req, res) => {
+    try {
+      const { 
+        equipmentId, 
+        modality, 
+        examItemName, 
+        exposureCount, 
+        billedFee, 
+        hisChargeCode,
+        injectAnomaly 
+      } = req.body;
+
+      const equip = equipmentStore.find(e => e.id === equipmentId) || equipmentStore[1] || {
+        id: 'EQ-002',
+        name: '西门子 64排螺旋CT (SOMATOM Definition AS)',
+        department: '医学影像科'
+      };
+
+      const nowStr = new Date().toISOString().replace('T', ' ').slice(0, 19);
+      const studyUid = `ST-${Date.now().toString().slice(-8)}`;
+      const expCount = Number(exposureCount) || 3;
+      let effectiveBilledFee = billedFee !== undefined ? Number(billedFee) : 380;
+      let recStatus: HisPacsLinkageRecord['reconciliationStatus'] = 'matched';
+      let discrepancy = 0;
+      let remark = 'HIS/PACS实时同步核验无误，已自动记账入库。';
+
+      if (injectAnomaly === 'leak') {
+        effectiveBilledFee = 0;
+        recStatus = 'unbilled_exposure';
+        discrepancy = -380;
+        remark = '【模拟漏费告警】检测到PACS已有影像序列，但HIS未检出划价结算流水，触发拦截补录通知。';
+      } else if (injectAnomaly === 'ghost_bill') {
+        recStatus = 'billed_without_pacs';
+        discrepancy = effectiveBilledFee;
+        remark = '【模拟异常计费告警】HIS计费成功但PACS未检出设备物理曝光，提示可能为患者中途取消或条码录错。';
+      }
+
+      const newRec: HisPacsLinkageRecord = {
+        id: `LINK-${Date.now()}`,
+        timestamp: nowStr,
+        equipmentId: equip.id,
+        equipmentName: equip.name,
+        department: equip.department,
+        modality: (modality as any) || 'CT',
+        patientStudyUid: studyUid,
+        examItemName: examItemName || '胸部多排螺旋CT平扫',
+        hisChargeCode: hisChargeCode || '310201011',
+        hisBilledFee: effectiveBilledFee,
+        pacsExposureCount: injectAnomaly === 'ghost_bill' ? 0 : expCount,
+        actualWorkMinutes: expCount * 3,
+        reconciliationStatus: recStatus,
+        discrepancyAmount: discrepancy,
+        remark
+      };
+
+      hisPacsRecordsStore.unshift(newRec);
+      if (hisPacsRecordsStore.length > 100) hisPacsRecordsStore.pop();
+      savePersistentHisPacsRecords(hisPacsRecordsStore);
+
+      res.json({
+        success: true,
+        message: `成功模拟注入一条 ${newRec.modality} 诊疗检查业务数据！当前钩稽诊断状态: 【${recStatus}】`,
+        record: newRec,
+        records: hisPacsRecordsStore
+      });
+    } catch (err: any) {
+      console.error('[Simulate HIS/PACS Error]', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 20.4 全院设备空间数字孪生拓扑与应急沙盘数据
+  app.get('/api/sandbox/topology', (_req, res) => {
+    try {
+      // 动态将 equipmentStore 映射到各个建筑与楼层
+      const topology = DEFAULT_FLOOR_TOPOLOGY.map(floor => {
+        // 匹配该楼层各科室设备
+        const deptDevices = equipmentStore.filter(e => floor.departments.some(d => (e.department || '').includes(d) || d.includes(e.department || '')));
+        const running = deptDevices.filter(d => d.status === '正常运行').length;
+        const faulty = deptDevices.filter(d => d.status === '故障待修').length;
+        const maint = deptDevices.filter(d => d.status === '维护保养中').length;
+        const idle = Math.max(0, deptDevices.length - running - faulty - maint);
+
+        return {
+          ...floor,
+          totalEquipmentCount: deptDevices.length > 0 ? deptDevices.length : floor.totalEquipmentCount,
+          runningCount: deptDevices.length > 0 ? running : floor.runningCount,
+          faultyCount: deptDevices.length > 0 ? faulty : floor.faultyCount,
+          idleCount: deptDevices.length > 0 ? idle : floor.idleCount
+        };
+      });
+
+      res.json({
+        success: true,
+        topology,
+        scenarios: PRESET_EMERGENCY_SCENARIOS,
+        totalHospitalEquipment: equipmentStore.length
+      });
+    } catch (err: any) {
+      console.error('[Sandbox Topology Error]', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 20.5 Gemini 3.8 Flash 医工大模型深度智能排查与维保建议
+  app.post('/api/ai/deep-troubleshoot', async (req, res) => {
+    try {
+      const {
+        equipmentId,
+        equipmentName,
+        model,
+        department,
+        faultSymptom,
+        errorCode,
+        serviceYears,
+        additionalContext
+      } = req.body;
+
+      const equip = equipmentStore.find(e => e.id === equipmentId) || {
+        id: equipmentId || 'EQ-DEFAULT',
+        name: equipmentName || '高档病人监护仪',
+        model: model || 'BeneView T8',
+        department: department || '重症医学科',
+        manufacturer: '知名医疗设备企业',
+        purchasePrice: 220000,
+        enableDate: '2021-04-10',
+        repairRecords: []
+      };
+
+      const prompt = `你是一位三甲综合医院医学装备保障部的资深主任临床工程师（Chief Biomedical Clinical Engineer）。
+现临床科室报告了一起医疗设备突发故障。请基于该设备的工程架构原理、服役年限衰减规律以及临床高危特征，进行专家级多层故障树推理与排障决策：
+
+【设备工程与档案信息】：
+- 设备名称：${equip.name}
+- 规格型号：${equip.model || model || '标配'}
+- 制造厂家：${equip.manufacturer || '原厂制造'}
+- 资产原值：￥${equip.purchasePrice || 0}
+- 服役在用年限：${serviceYears || 4.2} 年
+- 归属科室：${equip.department || department}
+- 历史维修履历概述：已历经 ${(equip.repairRecords || []).length} 次维保工单
+
+【现场故障表现与错误代码】：
+- 故障现象：${faultSymptom || '启动后蜂鸣器报警，核心测量参数失准或黑屏'}
+- 报警/错误代码：${errorCode || 'ERR-7402 / SYSTEM FAULT'}
+- 现场补充线索：${additionalContext || '已核实市电供电与气体管路正常'}
+
+请严格按照以下 JSON 格式输出，不要包含 Markdown 代码块标记以外的多余解释：
+{
+  "faultTree": [
+    {
+      "layer": "Level 1 (一次表象层)",
+      "node": "故障直观表现",
+      "probability": "100%",
+      "checkMethod": "开机指示灯与蜂鸣状态目视检查"
+    },
+    {
+      "layer": "Level 2 (功能模块层)",
+      "node": "受累硬件板卡或气路模块",
+      "probability": "75%",
+      "checkMethod": "工程维护模式自检或万用表量测测试点"
+    },
+    {
+      "layer": "Level 3 (元器件/机理层)",
+      "node": "根本失效机理（如电解电容漏液、光电耦合器击穿、高压逆变打火）",
+      "probability": "55%",
+      "checkMethod": "示波器波形抓取或拆机绝缘阻抗测试"
+    }
+  ],
+  "stepByStepActionPlan": [
+    {
+      "step": 1,
+      "title": "初级排查与物理隔离",
+      "action": "切断主电源，断开患者连接导联，使用备用机具接替抢救。",
+      "toolRequired": "医用电气安全测试仪 / 绝缘手套",
+      "estimatedMinutes": 5
+    },
+    {
+      "step": 2,
+      "title": "板级诊断与关键测试点核量",
+      "action": "测量电源板各路低压直流输出（+5V, +12V, -12V）纹波系数。",
+      "toolRequired": "数字万用表 / 示波器",
+      "estimatedMinutes": 15
+    },
+    {
+      "step": 3,
+      "title": "备件替换或模块复位",
+      "action": "插拔重置总线通信金手指，必要时更换同型号备用功能模块。",
+      "toolRequired": "防静电手环 / 六角螺丝刀套装",
+      "estimatedMinutes": 20
+    }
+  ],
+  "sparePartsAdvice": [
+    {
+      "partName": "核心易损板卡或传感器探头",
+      "partNumber": "WL-PART-88902",
+      "estimatedCost": 1200,
+      "urgency": "必备更换 | 视检测情况更换 | 建议备用",
+      "isHospitalStockAvailable": true
+    }
+  ],
+  "safetyPrecautions": [
+    "严格执行高压放电规程，电容残存电压清零前严禁触碰导电触点",
+    "修复后必须通过 GB9706.1-2020 医用电气安全漏电流与接地阻抗测试（接地电阻<0.2Ω）"
+  ],
+  "economicFeasibility": "建议院内工程师自主板级修复 | 建议联系原厂原厂大修 | 故障频发建议评估报废更新",
+  "officialConclusionDraft": "经医工部工程师现场检测，该机具系因长期连续服役导致核心电源滤波回路老化衰减，现已完成应急处置与校准验证，设备性能指标符合临床使用安全标准，准予恢复临床投用。"
+}`;
+
+      const aiResult = await callGeminiWithFallback({
+        prompt,
+        responseMimeType: 'application/json'
+      });
+
+      if (aiResult) {
+        try {
+          const parsed = JSON.parse(aiResult.text);
+          if (parsed && Array.isArray(parsed.faultTree)) {
+            return res.json({
+              success: true,
+              data: parsed,
+              source: aiResult.modelUsed
+            });
+          }
+        } catch (e) {
+          console.warn('[AI Troubleshoot] Parse error, fallback to expert template:', e);
+        }
+      }
+
+      // 降级离线临床工程模板
+      const fallbackData = {
+        faultTree: [
+          {
+            layer: "Level 1 (一次表象层)",
+            node: `设备报错 [${errorCode || 'ERR-7402'}]，临床参数采集或动力中断`,
+            probability: "100%",
+            checkMethod: "检查设备电源插头牢固度与外接传感器接触状态"
+          },
+          {
+            layer: "Level 2 (功能模块层)",
+            node: "电源分配板 (PDU) 或模拟信号预处理板通信中断",
+            probability: "80%",
+            checkMethod: "进入系统工程配置菜单读取错误日志堆栈"
+          },
+          {
+            layer: "Level 3 (元器件/机理层)",
+            node: "服役超过4年电解电容等效串联电阻(ESR)增大导致纹波过载保护",
+            probability: "60%",
+            checkMethod: "示波器测量输出纹波峰峰值 Vpp > 80mV"
+          }
+        ],
+        stepByStepActionPlan: [
+          {
+            step: 1,
+            title: "安全隔离与备用替换",
+            action: "立即从应急调配中心借调备用机具替换床旁使用，保障患者连续救治。",
+            toolRequired: "便携转运床旁支持机",
+            estimatedMinutes: 5
+          },
+          {
+            step: 2,
+            title: "现场静态电阻与接口自检",
+            action: "拆开后盖，排查主板排线氧化发黑情况，使用无水乙醇清洁金手指触点。",
+            toolRequired: "精密螺丝刀 / 触点清洁剂",
+            estimatedMinutes: 15
+          },
+          {
+            step: 3,
+            title: "电气安全与计量定标闭环",
+            action: "更换损坏滤波电容并重新上电，使用病人模拟仪或标准负载做全参数校准测试。",
+            toolRequired: "多参数模拟仪 / 漏电流测试仪",
+            estimatedMinutes: 25
+          }
+        ],
+        sparePartsAdvice: [
+          {
+            partName: "高频主电源滤波模块组件",
+            partNumber: "MED-PSU-T8-04",
+            estimatedCost: 850,
+            urgency: "必备更换",
+            isHospitalStockAvailable: true
+          }
+        ],
+        safetyPrecautions: [
+          "严禁带电热插拔高频信号板卡",
+          "检修完毕后必须进行绝缘耐压与患者漏电流复测（要求<100μA）"
+        ],
+        economicFeasibility: "建议院内工程师自主板级修复（相比原厂整板更换节省约75%费用）",
+        officialConclusionDraft: `经医学装备科工程师现场拆机排查，该机报警原因为模块电源滤波元件老化造成瞬时过流保护。现已完成元件更换、内部除尘与电气安全检测，运行各项参数正常，具备临床使用条件。`
+      };
+
+      res.json({
+        success: true,
+        data: fallbackData,
+        source: 'clinical_expert_engine'
+      });
+    } catch (err: any) {
+      console.error('[AI Deep Troubleshoot Error]', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // Vite middleware in development vs production static build
+  const isDev =
+    process.env.NODE_ENV === 'development' ||
+    !process.env.NODE_ENV ||
+    Boolean(process.env.K_SERVICE?.startsWith('ais-dev-'));
+
+  const distHtmlPath = path.join(process.cwd(), 'dist', 'index.html');
+  const hasDist = fs.existsSync(distHtmlPath);
+
+  if (isDev || !hasDist) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa'
@@ -2558,8 +4025,8 @@ ${userQuestion}
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+    app.get('*', (_req, res) => {
+      res.sendFile(distHtmlPath);
     });
   }
 

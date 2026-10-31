@@ -38,7 +38,8 @@ import {
   Download,
   Image as ImageIcon,
   Trash2,
-  Eye
+  Eye,
+  Scale
 } from 'lucide-react';
 import { 
   MedicalEquipment, 
@@ -55,6 +56,8 @@ import {
 import { LoanTimeProgressBar } from './LoanTimeProgressBar';
 import { Pagination } from './Pagination';
 import { getEquipmentValidityInfo } from '../utils/validityUtils';
+import { getEquipmentHealthScore } from '../utils/equipmentUtils';
+import { getEquipmentCalibrationInfo } from '../utils/calibrationUtils';
 
 interface MobileInspectionViewProps {
   equipmentList: MedicalEquipment[];
@@ -71,6 +74,9 @@ interface MobileInspectionViewProps {
   onSubmitStatusChange?: (id: string, newStatus: EquipmentStatus, reason: string, operator: string) => void;
   onSubmitRepair?: (repairData: any) => void;
   onViewDeviceDetail?: (device: MedicalEquipment) => void;
+  onOpenHealthScoreDetail?: (device: MedicalEquipment) => void;
+  onOpenUdiConsumables?: (device: MedicalEquipment) => void;
+  onOpenCertificateModal?: (device: MedicalEquipment) => void;
 }
 
 // 模拟或真实扫码成功提示音
@@ -120,7 +126,10 @@ export const MobileInspectionView: React.FC<MobileInspectionViewProps> = ({
   onUpdateEquipmentLocation,
   onSubmitStatusChange,
   onSubmitRepair,
-  onViewDeviceDetail
+  onViewDeviceDetail,
+  onOpenHealthScoreDetail,
+  onOpenUdiConsumables,
+  onOpenCertificateModal
 }) => {
   // 视图显示模式: 'handheld' (手持PDA手机模式) 或 'console' (全景工作台模式)
   const [viewMode, setViewMode] = useState<'handheld' | 'console'>('handheld');
@@ -1348,6 +1357,115 @@ export const MobileInspectionView: React.FC<MobileInspectionViewProps> = ({
                         );
                       })()}
 
+                      {/* 医工深度闭环: 综合健康评分 + 法定强检效期 + UDI专机耗材配对 */}
+                      <div className="space-y-2">
+                        {/* 1. 综合健康评分与风险 */}
+                        {(() => {
+                          const health = getEquipmentHealthScore(activeEquipment);
+                          const isHigh = health.score >= 90;
+                          const isMedium = health.score >= 70 && health.score < 90;
+                          return (
+                            <div className="p-2.5 bg-gradient-to-r from-slate-900 to-indigo-950 rounded-xl text-white flex items-center justify-between gap-2 shadow-xs">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <div className={`w-9 h-9 rounded-lg flex items-center justify-center font-mono font-black text-sm shrink-0 border ${
+                                  isHigh 
+                                    ? 'bg-emerald-500/20 text-emerald-400 border-emerald-400/40' 
+                                    : isMedium 
+                                    ? 'bg-amber-500/20 text-amber-400 border-amber-400/40' 
+                                    : 'bg-rose-500/20 text-rose-400 border-rose-400/40'
+                                }`}>
+                                  {health.score}
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-xs font-bold truncate">设备综合健康指数</span>
+                                    <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded border ${
+                                      isHigh ? 'bg-emerald-500/30 text-emerald-300 border-emerald-400/40' : 'bg-amber-500/30 text-amber-300 border-amber-400/40'
+                                    }`}>
+                                      {health.label}
+                                    </span>
+                                  </div>
+                                  <div className="text-[10px] text-slate-300 truncate mt-0.5">
+                                    {health.deductions.length > 0 ? `扣分项: ${health.deductions[0].reason}` : '各维度运行稳定，未见异常扣分'}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {onOpenHealthScoreDetail && (
+                                <button
+                                  type="button"
+                                  onClick={() => onOpenHealthScoreDetail(activeEquipment)}
+                                  className="px-2 py-1 bg-indigo-600/60 hover:bg-indigo-600 text-indigo-100 border border-indigo-400/40 rounded-lg text-[10px] font-bold shrink-0 transition cursor-pointer"
+                                >
+                                  雷达诊断
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })()}
+
+                        {/* 2. 法定计量与强检周期 */}
+                        {(() => {
+                          const cal = getEquipmentCalibrationInfo(activeEquipment);
+                          return (
+                            <div className="p-2 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-2 text-xs">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <Scale className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-bold text-slate-800 text-[11px] truncate">
+                                      {cal.calibrationType}
+                                    </span>
+                                    <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold border ${cal.badgeClass}`}>
+                                      {cal.statusLabel}
+                                      {cal.daysRemaining !== null && ` (${cal.daysRemaining}天)`}
+                                    </span>
+                                  </div>
+                                  <div className="text-[10px] text-slate-500 font-mono truncate">
+                                    证书: {cal.certificateNo} ｜ 效期至: {cal.nextDate}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {onOpenCertificateModal && (
+                                <button
+                                  type="button"
+                                  onClick={() => onOpenCertificateModal(activeEquipment)}
+                                  className="px-2 py-1 bg-white hover:bg-indigo-50 text-indigo-700 border border-indigo-200 rounded text-[10px] font-bold shrink-0 transition cursor-pointer"
+                                >
+                                  溯源证书
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })()}
+
+                        {/* 3. UDI 专机专耗白名单极速核验 */}
+                        <div className="p-2 bg-sky-50/70 border border-sky-200 rounded-xl flex items-center justify-between gap-2 text-xs">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <Sparkles className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                            <div className="min-w-0">
+                              <div className="font-bold text-sky-950 text-[11px] truncate">
+                                国家 UDI 专机专耗配伍追溯
+                              </div>
+                              <div className="text-[10px] text-sky-700 truncate">
+                                床旁扫描耗材条码即时核验白名单防错
+                              </div>
+                            </div>
+                          </div>
+
+                          {onOpenUdiConsumables && (
+                            <button
+                              type="button"
+                              onClick={() => onOpenUdiConsumables(activeEquipment)}
+                              className="px-2.5 py-1 bg-sky-600 hover:bg-sky-500 text-white rounded text-[10px] font-bold shrink-0 transition cursor-pointer shadow-2xs"
+                            >
+                              核验耗材
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
                       {/* 现场核查打卡清单 (Checklist) */}
                       <div className="space-y-1.5 text-xs">
                         <div className="text-[11px] font-bold text-slate-600 flex items-center justify-between">
@@ -1684,6 +1802,75 @@ export const MobileInspectionView: React.FC<MobileInspectionViewProps> = ({
                     <div className="flex justify-between">
                       <span className="text-slate-500">当前巡检科室:</span>
                       <span className="font-bold text-indigo-700">{selectedDeptName}</span>
+                    </div>
+                  </div>
+
+                  {/* 医工深度闭环: 综合健康评分 + 法定强检效期 + UDI专机耗材配对 (Console模式) */}
+                  <div className="space-y-1.5 pt-1">
+                    {/* 健康度 */}
+                    {(() => {
+                      const health = getEquipmentHealthScore(activeEquipment);
+                      return (
+                        <div className="p-2 bg-slate-900 text-white rounded-lg flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-bold text-emerald-400 bg-emerald-500/20 px-1.5 py-0.5 rounded border border-emerald-500/30">
+                              {health.score}分
+                            </span>
+                            <span className="font-semibold text-slate-200">健康等级: {health.label}</span>
+                          </div>
+                          {onOpenHealthScoreDetail && (
+                            <button
+                              type="button"
+                              onClick={() => onOpenHealthScoreDetail(activeEquipment)}
+                              className="text-[10px] text-indigo-300 hover:text-white underline cursor-pointer"
+                            >
+                              诊断雷达图
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
+
+                    {/* 计量与强检 */}
+                    {(() => {
+                      const cal = getEquipmentCalibrationInfo(activeEquipment);
+                      return (
+                        <div className="p-2 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-1.5 truncate">
+                            <Scale className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                            <span className="font-bold text-slate-800 truncate">{cal.calibrationType}</span>
+                            <span className={`px-1 rounded text-[9px] font-bold border ${cal.badgeClass}`}>
+                              {cal.statusLabel}
+                            </span>
+                          </div>
+                          {onOpenCertificateModal && (
+                            <button
+                              type="button"
+                              onClick={() => onOpenCertificateModal(activeEquipment)}
+                              className="text-[10px] text-indigo-600 hover:underline cursor-pointer shrink-0"
+                            >
+                              证书档案
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
+
+                    {/* UDI */}
+                    <div className="p-2 bg-sky-50 border border-sky-200 rounded-lg flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-1.5 truncate">
+                        <Sparkles className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                        <span className="font-bold text-sky-900 truncate">UDI 专机专耗白名单</span>
+                      </div>
+                      {onOpenUdiConsumables && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenUdiConsumables(activeEquipment)}
+                          className="text-[10px] text-sky-700 hover:underline font-bold cursor-pointer shrink-0"
+                        >
+                          配伍核验
+                        </button>
+                      )}
                     </div>
                   </div>
 

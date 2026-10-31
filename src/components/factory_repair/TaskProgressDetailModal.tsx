@@ -47,9 +47,9 @@ export const TaskProgressDetailModal: React.FC<TaskProgressDetailModalProps> = (
   onOpenPrint,
   onOpenWorkflowWorkspace
 }) => {
-  if (!isOpen || !task) return null;
-
   const [activeTab, setActiveTab] = useState<'progress' | 'technical' | 'approval' | 'timeline'>('progress');
+
+  if (!isOpen || !task) return null;
 
   const app = task.factoryRepairApplication;
   const ver = task.onsiteVerification;

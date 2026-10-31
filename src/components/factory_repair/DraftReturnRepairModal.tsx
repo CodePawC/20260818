@@ -33,22 +33,20 @@ export const DraftReturnRepairModal: React.FC<DraftReturnRepairModalProps> = ({
   onSubmitDraft,
   currentUser
 }) => {
-  if (!isOpen) return null;
-
   const nowYear = new Date().getFullYear();
   const dateNum = `${nowYear}${String(new Date().getMonth() + 1).padStart(2, '0')}${String(new Date().getDate()).padStart(2, '0')}`;
-  const defaultAppId = `APP-RET-${dateNum}-${task.id.slice(-4)}`;
+  const defaultAppId = `APP-RET-${dateNum}-${task ? task.id.slice(-4) : '0000'}`;
 
   const [applicationId, setApplicationId] = useState(defaultAppId);
   const [title, setTitle] = useState(
-    `【${task.department}】${task.equipmentName} (${task.equipmentModel}) 外协返厂大修呈批报告`
+    `【${task?.department || '临床科室'}】${task?.equipmentName || '精密仪器'} (${task?.equipmentModel || '设备'}) 外协返厂大修呈批报告`
   );
   const [urgency, setUrgency] = useState<'critical' | 'high' | 'normal'>('critical');
   const [targetVendor, setTargetVendor] = useState('德国狼牌医疗 (Richard Wolf GmbH) 技术服务中心');
   const [vendorContact, setVendorContact] = useState('李海明 (大区售后技术服务经理)');
   const [vendorPhone, setVendorPhone] = useState('400-820-8703 / 13910878703');
   const [estimatedBudget, setEstimatedBudget] = useState(14200);
-  const [originalPrice, setOriginalPrice] = useState(task.purchasePrice || 168000);
+  const [originalPrice, setOriginalPrice] = useState(task?.purchasePrice || 168000);
   const [warrantyMonths, setWarrantyMonths] = useState(12);
 
   // 核心公文论证
@@ -57,7 +55,7 @@ export const DraftReturnRepairModal: React.FC<DraftReturnRepairModalProps> = ({
   );
 
   const [technicalJustification, setTechnicalJustification] = useState(
-    task.onsiteVerification?.technicalAssessment ||
+    task?.onsiteVerification?.technicalAssessment ||
     '经现场仪器检测：第2组柱镜微裂、蓝宝石密封胶开裂受潮，透光率剧降至41.5%。该镜为激光气密烧结精密光学件，院内及第三方均无百级洁净无尘室与激光同轴干涉校准平台，必须由德国狼牌原厂返厂大修重置光轴。'
   );
 
@@ -102,6 +100,8 @@ export const DraftReturnRepairModal: React.FC<DraftReturnRepairModalProps> = ({
     onSubmitDraft(task.id, appForm);
     onClose();
   };
+
+  if (!isOpen || !task) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">

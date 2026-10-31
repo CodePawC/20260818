@@ -454,9 +454,14 @@ export const ClosedLoopTable: React.FC<ClosedLoopTableProps> = ({
                     {cols.taskNo && (
                       <td className={`border-r border-slate-200/70 whitespace-nowrap ${cellPadding}`}>
                         <div className="flex items-center gap-1.5">
-                          <span className="font-mono font-bold text-slate-800 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 text-2xs">
+                          <button
+                            type="button"
+                            onClick={() => onViewTaskDetail(task)}
+                            className="font-mono font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded border border-indigo-200 text-2xs cursor-pointer hover:underline text-left"
+                            title="点击查看闭环报修工单完整详情与全生命周期追踪"
+                          >
                             {task.taskNo}
-                          </span>
+                          </button>
                           <button
                             type="button"
                             onClick={(e) => handleCopy(task.taskNo, `taskNo-${task.id}`, e)}
@@ -623,11 +628,11 @@ export const ClosedLoopTable: React.FC<ClosedLoopTableProps> = ({
                           <button
                             type="button"
                             onClick={() => onViewTaskDetail(task)}
-                            className="px-2 py-1 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-semibold flex items-center gap-1 transition"
-                            title="查看闭环详情与全生命周期进度追踪"
+                            className="px-2 py-1 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 text-xs font-semibold flex items-center gap-1 transition cursor-pointer"
+                            title="查看闭环报修工单详情、科室技术实测核验与全生命周期进度追踪"
                           >
                             <Eye className="w-3 h-3 text-indigo-600" />
-                            <span>追踪</span>
+                            <span>详情追踪</span>
                           </button>
 
                           {/* 快捷业务动作 */}

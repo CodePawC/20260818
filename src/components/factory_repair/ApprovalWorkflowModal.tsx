@@ -39,32 +39,29 @@ export const ApprovalWorkflowModal: React.FC<ApprovalWorkflowModalProps> = ({
   onOpenPrint,
   onNavigateToFactoryWorkflow
 }) => {
-  if (!isOpen) return null;
-
-  const app = task.factoryRepairApplication;
-  if (!app) return null;
-
-  const isPendingDept = app.finalApprovalStatus === 'pending_dept';
-  const isPendingVp = app.finalApprovalStatus === 'pending_vp';
-  const isFullyApproved = app.finalApprovalStatus === 'approved';
+  const app = task?.factoryRepairApplication;
 
   // 节点 1: 设备科主管审核意见
-  const [deptReviewer, setDeptReviewer] = useState(app.deptReviewer || '崔伟');
+  const [deptReviewer, setDeptReviewer] = useState(app?.deptReviewer || '崔伟');
   const [deptRole, setDeptRole] = useState('医疗设备科科长 / 主管工程师');
   const [deptComment, setDeptComment] = useState(
-    app.deptReviewComment || 
+    app?.deptReviewComment || 
     '经现场精密勘查与测漏检测，该输尿管硬镜物镜封胶开裂进水、第2组柱镜碎裂，院内及本地第三方均无百级洁净无尘室与激光同轴重置仪器，确无修复条件。拟委托德国狼牌原厂大修，预算1.42万元（仅占原值8.4%），包含12个月原厂质保，论证充分，同意呈报分管副院长终审。'
   );
-  const [deptSignature, setDeptSignature] = useState(app.deptSignature || '崔伟 (电子审核签章)');
+  const [deptSignature, setDeptSignature] = useState(app?.deptSignature || '崔伟 (电子审核签章)');
 
   // 节点 2: 分管院长审批意见
-  const [vpApprover, setVpApprover] = useState(app.vpApprover || '王建国');
+  const [vpApprover, setVpApprover] = useState(app?.vpApprover || '王建国');
   const [vpRole, setVpRole] = useState('业务副院长 / 医学装备管理委员会主任');
   const [vpComment, setVpComment] = useState(
-    app.vpApprovalComment ||
+    app?.vpApprovalComment ||
     '同意返厂大修。请医学设备科严格监督大修质量，压缩返厂停机周期，确保落实12个月原厂全保并规范完成验收入库及全流程闭环归档。'
   );
-  const [vpSignature, setVpSignature] = useState(app.vpSignature || '王建国 (院领导审批签章)');
+  const [vpSignature, setVpSignature] = useState(app?.vpSignature || '王建国 (院领导审批签章)');
+
+  const isPendingDept = app?.finalApprovalStatus === 'pending_dept';
+  const isPendingVp = app?.finalApprovalStatus === 'pending_vp';
+  const isFullyApproved = app?.finalApprovalStatus === 'approved';
 
   const handleDeptSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,6 +72,8 @@ export const ApprovalWorkflowModal: React.FC<ApprovalWorkflowModalProps> = ({
     e.preventDefault();
     onApproveVp(task.id, vpApprover, vpComment, vpSignature);
   };
+
+  if (!isOpen || !task || !app) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">

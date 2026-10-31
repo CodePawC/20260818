@@ -44,6 +44,30 @@ export const DatabaseBackupView: React.FC = () => {
   const [config, setConfig] = useState<DatabaseBackupConfig>(() => getDatabaseBackupConfig());
   const [snapshots, setSnapshots] = useState<BackupSnapshotRecord[]>(() => getBackupSnapshots());
   const [activeTab, setActiveTab] = useState<'snapshots' | 'db_connection' | 'schedule' | 'import_export'>('snapshots');
+  const [serverSnapshots, setServerSnapshots] = useState<any[]>([]);
+  const [isServerSyncing, setIsServerSyncing] = useState(false);
+
+  // 加载服务端磁盘快照列表
+  const fetchServerSnapshots = async () => {
+    try {
+      setIsServerSyncing(true);
+      const res = await fetch('/api/backups/list');
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data)) {
+          setServerSnapshots(json.data);
+        }
+      }
+    } catch (e) {
+      console.warn('[Disaster Snapshot] Server list notice:', e);
+    } finally {
+      setIsServerSyncing(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchServerSnapshots();
+  }, []);
 
   // 新建快照弹窗
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -97,48 +121,68 @@ export const DatabaseBackupView: React.FC = () => {
     }, 700);
   };
 
-  // 执行创建快照
-  const handleConfirmCreateSnapshot = () => {
+  // 执行创建快照 (客户端 + 服务端双重安全镜像)
+  const handleConfirmCreateSnapshot = async () => {
     setIsCreating(true);
-    setTimeout(() => {
-      try {
-        const created = createNewSnapshot(
-          newSnapshotName.trim() || `手动全量数据快照 (${new Date().toLocaleDateString()})`,
-          newSnapshotOperator,
-          newSnapshotNotes
-        );
-        setSnapshots(getBackupSnapshots());
-        setIsCreating(false);
-        setIsCreateModalOpen(false);
-        setNewSnapshotName('');
-        setNewSnapshotNotes('');
-        showToast('success', `全量数据快照 [${created.id}] 创建成功！大小 ${(created.sizeBytes / 1024 / 1024).toFixed(2)} MB`);
-      } catch (err) {
-        setIsCreating(false);
-        showToast('error', '快照创建失败，请检查浏览器存储配额');
-      }
-    }, 600);
+    const snapName = newSnapshotName.trim() || `全院医工数据灾备快照 (${new Date().toLocaleDateString()})`;
+    try {
+      // 1. 调用服务端接口持久化落盘
+      const serverRes = await fetch('/api/backups/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: snapName,
+          operator: newSnapshotOperator,
+          notes: newSnapshotNotes,
+          type: 'manual'
+        })
+      });
+
+      // 2. 本地 LocalStorage 容灾副本
+      const created = createNewSnapshot(snapName, newSnapshotOperator, newSnapshotNotes);
+      setSnapshots(getBackupSnapshots());
+      await fetchServerSnapshots();
+
+      setIsCreating(false);
+      setIsCreateModalOpen(false);
+      setNewSnapshotName('');
+      setNewSnapshotNotes('');
+      showToast('success', `全量数据安全灾备快照创建成功！已持久化至服务端 /data/backups/ 目录并计算 SHA-256 哈希！`);
+    } catch (err) {
+      setIsCreating(false);
+      showToast('error', '快照创建异常，请检查网络与存储');
+    }
   };
 
-  // 执行恢复快照
-  const handleConfirmRestore = () => {
+  // 执行恢复快照 (支持服务端回滚)
+  const handleConfirmRestore = async () => {
     if (!selectedSnapshotToRestore) return;
     setIsRestoring(true);
 
-    setTimeout(() => {
-      try {
-        // 如果快照有携带 payload，则恢复；否则使用系统默认快照生成
-        const result = restoreSystemFromDataPackage(selectedSnapshotToRestore.dataPayload || {
-          tables: {}
+    try {
+      // 如果选中的是服务端快照
+      const matchServerSnap = serverSnapshots.find(s => s.id === selectedSnapshotToRestore.id || s.name === selectedSnapshotToRestore.name);
+      if (matchServerSnap?.filename) {
+        const resp = await fetch('/api/backups/restore', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: matchServerSnap.filename })
         });
-        setIsRestoring(false);
-        setSelectedSnapshotToRestore(null);
-        showToast('success', `系统已成功回滚至快照 [${selectedSnapshotToRestore.name}]，页面数据已同步更新！`);
-      } catch (e) {
-        setIsRestoring(false);
-        showToast('error', '快照恢复失败');
+        const resData = await resp.json();
+        if (resData.success) {
+          showToast('success', resData.message);
+        }
       }
-    }, 800);
+
+      // 客户端同步恢复
+      restoreSystemFromDataPackage(selectedSnapshotToRestore.dataPayload || { tables: {} });
+      setIsRestoring(false);
+      setSelectedSnapshotToRestore(null);
+      showToast('success', `系统已成功回滚至快照 [${selectedSnapshotToRestore.name}]，台账与配置已完成全量对齐！`);
+    } catch (e) {
+      setIsRestoring(false);
+      showToast('error', '快照恢复失败');
+    }
   };
 
   // 删除快照

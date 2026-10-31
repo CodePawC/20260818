@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   MedicalEquipment, 
   SystemStats, 
@@ -49,11 +49,19 @@ import {
   Wallet,
   Scale,
   FileCheck2,
-  Award
+  Award,
+  QrCode,
+  Bell,
+  Sliders,
+  Maximize2,
+  Minimize2
 } from 'lucide-react';
-import { FaultFrequencyAnalysisCard } from './FaultFrequencyAnalysisCard';
+import { MeaningfulExecutiveCharts } from './MeaningfulExecutiveCharts';
+import { ExecutiveQualityKpiStrip } from './ExecutiveQualityKpiStrip';
 import { ImmediateReconciliationPanel, ImmediateReconciliationItem } from './ImmediateReconciliationPanel';
 import { PinnedFinancialKpiGrid } from './PinnedFinancialKpiGrid';
+import { RepairAlertPopupModal, RepairAlertData } from './RepairAlertPopupModal';
+import { RepairReportDetailModal, RepairReportDetailData } from './RepairReportDetailModal';
 import { MonthlyFrameworkBatch } from '../types/vendorCollaborationTypes';
 import { getMonthlyFrameworkBatches } from '../utils/monthlyFrameworkData';
 import { 
@@ -82,6 +90,7 @@ export interface DashboardViewProps {
   onSelectDeviceDetail: (device: MedicalEquipment) => void;
   onBorrowEquipment?: (device: MedicalEquipment) => void;
   onReturnEquipment?: (device: MedicalEquipment) => void;
+  onOpenOfficialReport?: (device?: MedicalEquipment, reason?: string) => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -99,7 +108,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onOpenStatusModal,
   onSelectDeviceDetail,
   onBorrowEquipment,
-  onReturnEquipment
+  onReturnEquipment,
+  onOpenOfficialReport
 }) => {
   // 当前登录用户的科室识别与护士长身份
   const userDept = getUserDepartment(currentUser);
@@ -128,8 +138,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return (userIsNurse || userIsClinical) && hasDeptScope ? 'dept_only' : 'all';
   });
 
-  // 右侧监控栏目切换：'fault_stats' (设备故障频率统计分析) | 'emergency_repairs' (急需处置待修机具) | 'dept_health' (核心科室健康度)
-  const [rightMonitorTab, setRightMonitorTab] = useState<'fault_stats' | 'emergency_repairs' | 'dept_health'>('fault_stats');
+  // 右侧监控栏目切换：'meaningful_charts' (医工决策核心态势图表) | 'emergency_repairs' (急需处置待修机具) | 'dept_health' (核心科室健康度)
+  const [rightMonitorTab, setRightMonitorTab] = useState<'meaningful_charts' | 'emergency_repairs' | 'dept_health'>('meaningful_charts');
 
   // 交接班点检成功轻提示
   const [handoverSuccessMessage, setHandoverSuccessMessage] = useState<string>('');
@@ -176,6 +186,73 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     setUrgentReconcileCount(prev => Math.max(0, prev - 1));
     setTotalDiffAmount(prev => Math.max(0, prev - item.diffAmount));
   };
+
+  // 实时报修弹窗警报状态与草料扫码报修监听
+  const [activeRepairAlert, setActiveRepairAlert] = useState<RepairAlertData | null>(null);
+  const [selectedRepairDetail, setSelectedRepairDetail] = useState<RepairReportDetailData | null>(null);
+
+  // 定时轮询与全局报修事件监听，实现收到报修信息实时弹出消息
+  useEffect(() => {
+    let isMounted = true;
+
+    const checkLatestAlert = async () => {
+      try {
+        const res = await fetch('/api/caoliao/latest-alert');
+        const json = await res.json();
+        if (isMounted && json.success && json.hasNewAlert && json.alert) {
+          setActiveRepairAlert(json.alert);
+        }
+      } catch (e) {
+        // 静默容错
+      }
+    };
+
+    // 挂载时立即执行一次检测
+    checkLatestAlert();
+
+    // 每 4 秒轮询一次是否有来自草料二维码 Webhook 的最新报修
+    const pollTimer = setInterval(checkLatestAlert, 4000);
+
+    // 监听前端即时广播事件 (例如测试模拟器或其它组件直接分发)
+    const handleAlertReceived = (e: any) => {
+      if (e.detail?.alert) {
+        setActiveRepairAlert(e.detail.alert);
+      } else if (e.detail?.workOrderId) {
+        setActiveRepairAlert({
+          id: `ALERT-${Date.now()}`,
+          timestamp: '刚刚',
+          workOrderId: e.detail.workOrderId,
+          equipmentId: e.detail.matchedEquipmentId || 'EQ-001',
+          equipmentName: e.detail.equipmentName || '迈瑞病人监护仪',
+          department: e.detail.department || '重症医学科',
+          reporterName: '林瑞芳 (ICU护士长)',
+          reporterPhone: '13863371002',
+          faultDescription: '现场扫码报修：设备运行异常，需医工人员紧急到场处置',
+          urgency: e.detail.urgency || 'P1',
+          source: '草料二维码现场扫码',
+          isRead: false
+        });
+      }
+    };
+
+    window.addEventListener('caoliao_repair_received', handleAlertReceived);
+
+    return () => {
+      isMounted = false;
+      clearInterval(pollTimer);
+      window.removeEventListener('caoliao_repair_received', handleAlertReceived);
+    };
+  }, []);
+
+  // 关闭/忽略当前弹出的报修警报
+  const handleDismissRepairAlert = async () => {
+    setActiveRepairAlert(null);
+    try {
+      await fetch('/api/caoliao/dismiss-alert', { method: 'POST' });
+    } catch (e) {
+      // ignore
+    }
+  };
   
   // 新建/编辑日程模态框
   const [isAddScheduleModalOpen, setIsAddScheduleModalOpen] = useState(false);
@@ -213,13 +290,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return equipmentList;
   }, [equipmentList, isDeptView, userDept]);
 
-  // 本科室从应急储备库在借的设备
+  // 在借应急生命支持设备追踪池（科室视角看本科室在借，全院视角看全院跨科借调监控）
   const borrowedEmergencyDevices = useMemo(() => {
     const list = allEquipmentList || equipmentList;
-    if (!userDept) return [];
     const now = Date.now();
     return list
-      .filter(e => e.currentLoan && e.currentLoan.loanStatus !== 'returned' && (e.currentLoan.borrowingDepartment === userDept || e.currentLoan.borrowingDepartment?.includes(userDept)))
+      .filter(e => {
+        if (!e.currentLoan || e.currentLoan.loanStatus === 'returned') return false;
+        if (isDeptView && userDept) {
+          return e.currentLoan.borrowingDepartment === userDept || e.currentLoan.borrowingDepartment?.includes(userDept);
+        }
+        return true;
+      })
       .map(e => {
         const loan = e.currentLoan!;
         const borrowStr = loan.borrowTime || (loan as any).loanDate || '';
@@ -242,7 +324,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           daysOverdue
         };
       });
-  }, [allEquipmentList, equipmentList, userDept]);
+  }, [allEquipmentList, equipmentList, isDeptView, userDept]);
 
   // 本科室相关的审批流转单据
   const deptApprovalApplications = useMemo(() => {
@@ -642,53 +724,47 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <span>{currentUser?.organization || '五莲县人民医院'} · {userDept || '医学工程保障中心'}</span>
             </span>
 
-            {/* 护士长专属科室锁定标识 */}
-            {userIsNurse && userDept && (
-              <span className="px-2 py-0.5 rounded-md text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">
-                {userDept}专属
-              </span>
-            )}
-
-            {/* 护士长模式切换开关 (事务矩阵 vs 工作日程) */}
-            {isDeptView && (
-              <div className="flex items-center bg-slate-100 border border-slate-200 p-0.5 rounded-lg text-xs font-medium ml-1">
+            {/* 视角切换器：全院全局大盘 vs 本科室专属看板 */}
+            {hasDeptScope && (
+              <div className="flex items-center bg-slate-100 border border-slate-200/90 p-0.5 rounded-lg text-xs font-semibold ml-1">
                 <button
                   type="button"
-                  onClick={() => setNurseWorkMode('affairs')}
-                  className={`px-2.5 py-1 rounded-md transition cursor-pointer flex items-center gap-1 ${
-                    nurseWorkMode === 'affairs'
-                      ? 'bg-white text-rose-700 shadow-2xs font-bold'
+                  onClick={() => setDashboardScope('hospital')}
+                  className={`px-2.5 py-1 rounded-md transition cursor-pointer flex items-center gap-1.5 ${
+                    !isDeptView
+                      ? 'bg-white text-blue-700 shadow-2xs font-bold'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
-                  title="科室事务矩阵"
+                  title="切换至全院全局大盘视角"
                 >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>事务协同</span>
-                  {pendingDeptSignoffs.length > 0 && (
-                    <span className="w-4 h-4 rounded-full bg-amber-500 text-white text-[10px] flex items-center justify-center font-bold">
-                      {pendingDeptSignoffs.length}
-                    </span>
-                  )}
+                  <Building2 className="w-3.5 h-3.5" />
+                  <span>全院总览</span>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-200 text-slate-700 font-mono">
+                    {equipmentList.length}
+                  </span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setNurseWorkMode('schedule')}
-                  className={`px-2.5 py-1 rounded-md transition cursor-pointer flex items-center gap-1 ${
-                    nurseWorkMode === 'schedule'
-                      ? 'bg-white text-indigo-700 shadow-2xs font-bold'
+                  onClick={() => setDashboardScope('department')}
+                  className={`px-2.5 py-1 rounded-md transition cursor-pointer flex items-center gap-1.5 ${
+                    isDeptView
+                      ? 'bg-white text-rose-700 shadow-2xs font-bold'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
-                  title="工作排班与巡检日程"
+                  title={`切换至【${userDept}】专属工作台`}
                 >
-                  <Calendar className="w-3.5 h-3.5" />
-                  <span>排班巡检</span>
+                  <Stethoscope className="w-3.5 h-3.5 text-rose-500" />
+                  <span>{userDept}工作台</span>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-rose-100 text-rose-800 font-mono">
+                    {scopedEquipmentList.length}
+                  </span>
                 </button>
               </div>
             )}
           </div>
         </div>
 
-        {/* 右侧：工作台快捷动作 */}
+        {/* 右侧：工作台核心高频响应动作 */}
         <div className="flex items-center gap-2 shrink-0 flex-wrap">
           {/* 轻提示 */}
           {handoverSuccessMessage && (
@@ -698,107 +774,87 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </span>
           )}
 
+          {/* 晨间点检打卡按钮 (科室/临床视角优先显示) */}
           {isDeptView && (userIsNurse || userIsClinical) && (
             <button
+              type="button"
               onClick={handleCompleteHandoverCheck}
               className="h-8 px-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
-              title="完成今日急救生命支持设备交接点检"
+              title="完成今日急救生命支持设备晨间交接点检打卡"
             >
               <CheckSquare className="w-3.5 h-3.5" />
               <span>晨间交接点检</span>
             </button>
           )}
 
-          {userIsNurse && (
-            <button
-              onClick={() => onNavigateToTab?.('approvals')}
-              className="h-8 px-2.5 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
-              title="科室流转审批单"
-            >
-              <FileText className="w-3.5 h-3.5" />
-              <span>科室审批 {deptApprovalApplications.length > 0 && `(${deptApprovalApplications.length})`}</span>
-            </button>
-          )}
-
+          {/* 核心第一动作：紧急故障报修 */}
           <button
+            type="button"
             onClick={() => onOpenRepairModal()}
-            className="h-8 px-2.5 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
-            title="发起故障报修"
+            className="h-8 px-3 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs"
+            title="登记新设备故障报修工单"
           >
             <Wrench className="w-3.5 h-3.5" />
             <span>紧急报修</span>
           </button>
 
+          {/* 医院标准请示报告单 (打印与审批生成) */}
           <button
-            onClick={() => onNavigateToTab?.('adverse_events')}
-            className="h-8 px-2.5 bg-rose-50 hover:bg-rose-100 active:scale-95 text-rose-700 border border-rose-200 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
-            title="不良事件直报"
+            type="button"
+            onClick={() => onOpenOfficialReport?.()}
+            className="h-8 px-2.5 bg-red-50 hover:bg-red-100 active:scale-95 text-red-700 border border-red-200 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
+            title="生成或打印《五莲县人民医院请示报告单》"
           >
-            <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />
-            <span>不良事件</span>
+            <FileCheck2 className="w-3.5 h-3.5 text-red-600" />
+            <span>院请示单</span>
           </button>
 
-          {/* 月度对账只在管理科室/全院视角展示，临床科室人员无需进行供应商框架对账 */}
-          {!isDeptView ? (
-            <button
-              onClick={() => onNavigateToTab?.('vendor_collaboration')}
-              className="h-8 px-2.5 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
-              title="进入月度框架维保与双方即时对账工作台"
-            >
-              <Receipt className="w-3.5 h-3.5" />
-              <span>月度对账</span>
-              {urgentReconcileCount > 0 && (
-                <span className="w-4 h-4 rounded-full bg-white text-amber-700 text-[10px] font-extrabold flex items-center justify-center ml-0.5">
-                  {urgentReconcileCount}
-                </span>
-              )}
-            </button>
-          ) : (
-            <button
-              onClick={() => onNavigateToApprovals?.()}
-              className="h-8 px-2.5 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
-              title="查看科室审批流转事项"
-            >
-              <FileCheck2 className="w-3.5 h-3.5" />
-              <span>科室审批</span>
-              {pendingDeptSignoffs.length > 0 && (
-                <span className="w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] font-extrabold flex items-center justify-center ml-0.5">
-                  {pendingDeptSignoffs.length}
-                </span>
-              )}
-            </button>
-          )}
-
+          {/* 业务审批流转通道 */}
           <button
-            onClick={() => onNavigateToLedger('', isDeptView ? userDept : undefined)}
-            className="h-8 px-2.5 bg-slate-100 hover:bg-slate-200 active:scale-95 text-slate-700 border border-slate-200 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
-            title={isDeptView ? `查看${userDept}设备台账` : '查看全院设备台账'}
+            type="button"
+            onClick={() => onNavigateToApprovals?.()}
+            className="h-8 px-2.5 bg-white hover:bg-slate-50 active:scale-95 text-slate-700 border border-slate-200 rounded-lg text-xs font-medium transition flex items-center gap-1 cursor-pointer shadow-2xs"
+            title="查看业务审批流转事项"
           >
-            <FileText className="w-3.5 h-3.5 text-slate-600" />
-            <span>{isDeptView ? `${userDept}台账` : '全院台账'}</span>
+            <FileCheck2 className="w-3.5 h-3.5 text-indigo-600" />
+            <span>审批中心</span>
+            {pendingDeptSignoffs.length > 0 && (
+              <span className="w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] font-extrabold flex items-center justify-center ml-0.5">
+                {pendingDeptSignoffs.length}
+              </span>
+            )}
+          </button>
+
+          {/* 设备技术台账直达 */}
+          <button
+            type="button"
+            onClick={() => onNavigateToLedger('', isDeptView ? userDept : undefined)}
+            className="h-8 px-2.5 bg-white hover:bg-slate-50 active:scale-95 text-slate-700 border border-slate-200 rounded-lg text-xs font-medium transition flex items-center gap-1 cursor-pointer shadow-2xs"
+            title={isDeptView ? `查看${userDept}设备技术台账` : '查看全院设备技术台账'}
+          >
+            <FileText className="w-3.5 h-3.5 text-slate-500" />
+            <span>{isDeptView ? `${userDept}台账` : '设备台账'}</span>
           </button>
         </div>
       </div>
 
-      {/* ==================== 2. 置顶核心卡片网格 (未开票项目、待回款进度、月度维修费用置顶高亮) ==================== */}
-      <PinnedFinancialKpiGrid
-        batches={frameworkBatches}
+      {/* ==================== 第一段：置顶医疗质控与生命支持核心KPI看板 (Executive Quality KPIs Strip) ==================== */}
+      <ExecutiveQualityKpiStrip
+        equipmentList={scopedEquipmentList}
         monthlyRepairCost={activeStats.monthlyRepairCost}
-        healthRate={currentHealthRate}
-        normalCount={activeStats.normalCount}
-        faultCount={activeStats.faultCount}
-        borrowedCount={borrowedEmergencyDevices.length}
-        urgentReconcileCount={urgentReconcileCount}
-        totalDiffAmount={totalDiffAmount}
         isDeptView={isDeptView}
         userDept={userDept}
         pendingDeptSignoffsCount={pendingDeptSignoffs.length}
-        upcomingPmCount={upcomingPmAndCalibrations.length}
-        lifeSupportCount={lifeSupportDevices.length}
+        urgentReconcileCount={urgentReconcileCount}
         onNavigateToTab={onNavigateToTab}
-        onScrollToReconciliation={handleScrollToReconciliation}
-        onNavigateToApprovals={() => onNavigateToApprovals?.()}
+        onNavigateToLedger={onNavigateToLedger}
+        onScrollToActions={() => {
+          const el = document.getElementById('urgent-dispatch-section');
+          if (el) el.scrollIntoView({ behavior: 'smooth' });
+        }}
       />
+
+
 
       {/* ==================== 3. 主体工作区 ==================== */}
       {isDeptView && nurseWorkMode === 'affairs' ? (
@@ -1049,6 +1105,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         <div className="flex items-center gap-1.5 shrink-0">
                           <button
                             type="button"
+                            onClick={() => onOpenOfficialReport?.(device, device.lastFaultReason)}
+                            className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-md text-xs font-semibold transition flex items-center gap-1 cursor-pointer"
+                            title="生成该器械的《五莲县人民医院请示报告单》并直接打印"
+                          >
+                            <FileCheck2 className="w-3.5 h-3.5 text-red-600" />
+                            <span>请示单</span>
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => onOpenAiModal(device)}
                             className="px-2 py-1 bg-cyan-50 hover:bg-cyan-100 text-cyan-700 border border-cyan-200 rounded-md text-xs font-bold transition flex items-center gap-1 cursor-pointer"
                             title="AI智能急救故障排查与指导"
@@ -1211,7 +1276,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
 
             {/* 模块 D: 🛡️ 本科室近期法定强检定标与维保预警 */}
-            <div className="h-[210px] bg-white rounded-xl border border-slate-200 shadow-2xs p-3.5 flex flex-col justify-between shrink-0 overflow-hidden">
+            <div className="min-h-[280px] bg-white rounded-xl border border-slate-200 shadow-2xs p-3.5 flex flex-col justify-between shrink-0 overflow-hidden">
               <div className="flex items-center justify-between pb-1.5 border-b border-slate-100 shrink-0">
                 <div className="flex items-center gap-2">
                   <ShieldAlert className="w-4 h-4 text-purple-600" />
@@ -1234,7 +1299,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
 
               {/* 列表 */}
-              <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-slate-100 mt-1 pr-0.5">
+              <div className="flex-1 min-h-[160px] max-h-[320px] overflow-y-auto divide-y divide-slate-100 mt-1 pr-0.5">
                 {upcomingPmAndCalibrations.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center p-2 text-center text-slate-400 text-xs">
                     <CheckCircle2 className="w-6 h-6 text-emerald-500 opacity-90 mb-1" />
@@ -1242,7 +1307,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     <p className="text-[11px] text-slate-400 mt-0.5">全部计量证书与预防性维护均在有效期内</p>
                   </div>
                 ) : (
-                  upcomingPmAndCalibrations.slice(0, 3).map((eq) => (
+                  upcomingPmAndCalibrations.slice(0, 6).map((eq) => (
                     <div key={eq.id} className="py-1.5 flex items-center justify-between gap-2">
                       <div className="space-y-0.5 min-w-0 flex-1">
                         <div className="flex items-center gap-1.5 flex-wrap">
@@ -1296,586 +1361,618 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
         </div>
       ) : (
-        /* ------------------ 模式 B: 日程排班与巡检看板 (Schedule View) ------------------ */
-        <div className="flex-1 min-h-[580px] grid grid-cols-1 lg:grid-cols-12 gap-2.5">
+        /* ------------------ 模式 B: 三甲医院质控驾驶舱与排班协同全景 (Executive Cockpit & Flow) ------------------ */
+        <div className="flex-1 flex flex-col gap-3 min-h-0">
           
-          {/* 左侧栏 (5/12)：今日与近期工作日程看板 */}
-          <div className="lg:col-span-5 flex flex-col bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden min-h-[500px]">
-            {/* 日程工具栏 */}
-            <div className="px-3 py-1.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-1.5 bg-slate-50/80 shrink-0">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <Calendar className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-                <span className="text-xs font-bold text-slate-800">
-                  {isDeptView ? `【${userDept}】日程` : '工作日程看板'}
-                </span>
-                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-700">
-                  {scheduleFilterTab === 'today' ? `今日 ${filteredScheduleList.length}项` : `近期 ${filteredScheduleList.length}项`}
-                </span>
+          {/* ==================== 第二段：实时待办处置与排班协同枢纽 (Action & Schedule Center - 第一视觉焦点) ==================== */}
+          <div id="urgent-dispatch-section" className="grid grid-cols-1 lg:grid-cols-2 gap-3 min-h-[560px]">
+            
+            {/* 左侧栏 (1/2 均等分布)：急需抢修与现场派工流水 */}
+            <div className="flex flex-col bg-white rounded-xl border border-slate-200/90 shadow-2xs overflow-hidden">
+              {/* 卡片头部 */}
+              <div className="px-3.5 py-2.5 border-b border-slate-100 flex items-center justify-between bg-slate-50/60 shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className={`w-2 h-2 rounded-full ${faultyDevices.length > 0 ? "bg-rose-500 animate-pulse" : "bg-emerald-500"}`} />
+                  <h3 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                    <AlertTriangle className="w-4 h-4 text-rose-500" />
+                    <span>{isDeptView ? `【${userDept}】急需报修与抢修处置流水` : "全院急需抢修与现场派工流水"}</span>
+                  </h3>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                    faultyDevices.length > 0 ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"
+                  }`}>
+                    {faultyDevices.length > 0 ? `待响应 ${faultyDevices.length} 台` : "全部在线在位"}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onOpenOfficialReport?.()}
+                    className="px-2 py-0.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded text-xs font-semibold flex items-center gap-1 transition cursor-pointer"
+                    title="开具《五莲县人民医院请示报告单》"
+                  >
+                    <FileCheck2 className="w-3.5 h-3.5 text-red-600" />
+                    <span>开具请示单</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => onNavigateToLedger("故障待修", isDeptView ? userDept : undefined)}
+                    className="text-xs text-blue-600 hover:text-blue-800 font-semibold flex items-center gap-0.5 transition cursor-pointer"
+                  >
+                    <span>查看完整待修清单</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
 
-              <div className="flex items-center gap-1.5 flex-wrap">
-                {/* 科室专属范围过滤按钮 */}
-                {hasDeptScope && (
-                  <div className="flex items-center bg-slate-200/80 p-0.5 rounded-md text-[10px] font-semibold">
+              {/* 抢修设备列表 (适度加长以便清晰容纳更多内容) */}
+              <div className="flex-1 min-h-[360px] max-h-[640px] overflow-y-auto divide-y divide-slate-100 p-2 space-y-1">
+                {faultyDevices.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center p-6 text-center text-slate-400">
+                    <CheckCircle2 className="w-9 h-9 text-emerald-500 opacity-90 mb-2" />
+                    <p className="text-slate-800 font-bold text-sm">
+                      {isDeptView ? `【${userDept}】当前无急需报修设备` : "全院暂无急需抢修停机设备"}
+                    </p>
+                    <p className="text-xs text-slate-500 mt-1 max-w-sm">
+                      急救生命支持系统与高精尖监护设备完好率达标，值班医工人员处于常态化巡检待命状态
+                    </p>
                     <button
                       type="button"
-                      onClick={() => setScheduleScopeFilter('dept_only')}
-                      className={`px-1.5 py-0.5 rounded transition cursor-pointer ${
-                        scheduleScopeFilter === 'dept_only'
-                          ? 'bg-white text-indigo-700 shadow-2xs font-bold'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
+                      onClick={() => onOpenRepairModal()}
+                      className="mt-3.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-2xs"
                     >
-                      仅看{userDept}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setScheduleScopeFilter('all')}
-                      className={`px-1.5 py-0.5 rounded transition cursor-pointer ${
-                        scheduleScopeFilter === 'all'
-                          ? 'bg-white text-indigo-700 shadow-2xs font-bold'
-                          : 'text-slate-600 hover:text-slate-900'
-                      }`}
-                    >
-                      全部
+                      <Wrench className="w-3.5 h-3.5" />
+                      <span>登记临床新报修工单</span>
                     </button>
                   </div>
-                )}
-
-                {/* Tab 切换 */}
-                <div className="flex items-center bg-slate-200/80 p-0.5 rounded-md text-[10.5px] font-semibold">
-                  <button
-                    type="button"
-                    onClick={() => setScheduleFilterTab('today')}
-                    className={`px-1.5 py-0.5 rounded transition cursor-pointer flex items-center gap-1 ${
-                      scheduleFilterTab === 'today'
-                        ? 'bg-white text-slate-800 shadow-2xs font-bold'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <span>今日</span>
-                    <span className="w-3.5 h-3.5 rounded-full bg-indigo-100 text-indigo-700 text-[9px] flex items-center justify-center font-bold">
-                      {scheduleStats.todayTotal}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setScheduleFilterTab('upcoming')}
-                    className={`px-1.5 py-0.5 rounded transition cursor-pointer flex items-center gap-1 ${
-                      scheduleFilterTab === 'upcoming'
-                        ? 'bg-white text-slate-800 shadow-2xs font-bold'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <span>近期</span>
-                    <span className="w-3.5 h-3.5 rounded-full bg-slate-300 text-slate-700 text-[9px] flex items-center justify-center font-bold">
-                      {scheduleStats.upcomingTasks}
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setScheduleFilterTab('all')}
-                    className={`px-1.5 py-0.5 rounded transition cursor-pointer ${
-                      scheduleFilterTab === 'all'
-                        ? 'bg-white text-slate-800 shadow-2xs font-bold'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    全部
-                  </button>
-                </div>
-
-                {/* 类别筛选 */}
-                <select
-                  value={scheduleCategoryFilter}
-                  onChange={(e) => setScheduleCategoryFilter(e.target.value)}
-                  aria-label="按类别筛选"
-                  className="text-[10.5px] bg-white border border-slate-200 rounded px-1.5 py-0.5 text-slate-700 font-medium focus:ring-1 focus:ring-indigo-500 focus:outline-hidden"
-                >
-                  <option value="all">全部类型</option>
-                  <option value="强检定标">强检定标</option>
-                  <option value="预防性维护">预防性维护</option>
-                  <option value="故障抢修">故障抢修</option>
-                  <option value="科室巡检">科室巡检</option>
-                  <option value="质控抽检">质控抽检</option>
-                  <option value="例行工作">例行工作</option>
-                </select>
-
-                <button
-                  onClick={handleOpenAddModal}
-                  className="px-2 py-0.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded text-[10.5px] font-bold transition flex items-center gap-0.5 cursor-pointer"
-                >
-                  <Plus className="w-3 h-3" />
-                  <span>新建</span>
-                </button>
-              </div>
-            </div>
-
-            {/* 日程列表主体 */}
-            <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-slate-100">
-              {filteredScheduleList.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center p-6 text-center text-slate-400 space-y-1.5">
-                  <CheckCircle2 className="w-8 h-8 text-emerald-500 opacity-80" />
-                  <p className="text-xs font-semibold text-slate-600">当前条件下无待办工作日程安排</p>
-                  <button
-                    onClick={handleOpenAddModal}
-                    className="text-xs text-indigo-600 hover:underline font-bold"
-                  >
-                    + 新增工作日程安排
-                  </button>
-                </div>
-              ) : (
-                filteredScheduleList.map((task) => {
-                  const isCompleted = task.status === 'completed';
-                  const isInProgress = task.status === 'in_progress';
-                  const linkedDevice = getLinkedDevice(task);
-
-                  return (
-                    <div
-                      key={task.id}
-                      className={`p-2 flex items-center justify-between gap-2 hover:bg-slate-50/80 transition-colors ${
-                        isCompleted ? 'bg-slate-50/40 opacity-70' : ''
-                      }`}
+                ) : (
+                  faultyDevices.map((device) => (
+                    <div 
+                      key={device.id} 
+                      className="p-2.5 rounded-lg border border-slate-200/80 hover:border-slate-300 hover:bg-slate-50/70 transition flex flex-col sm:flex-row sm:items-center justify-between gap-2.5"
                     >
-                      {/* 左侧：复选框 + 时间 + 描述 */}
-                      <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <button
-                          type="button"
-                          onClick={(e) => handleToggleTaskStatus(task.id, e)}
-                          className="text-slate-400 hover:text-indigo-600 transition cursor-pointer shrink-0"
-                          title={isCompleted ? '标记为未完成' : '标记为已完成'}
-                        >
-                          {isCompleted ? (
-                            <CheckSquare className="w-4 h-4 text-emerald-600" />
-                          ) : (
-                            <Square className="w-4 h-4 text-slate-300 hover:text-indigo-500" />
-                          )}
-                        </button>
-
-                        <div className="w-20 shrink-0">
-                          <div className="text-[11px] font-bold font-mono text-slate-700 flex items-center gap-0.5">
-                            <Clock className="w-3 h-3 text-slate-500 shrink-0" />
-                            <span className="truncate">{task.timeRange}</span>
-                          </div>
-                          <div className="text-[10px] font-mono text-slate-500">
-                            {task.date}
-                          </div>
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span 
+                            onClick={() => onSelectDeviceDetail(device)}
+                            className="font-bold text-slate-900 text-xs hover:text-blue-600 cursor-pointer truncate max-w-[180px]"
+                            title={device.name}
+                          >
+                            {device.name}
+                          </span>
+                          <span className="font-mono text-[10px] text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                            {device.sn}
+                          </span>
+                          <span className="px-1.5 py-0.5 bg-rose-50 text-rose-700 text-[10px] font-bold rounded border border-rose-100">
+                            {device.department}
+                          </span>
+                          <span className="px-1.5 py-0.5 bg-amber-50 text-amber-700 text-[10px] font-bold rounded border border-amber-100">
+                            P1 紧急响应
+                          </span>
                         </div>
-
-                        <div className="space-y-0.5 min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            {task.priority === 'urgent' && (
-                              <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-rose-100 text-rose-700 border border-rose-200 shrink-0">
-                                紧急
-                              </span>
-                            )}
-                            {task.priority === 'high' && (
-                              <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 shrink-0">
-                                重要
-                              </span>
-                            )}
-
-                            <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold border shrink-0 ${getCategoryBadgeStyle(task.category)}`}>
-                              {task.category}
-                            </span>
-
-                            {isCompleted ? (
-                              <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
-                                已结单
-                              </span>
-                            ) : isInProgress ? (
-                              <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200 animate-pulse shrink-0">
-                                执行中
-                              </span>
-                            ) : null}
-
-                            <span className={`text-xs font-bold text-slate-900 truncate ${isCompleted ? 'line-through text-slate-400' : ''}`} title={task.title}>
-                              {task.title}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-2.5 text-[10.5px] text-slate-500 flex-wrap">
-                            <span className="flex items-center gap-0.5 truncate max-w-[140px]" title={task.location}>
-                              <MapPin className="w-2.5 h-2.5 text-slate-400 shrink-0" />
-                              <span>{task.location}</span>
-                            </span>
-                            <span className="flex items-center gap-0.5 truncate max-w-[110px]" title={task.assignedStaff}>
-                              <User className="w-2.5 h-2.5 text-slate-400 shrink-0" />
-                              <span>{task.assignedStaff}</span>
-                            </span>
-
-                            {task.relatedDeviceName && (
-                              <span 
-                                onClick={() => linkedDevice && onSelectDeviceDetail(linkedDevice)}
-                                className={`inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded bg-slate-100 text-slate-700 border border-slate-200 text-[10px] font-medium ${
-                                  linkedDevice ? 'hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-300 cursor-pointer' : ''
-                                }`}
-                                title="点击查看设备档案"
-                              >
-                                <Stethoscope className="w-2.5 h-2.5 text-indigo-600" />
-                                <span className="truncate max-w-[120px]">{task.relatedDeviceName}</span>
-                              </span>
-                            )}
-                          </div>
-                        </div>
+                        <p className="text-[11px] text-slate-600 truncate" title={device.lastFaultReason || "暂未录入故障原因"}>
+                          <span className="text-slate-500">故障现象：</span>
+                          <span className="text-slate-800 font-medium">
+                            {device.lastFaultReason || "电源告警/传感器异常/停机待查，急需现场技术排查"}
+                          </span>
+                        </p>
                       </div>
 
-                      {/* 动作按钮 */}
-                      <div className="flex items-center gap-1 shrink-0">
-                        {!isCompleted && (
-                          <button
-                            type="button"
-                            onClick={(e) => handleActionSchedule(task, e)}
-                            className={`px-2 py-0.5 rounded text-[11px] font-bold transition flex items-center gap-0.5 cursor-pointer ${
-                              task.category === '故障抢修'
-                                ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-2xs'
-                                : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200'
-                            }`}
-                          >
-                            {task.category === '故障抢修' ? (
-                              <>
-                                <Wrench className="w-3 h-3" />
-                                <span>抢修</span>
-                              </>
-                            ) : linkedDevice ? (
-                              <>
-                                <FileText className="w-3 h-3" />
-                                <span>设备</span>
-                              </>
-                            ) : (
-                              <>
-                                <Check className="w-3 h-3" />
-                                <span>完成</span>
-                              </>
-                            )}
-                          </button>
-                        )}
-
+                      <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
                         <button
                           type="button"
-                          onClick={(e) => handleOpenEditModal(task, e)}
-                          className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded transition cursor-pointer"
-                          title="编辑"
+                          onClick={() => {
+                            setSelectedRepairDetail({
+                              id: `WO-RT-${device.id}`,
+                              workOrderId: `WO-RT-${device.id}`,
+                              timestamp: device.lastRepairDate || "2026-08-17",
+                              equipmentId: device.id,
+                              equipmentName: device.name,
+                              equipmentSn: device.sn,
+                              model: device.model,
+                              category: device.category,
+                              department: device.department,
+                              location: device.location,
+                              reporterName: "临床医护/巡检工程师",
+                              faultDescription: device.lastFaultReason || "设备报警报错停机，急需医工人员赶往现场检修",
+                              urgency: "P1",
+                              source: "caoliao",
+                              status: "故障待修"
+                            });
+                          }}
+                          className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 rounded text-xs font-semibold transition flex items-center gap-1 cursor-pointer"
+                          title="查看工单单据详情"
                         >
-                          <Edit3 className="w-3 h-3" />
+                          <FileText className="w-3.5 h-3.5 text-slate-500" />
+                          <span>单据</span>
                         </button>
 
                         <button
                           type="button"
-                          onClick={(e) => handleDeleteSchedule(task.id, e)}
-                          className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition cursor-pointer"
-                          title="删除"
+                          onClick={() => onOpenOfficialReport?.(device, device.lastFaultReason)}
+                          className="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded text-xs font-semibold transition flex items-center gap-1 cursor-pointer"
+                          title="生成该器械的《五莲县人民医院请示报告单》并直接打印"
                         >
-                          <Trash2 className="w-3 h-3" />
+                          <FileCheck2 className="w-3.5 h-3.5 text-red-600" />
+                          <span>请示单</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => onOpenAiModal(device)}
+                          className="px-2 py-1 bg-cyan-50 hover:bg-cyan-100 text-cyan-700 border border-cyan-200 rounded text-xs font-semibold transition flex items-center gap-1 cursor-pointer"
+                          title="AI智能故障排查诊断"
+                        >
+                          <Bot className="w-3.5 h-3.5 text-cyan-600" />
+                          <span>AI排查</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => onOpenRepairModal(device)}
+                          className="px-2.5 py-1 bg-rose-600 hover:bg-rose-700 active:scale-95 text-white rounded text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                          title="立即登记派工"
+                        >
+                          <Wrench className="w-3.5 h-3.5" />
+                          <span>派单抢修</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => onOpenStatusModal(device)}
+                          className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                          title="确认故障已排除并恢复使用"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>修复验收</span>
                         </button>
                       </div>
                     </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-
-          {/* 右侧栏 (7/12)：设备故障频率统计 + 急需抢修 + 核心健康度监控台 */}
-          <div className="lg:col-span-7 flex flex-col gap-2 min-h-[500px]">
-            
-            {/* 顶部分类监控 Tab 栏 */}
-            <div className="flex items-center justify-between bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs shrink-0">
-              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-800">
-                <TrendingUp className="w-4 h-4 text-rose-600" />
-                <span>医工质控与设备监控台</span>
-              </div>
-              <div className="flex items-center bg-slate-100 p-0.5 rounded-lg text-[11px] font-semibold">
-                <button
-                  type="button"
-                  onClick={() => setRightMonitorTab('fault_stats')}
-                  className={`px-2 py-0.5 rounded-md flex items-center gap-1 transition cursor-pointer ${
-                    rightMonitorTab === 'fault_stats'
-                      ? 'bg-rose-600 text-white shadow-2xs font-bold'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                  title="设备故障频率统计（支持饼图/折线图）"
-                >
-                  <TrendingUp className="w-3 h-3" />
-                  <span>故障频率统计</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRightMonitorTab('emergency_repairs')}
-                  className={`px-2 py-0.5 rounded-md flex items-center gap-1 transition cursor-pointer ${
-                    rightMonitorTab === 'emergency_repairs'
-                      ? 'bg-rose-600 text-white shadow-2xs font-bold'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                  title="急需抢修处置设备"
-                >
-                  <AlertTriangle className="w-3 h-3 text-rose-400" />
-                  <span>待修处置</span>
-                  {faultyDevices.length > 0 && (
-                    <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[9px] font-bold animate-pulse">
-                      {faultyDevices.length}
-                    </span>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRightMonitorTab('dept_health')}
-                  className={`px-2 py-0.5 rounded-md flex items-center gap-1 transition cursor-pointer ${
-                    rightMonitorTab === 'dept_health'
-                      ? 'bg-indigo-600 text-white shadow-2xs font-bold'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                  title="核心科室与分类健康度"
-                >
-                  <Building2 className="w-3 h-3 text-indigo-400" />
-                  <span>健康度</span>
-                </button>
+                  ))
+                )}
               </div>
             </div>
 
-            {/* 动态卡片内容 */}
-            {rightMonitorTab === 'fault_stats' ? (
-              <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                <FaultFrequencyAnalysisCard 
-                  equipmentList={scopedEquipmentList}
-                  userDept={userDept}
-                  isDeptView={isDeptView}
-                  onNavigateToLedger={onNavigateToLedger}
-                  onNavigateToTab={onNavigateToTab}
-                  onSelectDeviceDetail={onSelectDeviceDetail}
-                  className="h-full"
-                />
-              </div>
-            ) : rightMonitorTab === 'emergency_repairs' ? (
-              /* 上卡片：急需处置故障设备 */
-              <div className="flex-1 min-h-0 bg-white rounded-xl border border-slate-200 shadow-2xs p-3 flex flex-col overflow-hidden">
-                <div className="flex items-center justify-between pb-2 border-b border-slate-100 shrink-0">
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-2 h-2 rounded-full bg-rose-500 animate-ping"></div>
-                    <h3 className="text-xs font-bold text-slate-800 flex items-center gap-1">
-                      <AlertTriangle className="w-3.5 h-3.5 text-rose-500" />
-                      {isDeptView ? `【${userDept}】急需报修设备 (待响应)` : '全院急需抢修处置设备 (待响应派工)'}
-                    </h3>
-                  </div>
-                  <button
-                    onClick={() => onNavigateToLedger('故障待修', isDeptView ? userDept : undefined)}
-                    className="text-[11px] text-indigo-600 hover:text-indigo-800 font-semibold flex items-center gap-0.5 transition cursor-pointer"
-                  >
-                    查看全部 ({faultyDevices.length})
-                    <ArrowRight className="w-3 h-3" />
-                  </button>
+            {/* 右侧栏 (1/2 均等分布)：今日值守与质控巡检日程 */}
+            <div className="flex flex-col bg-white rounded-xl border border-slate-200/90 shadow-2xs overflow-hidden">
+              {/* 日程工具栏 */}
+              <div className="px-3 py-2 border-b border-slate-100 flex flex-wrap items-center justify-between gap-1.5 bg-slate-50/60 shrink-0">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <Calendar className="w-4 h-4 text-blue-600 shrink-0" />
+                  <span className="text-xs font-bold text-slate-900">
+                    {isDeptView ? `【${userDept}】排班日程` : "医工值守与巡检日程"}
+                  </span>
+                  <span className="px-1.5 py-0.2 rounded-full text-xs font-bold bg-blue-100 text-blue-700">
+                    {scheduleFilterTab === "today" ? `今日 ${filteredScheduleList.length}项` : `近期 ${filteredScheduleList.length}项`}
+                  </span>
                 </div>
 
-                {/* 设备列表 */}
-                <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-slate-100 mt-1 pr-0.5">
-                  {faultyDevices.length === 0 ? (
-                    <div className="h-full flex flex-col items-center justify-center py-4 text-center text-slate-400 text-xs font-medium">
-                      <CheckCircle2 className="w-7 h-7 text-emerald-500 opacity-90 mb-1.5" />
-                      <p className="text-slate-700 font-bold text-xs">
-                        {isDeptView ? `【${userDept}】当前无急需报修设备` : '全院暂无急需报修设备'}
-                      </p>
-                      <p className="text-[11px] text-slate-400 mt-0.5">所有急救生命支持与监护设备处于完好待命状态</p>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {/* 科室专属范围过滤 */}
+                  {hasDeptScope && (
+                    <div className="flex items-center bg-slate-200/80 p-0.5 rounded-md text-[11px] font-semibold">
                       <button
-                        onClick={() => onOpenRepairModal()}
-                        className="mt-2.5 px-3 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                        type="button"
+                        onClick={() => setScheduleScopeFilter("dept_only")}
+                        className={`px-1.5 py-0.5 rounded transition cursor-pointer ${
+                          scheduleScopeFilter === "dept_only"
+                            ? "bg-white text-blue-700 shadow-2xs font-bold"
+                            : "text-slate-600 hover:text-slate-900"
+                        }`}
                       >
-                        <Wrench className="w-3 h-3" />
-                        <span>登记新报修工单</span>
+                        仅看{userDept}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setScheduleScopeFilter("all")}
+                        className={`px-1.5 py-0.5 rounded transition cursor-pointer ${
+                          scheduleScopeFilter === "all"
+                            ? "bg-white text-blue-700 shadow-2xs font-bold"
+                            : "text-slate-600 hover:text-slate-900"
+                        }`}
+                      >
+                        全部
                       </button>
                     </div>
-                  ) : (
-                    faultyDevices.map((device) => (
-                      <div key={device.id} className="py-2 flex items-center justify-between gap-2 hover:bg-slate-50/80 px-1 rounded-md transition">
-                        <div className="space-y-0.5 min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span 
-                              className="font-bold text-slate-800 text-xs hover:text-indigo-600 cursor-pointer truncate max-w-[150px]" 
-                              onClick={() => onSelectDeviceDetail(device)}
-                              title={device.name}
-                            >
-                              {device.name}
-                            </span>
-                            <span className="px-1.5 py-0.2 bg-rose-50 text-rose-700 text-[9px] font-bold rounded">
-                              {device.department}
-                            </span>
+                  )}
+
+                  {/* Tab 切换 */}
+                  <div className="flex items-center bg-slate-200/80 p-0.5 rounded-md text-[11px] font-semibold">
+                    <button
+                      type="button"
+                      onClick={() => setScheduleFilterTab("today")}
+                      className={`px-2 py-0.5 rounded transition cursor-pointer flex items-center gap-1 ${
+                        scheduleFilterTab === "today"
+                          ? "bg-white text-slate-900 shadow-2xs font-bold"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      <span>今日</span>
+                      <span className="w-3.5 h-3.5 rounded-full bg-blue-100 text-blue-700 text-[10px] flex items-center justify-center font-bold">
+                        {scheduleStats.todayTotal}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setScheduleFilterTab("upcoming")}
+                      className={`px-2 py-0.5 rounded transition cursor-pointer flex items-center gap-1 ${
+                        scheduleFilterTab === "upcoming"
+                          ? "bg-white text-slate-900 shadow-2xs font-bold"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      <span>近期</span>
+                      <span className="w-3.5 h-3.5 rounded-full bg-slate-200 text-slate-700 text-[10px] flex items-center justify-center font-bold">
+                        {scheduleStats.upcomingTotal}
+                      </span>
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleOpenAddModal}
+                    className="h-6 px-2 bg-blue-600 hover:bg-blue-700 text-white rounded text-[11px] font-semibold flex items-center gap-1 transition cursor-pointer shadow-2xs"
+                    title="新建值守与巡检日程"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>新建</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 日程列表 (适度加长以便清晰容纳更多内容) */}
+              <div className="flex-1 min-h-[360px] max-h-[640px] overflow-y-auto divide-y divide-slate-100 p-1">
+                {filteredScheduleList.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center p-6 text-center text-slate-400">
+                    <Calendar className="w-8 h-8 text-slate-300 mb-1.5" />
+                    <p className="text-slate-700 font-bold text-xs">暂无符合条件的日程任务</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">点击右上角“新建”可添加巡检定标或工作备忘</p>
+                  </div>
+                ) : (
+                  filteredScheduleList.map((task) => {
+                    const isCompleted = task.status === "completed";
+                    const isInProgress = task.status === "in_progress";
+                    const linkedDevice = getLinkedDevice(task);
+
+                    return (
+                      <div
+                        key={task.id}
+                        className={`p-2 flex items-center justify-between gap-2 hover:bg-slate-50/80 transition-colors ${
+                          isCompleted ? "bg-slate-50/50 opacity-70" : ""
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <button
+                            type="button"
+                            onClick={(e) => handleToggleTaskStatus(task.id, e)}
+                            className="text-slate-400 hover:text-blue-600 transition cursor-pointer shrink-0"
+                            title={isCompleted ? "标记为未完成" : "标记为已完成"}
+                          >
+                            {isCompleted ? (
+                              <CheckSquare className="w-4 h-4 text-emerald-600" />
+                            ) : (
+                              <Square className="w-4 h-4 text-slate-300 hover:text-blue-500" />
+                            )}
+                          </button>
+
+                          <div className="w-16 shrink-0">
+                            <div className="text-[10.5px] font-bold font-mono text-slate-700 truncate">
+                              {task.timeRange}
+                            </div>
+                            <div className="text-[9.5px] font-mono text-slate-400">
+                              {task.date}
+                            </div>
                           </div>
-                          <p className="text-[11px] text-slate-500 truncate" title={device.lastFaultReason || '暂未录入报修原因'}>
-                            {device.lastFaultReason || '电源告警/报错停机，需要急诊响应'}
-                          </p>
+
+                          <div className="space-y-0.5 min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {task.priority === "urgent" && (
+                                <span className="px-1 py-0.2 rounded text-[9.5px] font-bold bg-rose-100 text-rose-700 border border-rose-200 shrink-0">
+                                  紧急
+                                </span>
+                              )}
+                              <span className={`px-1 py-0.2 rounded text-[9.5px] font-bold border shrink-0 ${getCategoryBadgeStyle(task.category)}`}>
+                                {task.category}
+                              </span>
+                              <span className={`text-xs font-bold text-slate-900 truncate ${isCompleted ? "line-through text-slate-400" : ""}`} title={task.title}>
+                                {task.title}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-2 text-[10px] text-slate-500 flex-wrap">
+                              <span className="flex items-center gap-0.5 truncate max-w-[120px]" title={task.location}>
+                                <MapPin className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                                <span>{task.location}</span>
+                              </span>
+                              <span className="flex items-center gap-0.5 truncate max-w-[90px]" title={task.assignedStaff}>
+                                <User className="w-2.5 h-2.5 text-slate-400 shrink-0" />
+                                <span>{task.assignedStaff}</span>
+                              </span>
+                              {task.relatedDeviceName && (
+                                <span 
+                                  onClick={() => linkedDevice && onSelectDeviceDetail(linkedDevice)}
+                                  className={`inline-flex items-center gap-0.5 px-1 rounded bg-slate-100 text-slate-700 text-[9.5px] ${
+                                    linkedDevice ? "hover:bg-blue-50 hover:text-blue-700 cursor-pointer" : ""
+                                  }`}
+                                  title="点击查看关联设备"
+                                >
+                                  <Stethoscope className="w-2.5 h-2.5 text-blue-600" />
+                                  <span className="truncate max-w-[100px]">{task.relatedDeviceName}</span>
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         </div>
 
                         <div className="flex items-center gap-1 shrink-0">
                           <button
-                            onClick={() => onOpenAiModal(device)}
-                            className="px-2 py-0.5 bg-cyan-50 hover:bg-cyan-100 text-cyan-700 border border-cyan-200 rounded text-[11px] font-semibold transition flex items-center gap-0.5 cursor-pointer"
-                            title="AI智能诊断排查"
+                            type="button"
+                            onClick={(e) => handleOpenEditModal(task, e)}
+                            className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded transition cursor-pointer"
+                            title="编辑"
                           >
-                            <Bot className="w-3 h-3 text-cyan-600" />
-                            <span>AI排查</span>
+                            <Edit3 className="w-3 h-3" />
                           </button>
                           <button
-                            onClick={() => onOpenRepairModal(device)}
-                            className="px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white rounded text-[11px] font-semibold transition flex items-center gap-0.5 cursor-pointer shadow-2xs"
-                            title="立即登记派工"
+                            type="button"
+                            onClick={(e) => handleDeleteSchedule(task.id, e)}
+                            className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition cursor-pointer"
+                            title="删除"
                           >
-                            <Wrench className="w-3 h-3" />
-                            <span>派单抢修</span>
-                          </button>
-                          <button
-                            onClick={() => onOpenStatusModal(device)}
-                            className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[11px] font-semibold transition flex items-center gap-0.5 cursor-pointer shadow-2xs"
-                            title="设备已排除故障，点击修复并恢复正常运行"
-                          >
-                            <CheckCircle2 className="w-3 h-3" />
-                            <span>修复故障</span>
+                            <Trash2 className="w-3 h-3" />
                           </button>
                         </div>
                       </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            ) : (
-              /* 下卡片：核心科室设备完好率监控 */
-              <div className="flex-1 min-h-0 bg-white rounded-xl border border-slate-200 shadow-2xs p-3 flex flex-col justify-between overflow-hidden">
-                <div>
-                  <div className="flex items-center justify-between pb-1.5 border-b border-slate-100">
-                    <h3 className="text-xs font-bold text-slate-800 flex items-center gap-1">
-                      <Building2 className="w-3.5 h-3.5 text-indigo-600" />
-                      {isDeptView ? `【${userDept}】重点设备分类健康度` : '全院核心科室设备健康度 (Health Matrix)'}
-                    </h3>
-                    <span className="text-[10px] text-slate-400 font-mono">
-                      {isDeptView ? `${scopedEquipmentList.length}台在册` : '实时监测'}
-                    </span>
-                  </div>
-
-                  {isDeptView ? (
-                    <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5 mt-2">
-                      {deptCategoryBreakdown.slice(0, 4).map((cat) => (
-                        <div key={cat.category} className="p-1.5 rounded-lg bg-slate-50 border border-slate-200/80 text-center">
-                          <div className="text-[10px] font-bold text-slate-700 truncate" title={cat.category}>
-                            {(cat.category || '').replace('呼吸、麻醉和急救器械', '急救呼吸类').replace('医用诊察和监护器械', '诊察监护类').replace('妇产科、辅助生殖和避孕器械', '妇产专科类')}
-                          </div>
-                          <div className="text-xs font-bold text-emerald-600 mt-0.5">
-                            {cat.healthRate}% <span className="text-[10px] text-slate-400 font-normal">({cat.normal}/{cat.total})</span>
-                          </div>
-                          <div className="w-full h-1 bg-slate-200 rounded-full mt-1 overflow-hidden">
-                            <div 
-                              className={`h-full rounded-full ${cat.healthRate >= 90 ? 'bg-emerald-500' : 'bg-amber-500'}`} 
-                              style={{ width: `${cat.healthRate}%` }}
-                            ></div>
-                          </div>
-                        </div>
-                      ))}
-                      {deptCategoryBreakdown.length === 0 && (
-                        <div className="col-span-4 text-center text-xs text-slate-400 py-1">本科室暂无分类数据</div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-5 gap-1.5 mt-2">
-                      {departmentStats.map((dept) => (
-                        <div key={dept.name} className="p-1.5 rounded-lg bg-slate-50 border border-slate-200/80 text-center">
-                          <div className="text-[10px] font-bold text-slate-700 truncate" title={dept.name}>
-                            {(dept.name || '').replace('重症医学科(ICU)', 'ICU').replace('医学影像科', '影像科').replace('心血管内科', '心内科')}
-                          </div>
-                          <div className="text-xs font-bold text-emerald-600 mt-0.5">
-                            {dept.healthRate}%
-                          </div>
-                          <div className="w-full h-1 bg-slate-200 rounded-full mt-1 overflow-hidden">
-                            <div 
-                              className={`h-full rounded-full ${dept.healthRate >= 90 ? 'bg-emerald-500' : 'bg-amber-500'}`} 
-                              style={{ width: `${dept.healthRate}%` }}
-                            ></div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* 底部快捷操作入口栏（常驻快捷通道） */}
-            <div className="bg-white rounded-xl border border-slate-200 shadow-2xs p-2 shrink-0">
-              <div className="grid grid-cols-4 gap-1.5">
-                {isDeptView && (userIsNurse || userIsClinical) ? (
-                  <>
-                    <button
-                      onClick={handleCompleteHandoverCheck}
-                      className="p-1.5 bg-emerald-50/80 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-center transition group cursor-pointer"
-                      title="完成交接班点检"
-                    >
-                      <CheckSquare className="w-3.5 h-3.5 text-emerald-600 mx-auto group-hover:scale-110 transition-transform" />
-                      <div className="text-[10px] font-bold text-slate-800 mt-0.5">交接点检</div>
-                    </button>
-
-                    <button
-                      onClick={() => onOpenRepairModal()}
-                      className="p-1.5 bg-amber-50/70 hover:bg-amber-100 border border-amber-100 rounded-lg text-center transition group cursor-pointer"
-                      title="科室设备报修"
-                    >
-                      <Wrench className="w-3.5 h-3.5 text-amber-600 mx-auto group-hover:scale-110 transition-transform" />
-                      <div className="text-[10px] font-bold text-slate-800 mt-0.5">科室报修</div>
-                    </button>
-
-                    <button
-                      onClick={() => onOpenAiModal()}
-                      className="p-1.5 bg-cyan-50/70 hover:bg-cyan-100 border border-cyan-100 rounded-lg text-center transition group cursor-pointer"
-                      title="AI急救应急排查"
-                    >
-                      <Bot className="w-3.5 h-3.5 text-cyan-600 mx-auto group-hover:scale-110 transition-transform" />
-                      <div className="text-[10px] font-bold text-slate-800 mt-0.5">AI排查</div>
-                    </button>
-
-                    <button
-                      onClick={() => onNavigateToLedger('', userDept)}
-                      className="p-1.5 bg-indigo-50/70 hover:bg-indigo-100 border border-indigo-100 rounded-lg text-center transition group cursor-pointer"
-                      title={`查看${userDept}设备台账`}
-                    >
-                      <FileText className="w-3.5 h-3.5 text-indigo-600 mx-auto group-hover:scale-110 transition-transform" />
-                      <div className="text-[10px] font-bold text-slate-800 mt-0.5">科室台账</div>
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      onClick={onOpenAddModal}
-                      className="p-1.5 bg-indigo-50/70 hover:bg-indigo-100 border border-indigo-100 rounded-lg text-center transition group cursor-pointer"
-                      title="资产建卡"
-                    >
-                      <PlusCircle className="w-3.5 h-3.5 text-indigo-600 mx-auto group-hover:scale-110 transition-transform" />
-                      <div className="text-[10px] font-bold text-slate-800 mt-0.5">资产建卡</div>
-                    </button>
-
-                    <button
-                      onClick={() => onOpenRepairModal()}
-                      className="p-1.5 bg-amber-50/70 hover:bg-amber-100 border border-amber-100 rounded-lg text-center transition group cursor-pointer"
-                      title="故障报修"
-                    >
-                      <Wrench className="w-3.5 h-3.5 text-amber-600 mx-auto group-hover:scale-110 transition-transform" />
-                      <div className="text-[10px] font-bold text-slate-800 mt-0.5">故障报修</div>
-                    </button>
-
-                    <button
-                      onClick={() => onOpenAiModal()}
-                      className="p-1.5 bg-cyan-50/70 hover:bg-cyan-100 border border-cyan-100 rounded-lg text-center transition group cursor-pointer"
-                      title="AI专家排查"
-                    >
-                      <Bot className="w-3.5 h-3.5 text-cyan-600 mx-auto group-hover:scale-110 transition-transform" />
-                      <div className="text-[10px] font-bold text-slate-800 mt-0.5">AI排查</div>
-                    </button>
-
-                    <button
-                      onClick={() => onNavigateToLedger()}
-                      className="p-1.5 bg-emerald-50/70 hover:bg-emerald-100 border border-emerald-100 rounded-lg text-center transition group cursor-pointer"
-                      title="全院台账"
-                    >
-                      <FileText className="w-3.5 h-3.5 text-emerald-600 mx-auto group-hover:scale-110 transition-transform" />
-                      <div className="text-[10px] font-bold text-slate-800 mt-0.5">全院台账</div>
-                    </button>
-                  </>
+                    );
+                  })
                 )}
               </div>
+            </div>
+
+          </div>
+
+          {/* ==================== 第三段：急救与生命支持在借设备周转池 (Emergency & Life Support In-Loan Pool) ==================== */}
+          <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs p-3.5 flex flex-col overflow-hidden min-h-[460px]">
+            <div className="flex items-center justify-between pb-2.5 border-b border-slate-100 shrink-0 flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <div className="w-2.5 h-2.5 rounded-full bg-cyan-500 animate-pulse"></div>
+                <h3 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                  <RotateCcw className="w-4 h-4 text-cyan-600" />
+                  <span>{isDeptView ? `【${userDept}】在借急救生命支持机具周转池` : '全院跨科借调与应急生命支持机具动态监管'}</span>
+                </h3>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-cyan-50 text-cyan-700 border border-cyan-200 font-mono">
+                  在用 {borrowedEmergencyDevices.length} 台
+                </span>
+                {borrowedEmergencyDevices.filter(b => b.isOverdue).length > 0 && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200 animate-pulse flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3 text-rose-500" />
+                    <span>超期滞留 {borrowedEmergencyDevices.filter(b => b.isOverdue).length} 台</span>
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onNavigateToTab?.('emergency_reserve')}
+                  className="text-xs text-cyan-700 hover:text-cyan-900 font-bold flex items-center gap-1 transition cursor-pointer"
+                >
+                  <span>应急调配中心</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+
+            {/* 设备列表或卡片网格 */}
+            <div className="mt-2.5 flex-1 flex flex-col min-h-0">
+              {borrowedEmergencyDevices.length === 0 ? (
+                <div className="py-12 min-h-[280px] flex flex-col items-center justify-center text-center text-slate-400">
+                  <CheckCircle2 className="w-8 h-8 text-emerald-500 opacity-90 mb-1.5" />
+                  <p className="text-slate-700 font-bold text-xs">
+                    {isDeptView ? `【${userDept}】当前未占用应急备用库机具` : '全院暂无长期超期滞留机具，急救保障库房处于充足待命'}
+                  </p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    呼吸机、除颤起搏仪与微量注射泵处于完好备用状态，支持临床科室绿色通道随时申领借调
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => onNavigateToTab?.('emergency_reserve')}
+                    className="mt-2.5 px-3 py-1 bg-cyan-50 hover:bg-cyan-100 text-cyan-700 border border-cyan-200 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>前往应急库快速借调</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5 min-h-[360px] max-h-[640px] overflow-y-auto pr-1">
+                  {borrowedEmergencyDevices.map(({ device, loan, daysElapsed, isOverdue, isHalfwayPassed, daysRemaining, daysOverdue }) => (
+                    <div 
+                      key={device.id} 
+                      className="p-3 bg-slate-50/70 hover:bg-slate-100/70 rounded-lg border border-slate-200/80 hover:border-cyan-300 transition flex flex-col justify-between gap-2"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between gap-1.5">
+                          <span 
+                            onClick={() => onSelectDeviceDetail(device)}
+                            className="font-bold text-slate-900 text-xs hover:text-cyan-700 cursor-pointer truncate max-w-[150px]"
+                            title={device.name}
+                          >
+                            {device.name}
+                          </span>
+                          <span className="font-mono text-[10px] text-slate-500 bg-white px-1.5 py-0.2 rounded border border-slate-200">
+                            {device.sn}
+                          </span>
+                        </div>
+
+                        <div className="text-[11px] text-slate-500 flex items-center justify-between">
+                          <span>借入科室: <strong className="text-slate-700 font-medium">{loan.borrowingDepartment || device.department}</strong></span>
+                          <span>经办人: <strong className="text-slate-700">{loan.borrowerName || '临床经办'}</strong></span>
+                        </div>
+
+                        <div className="text-[11px] text-slate-500 flex items-center justify-between">
+                          <span>在科时长: <strong className="text-slate-800 font-mono">{daysElapsed}天</strong></span>
+                          <span className="font-mono text-[10px]">应还: {loan.expectedReturnTime ? loan.expectedReturnTime.split(' ')[0] : '待定'}</span>
+                        </div>
+
+                        {/* 状态徽标 */}
+                        <div className="pt-1">
+                          {isOverdue ? (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300 animate-pulse flex items-center justify-center gap-1">
+                              <AlertTriangle className="w-3 h-3 text-rose-600" />
+                              <span>已超期 {daysOverdue} 天 · 请尽快交还</span>
+                            </span>
+                          ) : isHalfwayPassed ? (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300 flex items-center justify-center gap-1">
+                              <Clock className="w-3 h-3 text-amber-700" />
+                              <span>借期过半 · 剩余 {daysRemaining} 天</span>
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700 border border-blue-200 flex items-center justify-center gap-1">
+                              <Clock className="w-3 h-3 text-blue-600" />
+                              <span>使用中 · 剩余 {daysRemaining} 天</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-end gap-1.5 pt-1.5 border-t border-slate-200/60">
+                        <button
+                          type="button"
+                          onClick={() => onReturnEquipment?.(device)}
+                          className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                          title="办理设备归还验收与点检"
+                        >
+                          <Check className="w-3 h-3" />
+                          <span>办理归还</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (onNavigateToApprovals) {
+                              onNavigateToApprovals({
+                                type: 'procurement_increase',
+                                title: `【${loan.borrowingDepartment || userDept}】申购增配 ${device.name} 论证申请`,
+                                targetEquipmentName: device.name,
+                                targetModel: device.model,
+                                applicantDepartment: loan.borrowingDepartment || userDept,
+                                borrowingHistorySummary: `从应急调配中心借调 ${device.name} (${device.sn}) 已累计在科使用 ${daysElapsed} 天，临床周转率极高，建议常态化增配。`
+                              });
+                            } else {
+                              onNavigateToTab?.('approvals');
+                            }
+                          }}
+                          className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                          title="根据使用频次一键发起科室增配申请"
+                        >
+                          <Sparkles className="w-3 h-3 text-indigo-600" />
+                          <span>发起增配</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* ==================== 第四段：全景医工质控与安全红线态势看板 (Meaningful Executive Charts) ==================== */}
+          <section aria-label="核心质控红线态势图表" className="w-full">
+            <MeaningfulExecutiveCharts 
+              equipmentList={allEquipmentList || equipmentList}
+              userDept={userDept}
+              isDeptView={isDeptView}
+              onNavigateToLedger={onNavigateToLedger}
+              onNavigateToTab={onNavigateToTab}
+              onSelectDeviceDetail={onSelectDeviceDetail}
+              onOpenRepairModal={onOpenRepairModal}
+            />
+          </section>
+
+          {/* ==================== 第五段：晨间点检与高频快速处置通道 (Daily Routine & Rapid Actions) ==================== */}
+          <div className="bg-white rounded-xl border border-slate-200/90 shadow-2xs p-3 grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+            
+            {/* 左侧：晨间交接与生命支持器械点检打卡卡片 (5/12) */}
+            <div className="md:col-span-5 flex items-center justify-between p-2.5 rounded-lg bg-emerald-50/60 border border-emerald-200/70">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-200 flex items-center justify-center shrink-0">
+                  <HeartPulse className="w-4 h-4 text-emerald-600" />
+                </div>
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                    <span>急救生命支持晨间点检</span>
+                    <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                      今日已核验
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-500 truncate mt-0.5">
+                    呼吸机、除颤仪等 {lifeSupportDevices.length} 台急救装备处于完好待命
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleCompleteHandoverCheck}
+                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer shrink-0 shadow-2xs"
+                title="完成今日晨间交接班器械点检打卡"
+              >
+                <CheckSquare className="w-3.5 h-3.5" />
+                <span>点检打卡</span>
+              </button>
+            </div>
+
+            {/* 右侧：5个高频业务直达通道 (7/12) */}
+            <div className="md:col-span-7 grid grid-cols-2 sm:grid-cols-5 gap-2">
+              <button
+                type="button"
+                onClick={onOpenAddModal}
+                className="p-2 bg-slate-50 hover:bg-blue-50/80 border border-slate-200/90 hover:border-blue-200 rounded-lg text-center transition group cursor-pointer"
+                title="资产建卡录入"
+              >
+                <PlusCircle className="w-4 h-4 text-blue-600 mx-auto group-hover:scale-110 transition-transform" />
+                <div className="text-xs font-bold text-slate-800 mt-1">资产建卡</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onNavigateToTab?.('mobile_inspection')}
+                className="p-2 bg-slate-50 hover:bg-emerald-50/80 border border-slate-200/90 hover:border-emerald-200 rounded-lg text-center transition group cursor-pointer"
+                title="进入移动端扫码巡检与盘点"
+              >
+                <QrCode className="w-4 h-4 text-emerald-600 mx-auto group-hover:scale-110 transition-transform" />
+                <div className="text-xs font-bold text-slate-800 mt-1">移动巡检</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onNavigateToTab?.('adverse_events')}
+                className="p-2 bg-slate-50 hover:bg-rose-50/80 border border-slate-200/90 hover:border-rose-200 rounded-lg text-center transition group cursor-pointer"
+                title="医疗器械不良事件警戒直报 (MDR)"
+              >
+                <ShieldAlert className="w-4 h-4 text-rose-600 mx-auto group-hover:scale-110 transition-transform" />
+                <div className="text-xs font-bold text-slate-800 mt-1">不良事件</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onNavigateToLedger("", isDeptView ? userDept : undefined)}
+                className="p-2 bg-slate-50 hover:bg-indigo-50/80 border border-slate-200/90 hover:border-indigo-200 rounded-lg text-center transition group cursor-pointer"
+                title="查看全院/科室台账"
+              >
+                <FileText className="w-4 h-4 text-indigo-600 mx-auto group-hover:scale-110 transition-transform" />
+                <div className="text-xs font-bold text-slate-800 mt-1">{isDeptView ? "科室台账" : "全院台账"}</div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onNavigateToTab?.("vendor_collaboration")}
+                className="p-2 bg-slate-50 hover:bg-purple-50/80 border border-slate-200/90 hover:border-purple-200 rounded-lg text-center transition group cursor-pointer"
+                title="进入外协服务对账与结算"
+              >
+                <Receipt className="w-4 h-4 text-purple-600 mx-auto group-hover:scale-110 transition-transform" />
+                <div className="text-xs font-bold text-slate-800 mt-1">外协对账</div>
+              </button>
             </div>
 
           </div>
@@ -2041,6 +2138,56 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* 实时草料二维码报修弹出消息模态框 / 浮窗 */}
+      <RepairAlertPopupModal
+        alert={activeRepairAlert}
+        onClose={handleDismissRepairAlert}
+        onFastDispatch={(device) => {
+          onOpenRepairModal(device);
+        }}
+        onViewLogs={() => {
+          onNavigateToTab?.('caoliao_webhook_logs');
+        }}
+        onViewEquipmentDetail={(device) => {
+          onSelectDeviceDetail(device);
+        }}
+        onViewRepairDetail={(alert) => {
+          setSelectedRepairDetail({
+            id: alert.workOrderId,
+            workOrderId: alert.workOrderId,
+            recordNo: alert.rawRecordNo,
+            timestamp: alert.timestamp,
+            equipmentId: alert.equipmentId,
+            equipmentName: alert.equipmentName,
+            equipmentSn: alert.sn,
+            department: alert.department,
+            reporterName: alert.reporterName,
+            reporterPhone: alert.reporterPhone,
+            faultDescription: alert.faultDescription,
+            photoUrl: alert.photoUrl,
+            urgency: alert.urgency,
+            source: alert.source
+          });
+        }}
+        equipmentList={equipmentList}
+      />
+
+      {/* 报修工单完整详情模态框 */}
+      <RepairReportDetailModal
+        isOpen={!!selectedRepairDetail}
+        onClose={() => setSelectedRepairDetail(null)}
+        data={selectedRepairDetail}
+        equipmentList={equipmentList}
+        onFastDispatch={(device) => {
+          setSelectedRepairDetail(null);
+          onOpenRepairModal(device);
+        }}
+        onViewEquipmentDetail={(device) => {
+          setSelectedRepairDetail(null);
+          onSelectDeviceDetail(device);
+        }}
+      />
 
     </div>
   );

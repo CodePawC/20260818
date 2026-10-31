@@ -540,6 +540,16 @@ export const CaoliaoSyncSettingsView: React.FC<CaoliaoSyncSettingsViewProps> = (
           <div className="flex items-center gap-2.5 flex-wrap shrink-0">
             <button
               type="button"
+              onClick={() => onNavigateTab ? onNavigateTab('caoliao_webhook_logs') : null}
+              className="px-3.5 py-2 bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 border border-teal-500/40 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer"
+              title="查看草料二维码 API 接口报修回调与错误排查日志"
+            >
+              <FileText className="w-3.5 h-3.5 text-teal-400" />
+              <span>查看接口报修日志</span>
+            </button>
+
+            <button
+              type="button"
               onClick={handleTestApi}
               disabled={isTesting}
               className="px-3.5 py-2 bg-slate-800/90 hover:bg-slate-700 text-emerald-300 border border-emerald-500/40 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"

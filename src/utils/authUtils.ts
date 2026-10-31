@@ -186,11 +186,15 @@ export function canAccessTab(user: AuthUser | null | undefined, tab: ActiveTab):
   // 护士长角色专属菜单：包含工作台概览、科室设备台账、移动扫码巡检盘点、医疗设备应急库(全院共享)、维保与强检、维修记录(科室报修跟踪及外协零修验收签单)、不良事件直报、业务审批、AI智能专家
   // 临床科室不需要看到科室常用备件耗材、不需要看到医工调度中心、不要有独立的外协维修协同菜单（外协零修进度及复核验收签字在科室报修跟踪中呈现）
   if (isHeadNurse(user)) {
-    const nurseAllowedTabs: ActiveTab[] = ['dashboard', 'ledger', 'mobile_inspection', 'emergency_reserve', 'maintenance', 'repairs', 'adverse_events', 'approvals', 'ai', 'regulations', 'project_concluding'];
+    const nurseAllowedTabs: ActiveTab[] = ['dashboard', 'ledger', 'mobile_inspection', 'emergency_reserve', 'maintenance', 'repairs', 'adverse_events', 'approvals', 'ai', 'regulations', 'project_concluding', 'drg_cost_audit', 'mobile_collaboration', 'accreditation_quality', 'scrap_workflow', 'smart_management', 'digital_twin_sandbox'];
     return nurseAllowedTabs.includes(tab);
   }
 
   switch (tab) {
+    case 'mobile_collaboration':
+      // 移动端即时协同与消息推送中枢：全院医护、工程师、管理层均可使用
+      return true;
+
     case 'project_concluding':
       // 日照市2026年度社会科学专项课题结项专区：全院职工、管理层、专家及评审人员均可查阅
       return true;
@@ -288,7 +292,8 @@ export function canAccessTab(user: AuthUser | null | undefined, tab: ActiveTab):
 
     case 'analytics':
     case 'roi':
-      // 效能、单机成本效益与ROI决策分析：医工主管、科主任、财务、医务、审计、采购等
+    case 'drg_cost_audit':
+      // 效能、单机成本效益与ROI决策分析、DRG专耗核算：医工主管、科主任、财务、医务、审计、采购等
       return hasAnyPermission(user, ['效能分析', '财务折旧', '成本效益', '质量月报', '预算审批', '绩效考核', '采购审计', '台账管理', '工单维修']);
 
     case 'ai':
@@ -301,6 +306,7 @@ export function canAccessTab(user: AuthUser | null | undefined, tab: ActiveTab):
     case 'system_update':
     case 'caoliao_integration':
     case 'caoliao_sync_settings':
+    case 'caoliao_webhook_logs':
       // 系统运维配置、AI模型配置与数据备份、草料二维码接口及同步设置：医工管理与系统运维均可访问配置
       return true;
 

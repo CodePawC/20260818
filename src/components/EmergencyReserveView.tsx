@@ -12,7 +12,8 @@ import {
   Phone, 
   Sparkles, 
   Zap, 
-  HelpCircle, 
+  HelpCircle,
+  Radio, 
   LayoutGrid, 
   List, 
   FileText, 
@@ -66,6 +67,8 @@ import { BorrowEquipmentModal } from './BorrowEquipmentModal';
 import { ReturnEquipmentModal } from './ReturnEquipmentModal';
 import { LoanVoucherPrintModal } from './LoanVoucherPrintModal';
 import { LoanTimeProgressBar, computeLoanTimeProgress, LoanCountdownBadge } from './LoanTimeProgressBar';
+import { EmergencyIndoorGeofenceMap } from './EmergencyIndoorGeofenceMap';
+import { sendInstantPushNotification } from '../utils/mobileNotificationData';
 import { Pagination } from './Pagination';
 
 export type GroupByOption = 'category' | 'model' | 'location' | 'status' | 'none';
@@ -129,7 +132,7 @@ export const EmergencyReserveView: React.FC<EmergencyReserveViewProps> = ({
   onConfirmReturn,
   onPrintLoanVoucher
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<'inventory' | 'loans' | 'distribution'>('inventory');
+  const [activeSubTab, setActiveSubTab] = useState<'inventory' | 'loans' | 'distribution' | 'geofence_map'>('inventory');
   const [inventoryViewMode, setInventoryViewMode] = useState<'list' | 'grid'>('grid'); // 默认卡片视图
   const [groupBy, setGroupBy] = useState<GroupByOption>(() => {
     const saved = localStorage.getItem('hospital-emergency-groupby');
@@ -1033,6 +1036,27 @@ export const EmergencyReserveView: React.FC<EmergencyReserveViewProps> = ({
       });
     }
 
+    // 触发移动端 PDA 与企业微信协同推送
+    sendInstantPushNotification({
+      title: `【急救设备借调出库】${targetEq.name} 已借出至 ${loanRecord.borrowingDepartment}`,
+      summary: `经办人【${loanRecord.borrowerName}】已办理出库，预计归还时间：${loanRecord.expectedReturnTime || '待定'}。系统已自动开启室内定位在位与超期倒计时监控。`,
+      scenario: 'emergency_loan',
+      scenarioTitle: '急救生命支持借调出库',
+      channel: 'pda',
+      priority: 'P2_URGENT',
+      equipmentName: targetEq.name,
+      equipmentModel: targetEq.model,
+      equipmentSn: targetEq.sn,
+      department: loanRecord.borrowingDepartment,
+      location: targetEq.location || '急救周转库房',
+      recipientName: `${loanRecord.borrowingDepartment} 护士站`,
+      recipientRole: '借调责任护师',
+      recipientTarget: `移动护理PDA: ${loanRecord.borrowerPhone || '科室分机'}`,
+      actions: [
+        { key: 'confirm_return', label: '扫码确认归还入库', color: 'primary', actionType: 'confirm_return' }
+      ]
+    }).catch(() => {});
+
     showToast(`✅ 已成功完成【${targetEq.name}】出库借用登记，借入科室：${loanRecord.borrowingDepartment}`);
   };
 
@@ -1467,7 +1491,7 @@ ${suggestion.actionPlan}
       </div>
 
       {/* 3. 主体工作区 */}
-      <div className="bg-white rounded-md border border-slate-200 flex-1 flex flex-col overflow-hidden shadow-xs min-h-0">
+      <div className="bg-white rounded-md border border-slate-200 flex-1 flex flex-col overflow-hidden shadow-xs min-h-[580px]">
         
         {/* Segment 1: Filter Bar / Subtabs Header */}
         <div className="px-3.5 py-2 border-b border-slate-100 bg-white flex-none flex flex-wrap items-center justify-between gap-2.5">
@@ -1520,6 +1544,22 @@ ${suggestion.actionPlan}
                   {overdueLoansList.length} 超期
                 </span>
               )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('geofence_map')}
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer ${
+                activeSubTab === 'geofence_map'
+                  ? 'bg-white text-cyan-700 shadow-2xs font-bold'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Radio className="w-3.5 h-3.5 text-cyan-500 animate-pulse" />
+              <span>全院定位与电子围栏 (高精度地图)</span>
+              <span className="px-1.5 py-0.2 rounded-full text-[9.5px] font-bold bg-cyan-100 text-cyan-800">
+                AOA
+              </span>
             </button>
           </div>
 
@@ -3315,6 +3355,16 @@ ${suggestion.actionPlan}
               </div>
 
             </div>
+          )}
+
+          {/* SubTab 4: 全院高精度定位与防流失电子围栏看板 (高精度地图) */}
+          {activeSubTab === 'geofence_map' && (
+            <EmergencyIndoorGeofenceMap
+              equipmentList={equipmentList}
+              currentUser={currentUser}
+              onViewDeviceDetail={onViewDeviceDetail}
+              onOpenBorrowModal={handleOpenBorrowModal}
+            />
           )}
 
         </div>

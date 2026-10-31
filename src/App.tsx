@@ -7,9 +7,11 @@ import {
   syncVendorCollaborationToPartner, 
   VENDOR_ACCOUNTS 
 } from "./utils/vendorCollaborationData";
+import "./utils/fontSizeScale";
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   MedicalEquipment, 
+  RepairRecord,
   EquipmentFilterState, 
   SystemStats, 
   EquipmentStatus, 
@@ -58,6 +60,7 @@ import { AdverseEventReportingView } from './components/AdverseEventReportingVie
 import { TrackingView } from './components/TrackingView';
 import { AnalyticsView } from './components/AnalyticsView';
 import { RoiAnalyticsView } from './components/RoiAnalyticsView';
+import { DrgCostAuditView } from './components/drg/DrgCostAuditView';
 import { DashboardView } from './components/DashboardView';
 import { StatusBar } from './components/StatusBar';
 import { PartnerManagementView } from './components/PartnerManagementView';
@@ -73,6 +76,15 @@ import { RepairClosedLoopView } from './components/RepairClosedLoopView';
 import { RegulationsView } from './components/RegulationsView';
 import { ProjectConcludingView } from './components/project_concluding/ProjectConcludingView';
 import { SystemOpsUnifiedView } from './components/SystemOpsUnifiedView';
+import { AccreditationQualityView } from './components/accreditation/AccreditationQualityView';
+import { EquipmentScrapWorkflowView } from './components/scrap/EquipmentScrapWorkflowView';
+import { SmartManagementRatingView } from './components/smart_management/SmartManagementRatingView';
+import { EquipmentDigitalTwinSandbox } from './components/smart_management/EquipmentDigitalTwinSandbox';
+import { AiTroubleshootModal } from './components/smart_management/AiTroubleshootModal';
+import { MobileCollaborationView } from './components/mobile_collaboration/MobileCollaborationView';
+import { MobileNotificationCenterDrawer } from './components/mobile_collaboration/MobileNotificationCenterDrawer';
+import { RepairAlertPopupModal, RepairAlertData } from './components/RepairAlertPopupModal';
+import { RepairReportDetailModal, RepairReportDetailData } from './components/RepairReportDetailModal';
 import { BorrowEquipmentModal } from './components/BorrowEquipmentModal';
 import { ReturnEquipmentModal } from './components/ReturnEquipmentModal';
 import { LoanVoucherPrintModal } from './components/LoanVoucherPrintModal';
@@ -81,6 +93,20 @@ import { ApprovalApplication } from './types/approvalTypes';
 import { INITIAL_APPROVAL_APPLICATIONS } from './utils/approvalMockData';
 import { EquipmentLoanRecord } from './types';
 import { CheckCircle2 } from 'lucide-react';
+import { ClinicalQuickActionPortal } from './components/clinical/ClinicalQuickActionPortal';
+import { UdiConsumableManagementModal } from './components/udi/UdiConsumableManagementModal';
+import { BatchRecallRadarModal } from './components/udi/BatchRecallRadarModal';
+import { HealthScoreDetailModal } from './components/HealthScoreDetailModal';
+import { MetrologyCertificateViewModal } from './components/metrology/MetrologyCertificateViewModal';
+import { HospitalOfficialReportModal } from './components/official_report/HospitalOfficialReportModal';
+import { 
+  HospitalOfficialReportData, 
+  SEED_REPORT_546,
+  SEED_REPORT_545, 
+  generateReportFromEquipment, 
+  generateReportFromRepair, 
+  generateReportFromApproval 
+} from './utils/hospitalReportGenerator';
 
 import { getEquipmentValidityInfo } from './utils/validityUtils';
 import { getEquipmentCalibrationInfo } from './utils/calibrationUtils';
@@ -277,6 +303,42 @@ export default function App() {
     setActiveTab('adverse_events');
   };
 
+  // 全局移动即时协同与推送抽屉状态
+  const [isMobileNotificationDrawerOpen, setIsMobileNotificationDrawerOpen] = useState(false);
+
+  // 全局草料报修弹窗警报状态 (保证在任何视图下都能实时弹出消息)
+  const [globalRepairAlert, setGlobalRepairAlert] = useState<RepairAlertData | null>(null);
+  const [selectedGlobalRepairDetail, setSelectedGlobalRepairDetail] = useState<RepairReportDetailData | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    const checkAlert = async () => {
+      try {
+        const res = await fetch('/api/caoliao/latest-alert');
+        const json = await res.json();
+        if (isMounted && json.success && json.hasNewAlert && json.alert) {
+          setGlobalRepairAlert(json.alert);
+        }
+      } catch (e) {}
+    };
+
+    checkAlert();
+    const t = setInterval(checkAlert, 4000);
+
+    const handleAlert = (e: any) => {
+      if (e.detail?.alert) {
+        setGlobalRepairAlert(e.detail.alert);
+      }
+    };
+    window.addEventListener('caoliao_repair_received', handleAlert);
+
+    return () => {
+      isMounted = false;
+      clearInterval(t);
+      window.removeEventListener('caoliao_repair_received', handleAlert);
+    };
+  }, []);
+
   // 从后端API获取最新的分类目录主数据
   useEffect(() => {
     fetch('/api/nmpa-categories')
@@ -380,11 +442,17 @@ export default function App() {
   const [pageSize, setPageSize] = useState<number>(20);
   const [tableDensity, setTableDensity] = useState<'default' | 'compact'>('default');
 
-  // 台账视图模式：紧凑表格 | 大卡片平铺 | 设备照片流
+  // 台账视图模式：紧凑表格 | 状态分类聚合卡片 | 科室分类聚合卡片 | 大卡片平铺 | 设备照片流
   const [viewMode, setViewMode] = useState<EquipmentViewMode>(() => {
     try {
       const saved = localStorage.getItem('equipment-ledger-view-mode');
-      if (saved === 'compact_table' || saved === 'card_grid' || saved === 'photo_stream') {
+      if (
+        saved === 'compact_table' || 
+        saved === 'group_by_status' || 
+        saved === 'group_by_department' || 
+        saved === 'card_grid' || 
+        saved === 'photo_stream'
+      ) {
         return saved as EquipmentViewMode;
       }
     } catch (err) {
@@ -477,6 +545,44 @@ export default function App() {
 
   // 全局智慧命令盘搜索模态框状态与快捷键
   const [isQuickSearchOpen, setIsQuickSearchOpen] = useState<boolean>(false);
+
+  // 规章制度中心目标直达制度
+  const [targetRegulationId, setTargetRegulationId] = useState<string>('REG-019');
+
+  const handleOpenRegulation = (regId: string) => {
+    setTargetRegulationId(regId);
+    setActiveTab('regulations');
+  };
+
+  // 五莲县人民医院请示报告单 (A4 自动生成与高保真打印) 模态框状态
+  const [activeOfficialReport, setActiveOfficialReport] = useState<HospitalOfficialReportData | null>(null);
+  const [isOfficialReportModalOpen, setIsOfficialReportModalOpen] = useState<boolean>(false);
+
+  const handleOpenOfficialReport = (target?: MedicalEquipment | ApprovalApplication | RepairRecord | null, reason?: string) => {
+    if (!target) {
+      setActiveOfficialReport(SEED_REPORT_546);
+      setIsOfficialReportModalOpen(true);
+      return;
+    }
+    if ('applicantDepartment' in target) {
+      const rep = generateReportFromApproval(target as ApprovalApplication, undefined, currentUser);
+      setActiveOfficialReport(rep);
+    } else if ('faultDate' in target) {
+      const rep = generateReportFromRepair(target as RepairRecord, undefined, currentUser);
+      setActiveOfficialReport(rep);
+    } else {
+      const rep = generateReportFromEquipment(target as MedicalEquipment, reason, 'repair', currentUser);
+      setActiveOfficialReport(rep);
+    }
+    setIsOfficialReportModalOpen(true);
+  };
+
+  // 生产级：临床极简流 vs 医工全能双轨模式与 UDI 闭环状态
+  const [isClinicalQuickMode, setIsClinicalQuickMode] = useState<boolean>(false);
+  const [isUdiModalOpen, setIsUdiModalOpen] = useState<boolean>(false);
+  const [isBatchRecallRadarOpen, setIsBatchRecallRadarOpen] = useState<boolean>(false);
+  const [udiPreSelectedDevice, setUdiPreSelectedDevice] = useState<MedicalEquipment | null>(null);
+  const [radarPreSelectedLot, setRadarPreSelectedLot] = useState<string>('');
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -618,6 +724,10 @@ export default function App() {
   // Department Detail Modal State
   const [departmentModalName, setDepartmentModalName] = useState<string | null>(null);
 
+  // Health Score & Metrology Certificate Detail Modal States
+  const [healthScoreDevice, setHealthScoreDevice] = useState<MedicalEquipment | null>(null);
+  const [metrologyCertDevice, setMetrologyCertDevice] = useState<MedicalEquipment | null>(null);
+
   const [isImportModalOpen, setIsImportModalOpen] = useState<boolean>(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState<boolean>(false);
 
@@ -628,6 +738,16 @@ export default function App() {
   // Inter-Department Loan / Borrowing Modals State
   const [borrowModalEquipment, setBorrowModalEquipment] = useState<MedicalEquipment | null>(null);
   const [returnModalEquipment, setReturnModalEquipment] = useState<MedicalEquipment | null>(null);
+
+  // Gemini 3.8 Flash 医工大模型深度排查顾问模态框状态
+  const [isAiTroubleshootModalOpen, setIsAiTroubleshootModalOpen] = useState<boolean>(false);
+  const [troubleshootTargetEquipment, setTroubleshootTargetEquipment] = useState<MedicalEquipment | null>(null);
+
+  const handleOpenAiTroubleshoot = (equipment?: MedicalEquipment) => {
+    setTroubleshootTargetEquipment(equipment || null);
+    setIsAiTroubleshootModalOpen(true);
+  };
+
   const [printVoucherModalData, setPrintVoucherModalData] = useState<{
     equipment: MedicalEquipment;
     loanRecord: EquipmentLoanRecord;
@@ -770,7 +890,7 @@ export default function App() {
   const handleOpenTransferModal = () => {
     const selected = equipmentList.filter((eq) => selectedIds.includes(eq.id));
     if (selected.length === 0) {
-      alert('请先勾选需要进行科室调拨的设备！');
+      showToast('请先勾选需要进行科室调拨的设备！', 'warning');
       return;
     }
     setTransferEquipmentList(selected);
@@ -1556,17 +1676,30 @@ export default function App() {
           }}
           onQuickEmergency={() => setActiveTab('emergency_reserve')}
           onQuickApprovals={() => setActiveTab('approvals')}
+          onOpenMobileNotifications={() => setIsMobileNotificationDrawerOpen(true)}
           onSwitchToVendorPortal={handleLoginAsVendor}
           pendingAlertsCount={stats.faultCount + pendingApprovalCount}
           faultCount={stats.faultCount}
           onRefreshData={fetchEquipmentData}
+          isClinicalQuickMode={isClinicalQuickMode}
+          onToggleDualTrackMode={() => setIsClinicalQuickMode(prev => !prev)}
+          onOpenUdiModal={() => {
+            setUdiPreSelectedDevice(null);
+            setIsUdiModalOpen(true);
+          }}
+          onOpenBatchRecallRadar={() => {
+            setRadarPreSelectedLot('');
+            setIsBatchRecallRadarOpen(true);
+          }}
         />
 
         {/* Main Workspace Body */}
         <main className={`flex-1 min-h-0 flex flex-col ${
-          activeTab === 'vendor_collaboration' || activeTab === 'dispatch'
+          activeTab === 'mobile_collaboration'
+            ? 'p-0 overflow-hidden bg-slate-950'
+            : activeTab === 'vendor_collaboration' || activeTab === 'dispatch'
             ? 'p-2 sm:p-2.5 gap-2 overflow-hidden bg-slate-100/70' 
-            : activeTab === 'system_ops' || activeTab === 'ai_config' || activeTab === 'database_backup' || activeTab === 'system_update' || activeTab === 'caoliao_integration' || activeTab === 'caoliao_sync_settings'
+            : activeTab === 'system_ops' || activeTab === 'ai_config' || activeTab === 'database_backup' || activeTab === 'system_update' || activeTab === 'caoliao_integration' || activeTab === 'caoliao_sync_settings' || activeTab === 'caoliao_webhook_logs'
             ? 'p-0 overflow-y-auto bg-slate-100/70'
             : activeTab === 'roi' || activeTab === 'master_data' || activeTab === 'partners' || activeTab === 'regulations'
             ? 'p-3 sm:p-3.5 lg:p-4 overflow-y-auto gap-3.5 bg-slate-100/70'
@@ -1598,10 +1731,53 @@ export default function App() {
                 </button>
               </div>
             </div>
+          ) : isClinicalQuickMode ? (
+            <ClinicalQuickActionPortal
+              equipments={equipmentList}
+              onAddRepair={(equipmentId, repair) => {
+                const target = equipmentList.find(e => e.id === equipmentId);
+                if (target) {
+                  const fullRepair: RepairRecord = {
+                    id: repair.id || `REP-CLINICAL-${Date.now().toString().slice(-6)}`,
+                    equipmentId,
+                    equipmentName: target.name,
+                    equipmentSn: target.sn,
+                    faultDate: repair.faultDate || new Date().toISOString().replace('T', ' ').slice(0, 19),
+                    repairType: (repair.repairType as any) || '紧急故障维修',
+                    faultDescription: repair.faultDescription || '临床极速报修',
+                    technician: repair.technician || '待医工值班工程师响应',
+                    cost: 0,
+                    partsReplaced: '-',
+                    resolution: '临床极速报修已直连医工微信/钉钉响应中枢',
+                    status: '处理中',
+                    department: target.department,
+                    reporterName: repair.reporterName,
+                    reporterPhone: repair.reporterPhone,
+                    source: 'platform'
+                  };
+                  setEquipmentList(prev => prev.map(e => e.id === equipmentId ? {
+                    ...e,
+                    status: '故障待修' as EquipmentStatus,
+                    repairCount: (e.repairCount || 0) + 1,
+                    repairRecords: [fullRepair, ...(e.repairRecords || [])]
+                  } : e));
+                  fetch(`/api/equipment/${equipmentId}/repairs`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(fullRepair)
+                  }).catch(e => console.warn(e));
+                }
+              }}
+              onSwitchToEngineeringMode={() => setIsClinicalQuickMode(false)}
+              onOpenUdiModal={(equipment) => {
+                setUdiPreSelectedDevice(equipment || null);
+                setIsUdiModalOpen(true);
+              }}
+            />
           ) : (
             <>
               {/* Dashboard View */}
-              {activeTab === 'dashboard' && (
+              {(activeTab === 'dashboard' || activeTab === 'welcome') && (
                  <DashboardView
                    stats={stats}
                    equipmentList={userAccessibleEquipment}
@@ -1637,6 +1813,7 @@ export default function App() {
                      setIsStatusChangeModalOpen(true);
                    }}
                    onSelectDeviceDetail={(device) => setDetailDevice(device)}
+                   onOpenOfficialReport={handleOpenOfficialReport}
                  />
                )}
 
@@ -1745,6 +1922,7 @@ export default function App() {
                    onNavigateToInspection={handleNavigateToInspection}
                    onPrintQrLabel={(device) => handleOpenQrModal([device])}
                    onOpenOverdueFiling={(device) => setOverdueFilingDevice(device)}
+                   onOpenTroubleshootModal={handleOpenAiTroubleshoot}
                  />
 
                  {/* Segment 3: Fixed Footer Pagination */}
@@ -1797,6 +1975,7 @@ export default function App() {
                onUpdateEquipmentFiling={handleSaveOverdueFiling}
                onOpenPrintLabel={(eq) => handleOpenQrModal([eq])}
                onOpenOverdueFilingModal={(eq) => setOverdueFilingDevice(eq)}
+               onOpenOfficialReport={handleOpenOfficialReport}
              />
            )}
 
@@ -1808,6 +1987,10 @@ export default function App() {
                  setRepairPreSelectedDevice(device);
                  setIsRepairModalOpen(true);
                }}
+                onUpdateEquipment={(updated) => {
+                  setEquipmentList(prev => prev.map(e => e.id === updated.id ? updated : e));
+                }}
+                onViewDeviceDetail={(device) => setDetailDevice(device)}
              />
            )}
 
@@ -1832,6 +2015,7 @@ export default function App() {
                  setDetailInitialTab(initialTab as any);
                }}
                onNavigateToTab={(tab) => setActiveTab(tab)}
+               onOpenRegulation={handleOpenRegulation}
              />
            )}
 
@@ -1874,10 +2058,17 @@ export default function App() {
            {activeTab === 'tracking' && (
              <TrackingView
                equipmentList={userAccessibleEquipment}
+               departments={departments}
+               campuses={campuses}
+               buildings={buildings}
+               rooms={rooms}
+               currentUser={currentUser}
                onOpenStatusChange={(device) => {
                  setStatusChangeDevice(device);
                  setIsStatusChangeModalOpen(true);
                }}
+               onViewDeviceDetail={(device) => setDetailDevice(device)}
+               onNavigateToApprovals={handleNavigateToApprovals}
              />
            )}
 
@@ -1914,6 +2105,12 @@ export default function App() {
                onSubmitStatusChange={handleSubmitStatusChange}
                onSubmitRepair={handleSubmitRepair}
                onViewDeviceDetail={(device) => setDetailDevice(device)}
+                onOpenHealthScoreDetail={(device) => setHealthScoreDevice(device)}
+                onOpenUdiConsumables={(device) => {
+                  setUdiPreSelectedDevice(device);
+                  setIsUdiModalOpen(true);
+                }}
+                onOpenCertificateModal={(device) => setMetrologyCertDevice(device)}
              />
            )}
 
@@ -1934,6 +2131,21 @@ export default function App() {
                onNavigateToTab={(tab) => setActiveTab(tab)}
              />
            )}
+
+          {activeTab === 'drg_cost_audit' && (
+            <DrgCostAuditView
+              currentUser={currentUser}
+              equipmentList={equipmentList}
+              onNavigateToLedger={(eqId) => {
+                if (eqId) {
+                  const found = equipmentList.find(e => e.id === eqId || e.internalNo === eqId);
+                  if (found) setDetailDevice(found);
+                }
+                setActiveTab('ledger');
+              }}
+              onNavigateToRoi={() => setActiveTab('roi')}
+            />
+          )}
 
           {activeTab === "vendor_collaboration" && (
             <VendorCollaborationHospitalView
@@ -1989,6 +2201,7 @@ export default function App() {
             <RegulationsView
               currentUser={currentUser}
               departments={departments}
+              initialSelectedId={targetRegulationId}
               onNavigateToTab={(tab) => {
                 setActiveTab(tab);
               }}
@@ -2032,10 +2245,27 @@ export default function App() {
             />
           )}
 
-          {(activeTab === 'system_ops' || activeTab === 'ai_config' || activeTab === 'database_backup' || activeTab === 'system_update' || activeTab === 'caoliao_integration' || activeTab === 'caoliao_sync_settings') && (
+          {activeTab === 'accreditation_quality' && (
+            <AccreditationQualityView
+              equipmentList={equipmentList}
+              currentUser={currentUser}
+            />
+          )}
+
+          {activeTab === 'scrap_workflow' && (
+            <EquipmentScrapWorkflowView
+              equipmentList={equipmentList}
+              currentUser={currentUser}
+              onEquipmentStatusChange={handleSubmitStatusChange}
+            />
+          )}
+
+          {(activeTab === 'system_ops' || activeTab === 'diagnostics' || activeTab === 'ai' || activeTab === 'ai_config' || activeTab === 'database_backup' || activeTab === 'system_update' || activeTab === 'caoliao_integration' || activeTab === 'caoliao_sync_settings' || activeTab === 'caoliao_webhook_logs') && (
             <SystemOpsUnifiedView
               initialSubTab={
-                activeTab === 'database_backup' 
+                activeTab === 'diagnostics'
+                  ? 'diagnostics'
+                  : activeTab === 'database_backup' 
                   ? 'database_backup' 
                   : activeTab === 'system_update' 
                   ? 'system_update' 
@@ -2043,9 +2273,13 @@ export default function App() {
                   ? 'caoliao_integration'
                   : activeTab === 'caoliao_sync_settings'
                   ? 'caoliao_sync_settings'
-                  : 'ai_config'
+                  : activeTab === 'caoliao_webhook_logs'
+                  ? 'caoliao_webhook_logs'
+                  : 'diagnostics'
               }
               onNavigateTab={(tab) => setActiveTab(tab)}
+              equipmentList={equipmentList}
+              onUpdateEquipment={setEquipmentList}
               onViewEquipmentDetails={(item, initialTab) => {
                 // Find full item from equipmentList if possible
                 const fullItem = equipmentList.find(e => e.id === item.id || (item.codeId && String(e.codeId) === String(item.codeId))) || item;
@@ -2054,13 +2288,46 @@ export default function App() {
               }}
             />
           )}
+
+          {/* 移动端即时协同与消息推送中枢 (企业微信 / 钉钉 / 移动护理PDA) */}
+          {activeTab === 'mobile_collaboration' && (
+            <MobileCollaborationView
+              currentUser={currentUser}
+              onNavigateTab={(tab) => setActiveTab(tab)}
+            />
+          )}
+
+          {/* 国家卫健委智慧管理评级与 HIS/PACS 数据互联质控专区 */}
+          {activeTab === 'smart_management' && (
+            <SmartManagementRatingView
+              equipments={equipmentList}
+              onOpenTroubleshootModal={handleOpenAiTroubleshoot}
+            />
+          )}
+
+          {/* 全院设备空间数字孪生模拟沙盘与突发应急动员推演 */}
+          {activeTab === 'digital_twin_sandbox' && (
+            <EquipmentDigitalTwinSandbox
+              equipments={equipmentList}
+              onOpenBorrowModal={(eq) => setBorrowModalEquipment(eq || equipmentList[0])}
+              onOpenTroubleshootModal={handleOpenAiTroubleshoot}
+            />
+          )}
             </>
           )}
         </main>
 
         {/* 3. Bottom Status Bar */}
-        <StatusBar />
+        <StatusBar onOpenDiagnostics={() => setActiveTab('system_ops')} />
       </div>
+
+      {/* 移动端即时协同与消息推送抽屉 (企业微信 / 钉钉 / 移动护理PDA) */}
+      <MobileNotificationCenterDrawer
+        isOpen={isMobileNotificationDrawerOpen}
+        onClose={() => setIsMobileNotificationDrawerOpen(false)}
+        onNavigateToMobileCollaboration={() => setActiveTab('mobile_collaboration')}
+        currentUserName={currentUser?.name}
+      />
 
       {/* Modals */}
       <EquipmentDetailModal
@@ -2118,6 +2385,12 @@ export default function App() {
         }}
         onPrintQrLabel={(device) => {
           handleOpenQrModal([device]);
+        }}
+        onOpenOfficialReport={handleOpenOfficialReport}
+        onOpenTroubleshootModal={handleOpenAiTroubleshoot}
+        onNavigateToScrap={() => {
+          setDetailDevice(null);
+          setActiveTab('scrap_workflow');
         }}
       />
 
@@ -2362,6 +2635,10 @@ export default function App() {
           setIsQuickSearchOpen(false);
           setActiveTab(tab);
         }}
+        onSelectRegulation={(regId) => {
+          setIsQuickSearchOpen(false);
+          handleOpenRegulation(regId);
+        }}
       />
 
       {/* 超期服役稳定性检测与准用备案档案申报办理模态框 */}
@@ -2426,6 +2703,157 @@ export default function App() {
           <span>{toastMessage.text}</span>
         </div>
       )}
+
+      {/* 全局草料报修实时弹出消息浮窗 (当非大盘视图时展示) */}
+      {activeTab !== 'dashboard' && (
+        <RepairAlertPopupModal
+          alert={globalRepairAlert}
+          onClose={async () => {
+            setGlobalRepairAlert(null);
+            try {
+              await fetch('/api/caoliao/dismiss-alert', { method: 'POST' });
+            } catch {}
+          }}
+          onFastDispatch={(device) => {
+            setRepairPreSelectedDevice(device || null);
+            setIsRepairModalOpen(true);
+          }}
+          onViewLogs={() => {
+            setActiveTab('caoliao_webhook_logs');
+          }}
+          onViewEquipmentDetail={(device) => {
+            setDetailDevice(device);
+          }}
+          onViewRepairDetail={(alert) => {
+            setSelectedGlobalRepairDetail({
+              id: alert.workOrderId,
+              workOrderId: alert.workOrderId,
+              recordNo: alert.rawRecordNo,
+              timestamp: alert.timestamp,
+              equipmentId: alert.equipmentId,
+              equipmentName: alert.equipmentName,
+              equipmentSn: alert.sn,
+              department: alert.department,
+              reporterName: alert.reporterName,
+              reporterPhone: alert.reporterPhone,
+              faultDescription: alert.faultDescription,
+              photoUrl: alert.photoUrl,
+              urgency: alert.urgency,
+              source: alert.source
+            });
+          }}
+          equipmentList={equipmentList}
+        />
+      )}
+
+      {/* 全局报修详情模态框 */}
+      <RepairReportDetailModal
+        isOpen={!!selectedGlobalRepairDetail}
+        onClose={() => setSelectedGlobalRepairDetail(null)}
+        data={selectedGlobalRepairDetail}
+        equipmentList={equipmentList}
+        onFastDispatch={(device) => {
+          setSelectedGlobalRepairDetail(null);
+          setRepairPreSelectedDevice(device || null);
+          setIsRepairModalOpen(true);
+        }}
+        onViewEquipmentDetail={(device) => {
+          setSelectedGlobalRepairDetail(null);
+          setDetailDevice(device);
+        }}
+      />
+
+      {/* 国家 UDI 编码解析与专机专耗闭环工作台 */}
+      <UdiConsumableManagementModal
+        isOpen={isUdiModalOpen}
+        onClose={() => setIsUdiModalOpen(false)}
+        equipments={equipmentList}
+        preselectedEquipment={udiPreSelectedDevice}
+        onOpenBatchRecallRadar={(lot) => {
+          setRadarPreSelectedLot(lot || '');
+          setIsBatchRecallRadarOpen(true);
+        }}
+      />
+
+      {/* 国家药监局 UDI 批次不良召回排查雷达 */}
+      <BatchRecallRadarModal
+        isOpen={isBatchRecallRadarOpen}
+        onClose={() => setIsBatchRecallRadarOpen(false)}
+        equipments={equipmentList}
+        initialLotNumber={radarPreSelectedLot}
+        onLockEquipment={(equipId, reason) => {
+          setEquipmentList(prev => prev.map(e => e.id === equipId ? {
+            ...e,
+            status: '故障待修' as EquipmentStatus,
+            lastFaultReason: reason
+          } : e));
+          fetch(`/api/equipment/${equipId}/status`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              newStatus: '故障待修',
+              reason,
+              operator: currentUser?.name || '药监紧急排查守护'
+            })
+          }).catch(e => console.warn(e));
+        }}
+      />
+
+      {/* 设备全生命周期综合健康指数与多维扣分诊断模态框 */}
+      <HealthScoreDetailModal
+        isOpen={!!healthScoreDevice}
+        equipment={healthScoreDevice}
+        onClose={() => setHealthScoreDevice(null)}
+        onAddRepairForDevice={(device) => {
+          setHealthScoreDevice(null);
+          setRepairPreSelectedDevice(device);
+          setIsRepairModalOpen(true);
+        }}
+        onChangeStatusForDevice={(device) => {
+          setHealthScoreDevice(null);
+          setStatusChangeDevice(device);
+          setIsStatusChangeModalOpen(true);
+        }}
+        onViewDetails={(device) => {
+          setHealthScoreDevice(null);
+          setDetailDevice(device);
+        }}
+      />
+
+      {/* 国家法定计量检定 / 校准证书全景防伪预览模态框 */}
+      <MetrologyCertificateViewModal
+        isOpen={!!metrologyCertDevice}
+        equipment={metrologyCertDevice}
+        onClose={() => setMetrologyCertDevice(null)}
+      />
+
+      {/* 五莲县人民医院请示报告单 (A4 高保真打印与自动生成模态框) */}
+      <HospitalOfficialReportModal
+        isOpen={isOfficialReportModalOpen}
+        onClose={() => setIsOfficialReportModalOpen(false)}
+        reportData={activeOfficialReport}
+        onSaveReport={(updated) => {
+          setActiveOfficialReport(updated);
+        }}
+        onOpenRegulation={handleOpenRegulation}
+      />
+
+      {/* Gemini 3.8 Flash 医工专家大模型排查与维保建议模态框 */}
+      <AiTroubleshootModal
+        isOpen={isAiTroubleshootModalOpen}
+        onClose={() => setIsAiTroubleshootModalOpen(false)}
+        initialEquipment={troubleshootTargetEquipment}
+        allEquipments={equipmentList}
+        onApplyResolutionToWorkOrder={(conclusion) => {
+          setIsAiTroubleshootModalOpen(false);
+          if (detailDevice) {
+            handleUpdateEquipmentDirectly({
+              ...detailDevice,
+              lastFaultReason: conclusion
+            });
+          }
+        }}
+      />
     </div>
   );
 }

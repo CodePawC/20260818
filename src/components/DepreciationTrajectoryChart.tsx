@@ -103,7 +103,7 @@ export const DepreciationTrajectoryChart: React.FC<DepreciationTrajectoryChartPr
     const isFuture = data.stage === 'future';
 
     return (
-      <div className="bg-slate-900/95 text-white p-3 rounded-lg shadow-xl border border-slate-700 text-xs space-y-2 min-w-[240px] backdrop-blur-xs">
+      <div className="bg-slate-900/95 text-white p-3 rounded-lg shadow-xl border border-slate-700 text-xs space-y-2 min-w-[240px] backdrop-blur-xs pointer-events-none select-none z-50">
         <div className="flex items-center justify-between border-b border-slate-700 pb-1.5">
           <span className="font-bold text-slate-100 flex items-center gap-1.5">
             <Calendar className="w-3.5 h-3.5 text-blue-400" />
@@ -386,7 +386,10 @@ export const DepreciationTrajectoryChart: React.FC<DepreciationTrajectoryChartPr
                 domain={[0, 'auto']}
               />
               
-              <Tooltip content={<CustomTrajectoryTooltip />} />
+              <Tooltip 
+                content={<CustomTrajectoryTooltip />} 
+                wrapperStyle={{ pointerEvents: 'none', zIndex: 100 }} 
+              />
               
               {/* 2026 当前节点垂直参考分界线 */}
               {currentNode && (

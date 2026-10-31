@@ -22,29 +22,36 @@ import { DatabaseBackupView } from './DatabaseBackupView';
 import { SystemUpdateConfigView } from './SystemUpdateConfigView';
 import { CaoliaoIntegrationView } from './CaoliaoIntegrationView';
 import { CaoliaoSyncSettingsView } from './CaoliaoSyncSettingsView';
+import { CaoliaoWebhookLogsView } from './CaoliaoWebhookLogsView';
+import { SystemDiagnosticsView } from './SystemDiagnosticsView';
 import { ActiveTab } from '../types';
 
 interface SystemOpsUnifiedViewProps {
-  initialSubTab?: 'ai_config' | 'database_backup' | 'system_update' | 'caoliao_hub' | 'caoliao_integration' | 'caoliao_sync_settings';
+  initialSubTab?: 'ai_config' | 'database_backup' | 'system_update' | 'caoliao_hub' | 'caoliao_integration' | 'caoliao_sync_settings' | 'caoliao_webhook_logs' | 'diagnostics';
   onNavigateTab?: (tab: ActiveTab) => void;
   onViewEquipmentDetails?: (item: any, initialTab?: string) => void;
+  onUpdateEquipment?: (updatedList: any[]) => void;
+  equipmentList?: any[];
 }
 
 export const SystemOpsUnifiedView: React.FC<SystemOpsUnifiedViewProps> = ({
-  initialSubTab = 'ai_config',
+  initialSubTab = 'diagnostics',
   onNavigateTab,
-  onViewEquipmentDetails
+  onViewEquipmentDetails,
+  onUpdateEquipment,
+  equipmentList = []
 }) => {
-  // 顶层四大运维支柱 Tab
-  const [activeSubTab, setActiveSubTab] = useState<'ai_config' | 'database_backup' | 'system_update' | 'caoliao_hub'>(() => {
-    if (initialSubTab === 'caoliao_integration' || initialSubTab === 'caoliao_sync_settings' || initialSubTab === 'caoliao_hub') {
+  // 顶层运维支柱 Tab
+  const [activeSubTab, setActiveSubTab] = useState<'diagnostics' | 'ai_config' | 'database_backup' | 'system_update' | 'caoliao_hub'>(() => {
+    if (initialSubTab === 'caoliao_integration' || initialSubTab === 'caoliao_sync_settings' || initialSubTab === 'caoliao_hub' || initialSubTab === 'caoliao_webhook_logs') {
       return 'caoliao_hub';
     }
-    return (initialSubTab as any) || 'ai_config';
+    return (initialSubTab as any) || 'diagnostics';
   });
 
-  // 草料二维码一体化专区内的子切换：'sync_settings' (OpenAPI凭据与22大类映射规则) vs 'rds_linkage' (阿里云RDS数据库与扫码报修联动)
-  const [caoliaoViewMode, setCaoliaoViewMode] = useState<'sync_settings' | 'rds_linkage'>(() => {
+  // 草料二维码一体化专区内的子切换：'sync_settings' (OpenAPI凭据与22大类映射规则) vs 'rds_linkage' (阿里云RDS数据库与扫码报修联动) vs 'webhook_logs' (草料接口报修日志)
+  const [caoliaoViewMode, setCaoliaoViewMode] = useState<'sync_settings' | 'rds_linkage' | 'webhook_logs'>(() => {
+    if (initialSubTab === 'caoliao_webhook_logs') return 'webhook_logs';
     return initialSubTab === 'caoliao_integration' ? 'rds_linkage' : 'sync_settings';
   });
 
@@ -56,6 +63,9 @@ export const SystemOpsUnifiedView: React.FC<SystemOpsUnifiedViewProps> = ({
       } else if (initialSubTab === 'caoliao_integration') {
         setActiveSubTab('caoliao_hub');
         setCaoliaoViewMode('rds_linkage');
+      } else if (initialSubTab === 'caoliao_webhook_logs') {
+        setActiveSubTab('caoliao_hub');
+        setCaoliaoViewMode('webhook_logs');
       } else if (initialSubTab === 'caoliao_hub') {
         setActiveSubTab('caoliao_hub');
       } else {
@@ -65,6 +75,14 @@ export const SystemOpsUnifiedView: React.FC<SystemOpsUnifiedViewProps> = ({
   }, [initialSubTab]);
 
   const tabsConfig = [
+    {
+      id: 'diagnostics' as const,
+      name: '系统体检与自动化自检',
+      badge: '业务闭环 · 一致性审计 · 性能压测',
+      icon: ShieldCheck,
+      desc: '全流程业务闭环测试、跨表数据一致性审计、长列表检索压力测速与一键自愈修复',
+      activeColor: 'border-emerald-600 text-emerald-700 bg-emerald-50/50'
+    },
     {
       id: 'ai_config' as const,
       name: 'AI 智能模型配置',
@@ -164,6 +182,16 @@ export const SystemOpsUnifiedView: React.FC<SystemOpsUnifiedViewProps> = ({
 
       {/* 核心内容渲染区 - 采用充满屏幕的视觉效果 */}
       <div className="w-full px-4 sm:px-6 lg:px-8 py-5 sm:py-6 flex-1">
+        {activeSubTab === 'diagnostics' && (
+          <div className="animate-in fade-in duration-150 w-full">
+            <SystemDiagnosticsView 
+              equipmentList={equipmentList}
+              onUpdateEquipment={onUpdateEquipment}
+              onNavigateTab={onNavigateTab}
+            />
+          </div>
+        )}
+
         {activeSubTab === 'ai_config' && (
           <div className="animate-in fade-in duration-150 w-full">
             <AiConfigView />
@@ -213,6 +241,19 @@ export const SystemOpsUnifiedView: React.FC<SystemOpsUnifiedViewProps> = ({
                   <span>阿里云 RDS 数据库直通与现场扫码联动</span>
                   <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-700 font-mono">1602个活码</span>
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setCaoliaoViewMode('webhook_logs')}
+                  className={`px-3.5 py-1.5 rounded-md text-xs font-bold flex items-center gap-2 transition cursor-pointer ${
+                    caoliaoViewMode === 'webhook_logs'
+                      ? 'bg-white text-rose-800 shadow-xs border border-slate-200'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <QrCode className="w-3.5 h-3.5 text-rose-600" />
+                  <span>草料接口报修日志与 Webhook 审计</span>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-rose-50 text-rose-700 font-mono">实时排查</span>
+                </button>
               </div>
 
               <div className="text-2xs text-slate-500 hidden md:flex items-center gap-2 px-2 font-medium">
@@ -231,16 +272,23 @@ export const SystemOpsUnifiedView: React.FC<SystemOpsUnifiedViewProps> = ({
                   }
                 }}
               />
-            ) : (
+            ) : caoliaoViewMode === 'rds_linkage' ? (
               <CaoliaoIntegrationView 
                 onViewEquipmentDetails={onViewEquipmentDetails} 
                 onNavigateTab={(tab) => {
                   if (tab === 'caoliao_sync_settings') {
                     setCaoliaoViewMode('sync_settings');
+                  } else if (tab === 'caoliao_webhook_logs') {
+                    setCaoliaoViewMode('webhook_logs');
                   } else if (onNavigateTab) {
                     onNavigateTab(tab);
                   }
                 }}
+              />
+            ) : (
+              <CaoliaoWebhookLogsView
+                onNavigateTab={onNavigateTab}
+                equipmentList={equipmentList}
               />
             )}
           </div>

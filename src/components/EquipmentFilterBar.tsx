@@ -19,7 +19,8 @@ import {
   Sparkles,
   Table2,
   LayoutGrid,
-  Images
+  Images,
+  Activity
 } from 'lucide-react';
 import { 
   canAddEquipment, 
@@ -353,23 +354,31 @@ export const EquipmentFilterBar: React.FC<EquipmentFilterBarProps> = ({
                       </button>
                     )}
 
-                    {/* 5. 视图模式切换（隐藏到台账操作中） */}
+                    {/* 5. 视图模式切换（按设备状态/所属科室聚合、表格、平铺、照片流） */}
                     {onChangeViewMode && (
                       <div className="pt-2 mt-1.5 border-t border-slate-100">
-                        <div className="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                        <div className="px-2 py-1 text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center justify-between">
                           <span>视图模式</span>
-                          <span className="text-[10px] text-blue-600 font-semibold">
-                            {viewMode === 'card_grid' ? '卡片矩阵' : viewMode === 'photo_stream' ? '照片流' : '紧凑表格'}
+                          <span className="text-xs text-blue-600 font-semibold">
+                            {viewMode === 'group_by_status' 
+                              ? '状态聚合' 
+                              : viewMode === 'group_by_department' 
+                              ? '科室聚合' 
+                              : viewMode === 'card_grid' 
+                              ? '卡片矩阵' 
+                              : viewMode === 'photo_stream' 
+                              ? '照片流' 
+                              : '紧凑表格'}
                           </span>
                         </div>
-                        <div className="grid grid-cols-3 gap-1 p-1 bg-slate-50 rounded-lg border border-slate-100 mt-0.5">
+                        <div className="grid grid-cols-2 gap-1.5 p-1.5 bg-slate-50 rounded-lg border border-slate-100 mt-1">
                           <button
                             type="button"
                             onClick={() => {
                               onChangeViewMode('compact_table');
                               setIsActionsMenuOpen(false);
                             }}
-                            className={`flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-md text-[11px] font-medium transition cursor-pointer ${
+                            className={`flex items-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-medium transition cursor-pointer ${
                               viewMode === 'compact_table'
                                 ? 'bg-white text-blue-700 shadow-2xs font-bold ring-1 ring-blue-200'
                                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
@@ -377,7 +386,39 @@ export const EquipmentFilterBar: React.FC<EquipmentFilterBarProps> = ({
                             title="紧凑表格视图"
                           >
                             <Table2 className="w-3.5 h-3.5" />
-                            <span>表格</span>
+                            <span>紧凑表格</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onChangeViewMode('group_by_status');
+                              setIsActionsMenuOpen(false);
+                            }}
+                            className={`flex items-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-medium transition cursor-pointer ${
+                              viewMode === 'group_by_status'
+                                ? 'bg-white text-emerald-700 shadow-2xs font-bold ring-1 ring-emerald-300'
+                                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                            }`}
+                            title="按设备状态自动分类聚合卡片组"
+                          >
+                            <Activity className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>状态分类聚合</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onChangeViewMode('group_by_department');
+                              setIsActionsMenuOpen(false);
+                            }}
+                            className={`flex items-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-medium transition cursor-pointer ${
+                              viewMode === 'group_by_department'
+                                ? 'bg-white text-indigo-700 shadow-2xs font-bold ring-1 ring-indigo-300'
+                                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                            }`}
+                            title="按所属科室自动分类聚合卡片组"
+                          >
+                            <Building2 className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>科室分类聚合</span>
                           </button>
                           <button
                             type="button"
@@ -385,15 +426,15 @@ export const EquipmentFilterBar: React.FC<EquipmentFilterBarProps> = ({
                               onChangeViewMode('card_grid');
                               setIsActionsMenuOpen(false);
                             }}
-                            className={`flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-md text-[11px] font-medium transition cursor-pointer ${
+                            className={`flex items-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-medium transition cursor-pointer ${
                               viewMode === 'card_grid'
                                 ? 'bg-white text-blue-700 shadow-2xs font-bold ring-1 ring-blue-200'
                                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
                             }`}
-                            title="卡片矩阵视图"
+                            title="大卡片平铺矩阵视图"
                           >
                             <LayoutGrid className="w-3.5 h-3.5" />
-                            <span>卡片</span>
+                            <span>卡片矩阵</span>
                           </button>
                           <button
                             type="button"
@@ -401,15 +442,15 @@ export const EquipmentFilterBar: React.FC<EquipmentFilterBarProps> = ({
                               onChangeViewMode('photo_stream');
                               setIsActionsMenuOpen(false);
                             }}
-                            className={`flex flex-col items-center justify-center gap-1 py-1.5 px-1 rounded-md text-[11px] font-medium transition cursor-pointer ${
+                            className={`col-span-2 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-medium transition cursor-pointer ${
                               viewMode === 'photo_stream'
                                 ? 'bg-white text-blue-700 shadow-2xs font-bold ring-1 ring-blue-200'
                                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
                             }`}
-                            title="实物照片流视图"
+                            title="实物照片流画廊视图"
                           >
                             <Images className="w-3.5 h-3.5" />
-                            <span>照片流</span>
+                            <span>实物照片流画廊</span>
                           </button>
                         </div>
                       </div>

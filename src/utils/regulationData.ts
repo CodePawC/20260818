@@ -1,6 +1,151 @@
-import { RegulationItem } from '../types/regulationTypes';
+import { RegulationItem, RegulationCategory, RegulationLevel } from '../types/regulationTypes';
 
 export const REGULATION_STORAGE_KEY = 'hospital_medical_equipment_regulations_v1';
+
+/**
+ * 制度总汇编与制度中心分类排序规范：按“从总体到局部、全生命周期”的原则严格排序
+ * 1. 法规依据 (国家上位法律法规、国务院令与部委规章 - 顶层宏观基石)
+ * 2. 采购准入 (准入论证、招标采购、开箱验收、技术建档 - 全生命周期起点)
+ * 3. 运行维保 (预防性维保PM、工单唯一标识WO-UID与公文追溯、备件耗材管控 - 全院运行中枢)
+ * 4. 计量强检 (国家法定计量器具强制检定、e-CQS直报与周期轮检 - 法定强制监管)
+ * 5. 维修闭环 (临床报修响应、现场检修、原厂返厂大修与修复验收 - 维修执行闭环)
+ * 6. 质控安全 (不良事件MDR主动监测与大型放射防护 - 质控安全红线)
+ * 7. 急救调配 (急救与生命支持类设备24小时应急借调与共享 - 全院跨科资源统筹)
+ * 8. 外协协同 (外协维修服务商准入资质审查、联合议价与履约考评 - 外部供应链协同)
+ * 9. 资产处置 (超期服役评估、跨科调拨借用、资产清查与报废处置 - 资产退出终结)
+ * 10. 培训考核 (临床医护高风险设备操作资质培训与三级考核 - 局部人员操作授权)
+ * 11. 应急预案 (突发严重故障、大面积停电及网络中断应急预案 - 局部极端特情处置)
+ */
+export const REGULATION_CATEGORY_ORDER: RegulationCategory[] = [
+  '管理体制',
+  '法规依据',
+  '采购准入',
+  '运行维保',
+  '计量强检',
+  '维修闭环',
+  '质控安全',
+  '急救调配',
+  '外协协同',
+  '资产处置',
+  '培训考核',
+  '应急预案'
+];
+
+export interface CompilationCategoryMeta {
+  partNumber: string; // 例如 "第一编"
+  partTitle: string; // 例如 "管理体制与组织领导"
+  subtitle: string;
+  badgeColor: string;
+}
+
+export const COMPILATION_CATEGORY_METAS: Record<RegulationCategory, CompilationCategoryMeta> = {
+  '管理体制': {
+    partNumber: '第一编',
+    partTitle: '管理体制与组织领导',
+    subtitle: '主管领导、医疗设备科与临床使用科室三级管理制度及架构权责 (全院统领基石)',
+    badgeColor: 'border-red-300 text-red-800 bg-red-50'
+  },
+  '法规依据': {
+    partNumber: '第一编',
+    partTitle: '管理体制与法规依据',
+    subtitle: '主管领导、管理部门与使用科室三级管理体系 (全院统领基石)',
+    badgeColor: 'border-red-300 text-red-800 bg-red-50'
+  },
+  '采购准入': {
+    partNumber: '第二编',
+    partTitle: '装备准入与采购建档',
+    subtitle: '配置需求论证、招投标采购、三方开箱验收与一机一档建册 (全生命周期起点)',
+    badgeColor: 'border-blue-300 text-blue-800 bg-blue-50'
+  },
+  '运行维保': {
+    partNumber: '第三编',
+    partTitle: '运行维保与工单追溯',
+    subtitle: '预防性维护(PM)、工单唯一标识(WO-UID)体系、公文双轨追溯与备件管控 (全院运行中枢)',
+    badgeColor: 'border-indigo-300 text-indigo-800 bg-indigo-50'
+  },
+  '计量强检': {
+    partNumber: '第四编',
+    partTitle: '法定计量与强检校准',
+    subtitle: '国家法定计量器具强制检定、e-CQS平台直报与周期轮检闭环 (法定强制监管)',
+    badgeColor: 'border-cyan-300 text-cyan-800 bg-cyan-50'
+  },
+  '维修闭环': {
+    partNumber: '第五编',
+    partTitle: '临床报修与检修闭环',
+    subtitle: '临床报修实时响应、现场应急检修、原厂返厂大修与修复终末验收 (维修执行闭环)',
+    badgeColor: 'border-emerald-300 text-emerald-800 bg-emerald-50'
+  },
+  '质控安全': {
+    partNumber: '第六编',
+    partTitle: '质控预警与防护安全',
+    subtitle: '医疗器械不良事件(MDR)主动监测直报与放射诊疗辐射安全防护 (质控安全红线)',
+    badgeColor: 'border-amber-300 text-amber-800 bg-amber-50'
+  },
+  '急救调配': {
+    partNumber: '第七编',
+    partTitle: '急救生命支持应急调配',
+    subtitle: '急救生命支持类设备24小时应急调配中心共享调拨与归还质检 (全院跨科统筹)',
+    badgeColor: 'border-purple-300 text-purple-800 bg-purple-50'
+  },
+  '外协协同': {
+    partNumber: '第八编',
+    partTitle: '外协维保与供应链协同',
+    subtitle: '第三方维修维保服务商准入资质核验、多方联合议价与年度履约考评 (外部供应链协同)',
+    badgeColor: 'border-orange-300 text-orange-800 bg-orange-50'
+  },
+  '资产处置': {
+    partNumber: '第九编',
+    partTitle: '资产盘点与报废终结',
+    subtitle: '超期服役安全性评估、跨科调拨借用、资产定期盘点与报废技术鉴定 (资产退出终结)',
+    badgeColor: 'border-stone-300 text-stone-800 bg-stone-50'
+  },
+  '培训考核': {
+    partNumber: '第十编',
+    partTitle: '人员资质与操作授权',
+    subtitle: '临床医护高风险设备操作准入资质培训、三级考核与持证上岗 (局部人员操作授权)',
+    badgeColor: 'border-teal-300 text-teal-800 bg-teal-50'
+  },
+  '应急预案': {
+    partNumber: '第十一编',
+    partTitle: '应急预案与特情处置',
+    subtitle: '突发严重设备故障、大面积停电及网络中断应急处置与极端兜底 (局部特情处置)',
+    badgeColor: 'border-rose-300 text-rose-800 bg-rose-50'
+  }
+};
+
+const LEVEL_ORDER_WEIGHT: Record<RegulationLevel, number> = {
+  national: 1,
+  hospital: 2,
+  departmental: 3,
+  sop: 4,
+  emergency: 5
+};
+
+/**
+ * 按照总体到局部原则及制度层级严格排序制度列表
+ */
+export function sortRegulationsByLifecycle(items: RegulationItem[]): RegulationItem[] {
+  return [...items].sort((a, b) => {
+    // 1. 按业务类别排序：总体到局部生命周期体系
+    const catIdxA = REGULATION_CATEGORY_ORDER.indexOf(a.category);
+    const catIdxB = REGULATION_CATEGORY_ORDER.indexOf(b.category);
+    const safeCatA = catIdxA >= 0 ? catIdxA : 999;
+    const safeCatB = catIdxB >= 0 ? catIdxB : 999;
+    if (safeCatA !== safeCatB) {
+      return safeCatA - safeCatB;
+    }
+
+    // 2. 同一类内按制度层级权威权重 (国家法规 -> 院级制度 -> 科级细则 -> 操作SOP -> 应急预案)
+    const levelWeightA = LEVEL_ORDER_WEIGHT[a.level] || 99;
+    const levelWeightB = LEVEL_ORDER_WEIGHT[b.level] || 99;
+    if (levelWeightA !== levelWeightB) {
+      return levelWeightA - levelWeightB;
+    }
+
+    // 3. 同一层级按发文字号或编号顺排
+    return a.code.localeCompare(b.code, 'zh-CN', { numeric: true });
+  });
+}
 
 export const DEFAULT_REGULATIONS: RegulationItem[] = [
   {
@@ -944,59 +1089,238 @@ export const DEFAULT_REGULATIONS: RegulationItem[] = [
     id: 'REG-018',
     code: 'YXGC-ZD-2026-18',
     docNumber: '院医工发〔2026〕18号',
-    title: '《医疗器械监督管理条例》（国务院令第739号）医院贯彻执行管理规范',
-    shortTitle: '医疗器械监管条例贯彻规范',
-    category: '法规依据',
-    level: 'national',
+    title: '《医学装备三级管理制度》',
+    shortTitle: '医学装备三级管理制度',
+    category: '管理体制',
+    level: 'hospital',
     status: 'active',
     effectiveDate: '2026-01-01',
     revisionDate: '2026-05-10',
     version: 'v3.0',
-    issuedBy: '五莲县人民医院 依法执业办公室 / 医学工程保障中心',
-    signatory: '院长',
-    applicableDepartments: ['全院所有科室', '医学工程保障中心', '医务处', '院纪委', '质量控制办公室'],
-    keywords: ['国务院令739号', '医疗器械法', '法规依据', '合法准入', '不良事件', '执业合规', '等级评审核心'],
-    summary: '全面梳理落实新修订《医疗器械监督管理条例》（国务院令第739号）法定条款，对全院医疗器械采购、验收、储存、使用前检查、维护保养、不良事件监测及法律责任作出的根本指导总纲。',
-    tableOfContents: [
-      { id: 'sec-1', title: '第一章 总则与法定监管基石', level: 1 },
-      { id: 'sec-2', title: '第二章 医疗器械临床使用全过程质量安全管理', level: 1 },
-      { id: 'sec-3', title: '第三章 采购查验与首营资质审核规范', level: 1 },
-      { id: 'sec-4', title: '第四章 维修保养与定期校准法定要求', level: 1 },
-      { id: 'sec-5', title: '第五章 不良事件警戒监测法定报告义务', level: 1 },
-      { id: 'sec-6', title: '第六章 法律责任与执业红线', level: 1 }
+    issuedBy: '五莲县人民医院 医务处 / 医学工程保障中心',
+    signatory: '分管业务副院长 / 院长',
+    applicableDepartments: ['主管院领导', '医疗设备科(医学工程保障中心)', '全院各临床科室', '全院各医技科室', '财务科', '审计科'],
+    keywords: [
+      '医学装备三级管理制度',
+      '三级管理制度',
+      '医学装备三级管理体系',
+      '主管领导',
+      '医疗设备科',
+      '使用科室',
+      '等级评审核心',
+      '三甲评审',
+      '管理架构图',
+      '分级负责',
+      '权责一致',
+      '全生命周期'
     ],
-    content: `### 第一章 总则与法定监管基石
-**第一条** 为保证医疗器械的安全、有效，保障人体健康和生命安全，依据新修订的《医疗器械监督管理条例》（国务院令第739号），结合我院实际，制定本规范。
-**第二条** 本规范为我院所有医疗器械管理制度的上位法总纲，全院各部门、科室及从业人员在器械使用全生命周期中必须严格遵照执行。
+    summary: '为了保证本院医学装备合理配置、实现安全与有效利用，根据《医疗器械监督管理条例》、《医疗卫生机构医学装备管理办法》、《医疗器械使用质量监督管理办法》等法律法规，遵循“统一领导、归口管理、分级负责、权责一致”原则，本院医学装备管理实行主管领导、医疗设备科和使用科室三级管理制度，明确各级职责并构建全生命周期管理架构。',
+    tableOfContents: [
+      { id: 'sec-1', title: '第一章 总则与法定管理原则', level: 1 },
+      { id: 'sec-2', title: '第二章 第一级 · 主管领导管理职责', level: 1 },
+      { id: 'sec-3', title: '第三章 第二级 · 医学装备管理部门（医疗设备科）职责', level: 1 },
+      { id: 'sec-4', title: '第四章 第三级 · 医学装备使用部门日常管理职责', level: 1 },
+      { id: 'sec-5', title: '第五章 医学装备三级管理架构图与监督考核机制', level: 1 }
+    ],
+    content: `### 第一章 总则与法定管理原则
+**第一条** 为了保证本院医学装备合理配置、实现安全与有效利用，根据《医疗器械监督管理条例》（国务院令第739号）、《医疗卫生机构医学装备管理办法》、《医疗器械使用质量监督管理办法》等法律法规，遵循“统一领导、归口管理、分级负责、权责一致”的原则，结合我院实际，制定本制度。
+**第二条** 本院医学装备管理实行主管领导、医疗设备科和使用科室三级管理制度。全院所有涉及医疗设备配置、采购、验收、使用、维护、调配及处置的部门和人员，均须严格遵守本制度。
 
-### 第二章 医疗器械临床使用全过程质量安全管理
-**第三条** 医疗器械使用单位应当配置与其规模相适应的医疗器械质量管理机构或者专职质量管理人员，建立健全覆盖采购、验收、储存、使用、维护、转让、报废全生命周期的质量管理制度。
-**第四条** 医疗机构应当建立医疗器械使用前检查制度。对生命支持或者用于重症监护的医疗器械，应当在每次使用前进行安全性和有效性检查。
+### 第二章 第一级 · 主管领导管理职责
+**第三条** 由分管院领导直接负责，并依据机构规模、管理任务配备数量适宜的专业技术人员。
+**第四条** 分管院领导负责全院资金的预算管理、统筹安排，主管全院大型医用设备准入配置论证、重大技术风险及突发应急处置决策。
 
-### 第三章 采购查验与首营资质审核规范
-**第五条** 严格查验供货者的资质和医疗器械的合格证明文件，建立真实、完整的进货查验记录。查验记录保存期限不得少于医疗器械规定使用期限届满后2年，或者不得少于5年。
-**第六条** 严禁使用未经注册、无合格证明文件、过期、失效或者淘汰的医疗器械。
+### 第三章 第二级 · 医学装备管理部门（医疗设备科）职责
+**第五条** 医疗设备科（医学工程保障中心）是全院医疗设备管理的职能部门，在分管院长的领导下，参加医院医疗设备管理全过程。负责医疗设备的规划调研、立项论证、申报审批、招标采购、合同签订、安装验收、维护保养、培训使用、报废鉴定、配合财务部门完成医疗设备的调拨使用及报废报批工作。
+**第六条** 医疗设备科具体职责如下：
+1. 负责医疗设备、设备质量管理的策划，并组织具体实施，对医用仪器质量进行监督、检查和考核；
+2. 负责医院医疗仪器质量控制程序文件的归档管理，健全“一机一档”全生命周期技术履历；
+3. 负责对医院所购医疗设备在使用中存在的质量问题，提出纠正和预防措施，并协助进行跟踪验证；
+4. 负责全院医疗设备的维修、保养与预防性维护（PM）；
+5. 遵照国家法律规定严格执行落实医用监护、计量仪器的强制检定与周期校准工作；
+6. 负责全院医用材料的供应与保障；
+7. 建立健全医疗设备保养、维修与更新制度，使设备处于完好状态；
+8. 加强大中型医疗设备合理应用情况、开机机时与成本效益分析；
+9. 对设备实行科学管理，购置大型设备必须经过严格的可行性论证。属于《大型医用设备配置与使用管理办法》规定的甲、乙类品目的大型医用设备，按照规定申请配置许可。急救设备齐全完好，满足急救工作需要，指导医护人员熟练、正确使用；
+10. 遵守检验项目和检测仪器操作规程，定期校准检测系统，并及时淘汰经检定不合格的设备。
 
-### 第四章 维修保养与定期校准法定要求
-**第七条** 医疗器械使用单位应当对大型医疗器械以及植入和介入类医疗器械建立使用记录。
-**第八条** 应当按照产品说明书等要求，对在用医疗器械进行定期检查、检验、校准、保养、维护并记录，分析、评估其安全性、有效性，保障医疗器械处于良好状态。
+### 第四章 第三级 · 医学装备使用部门日常管理职责
+**第七条** 使用部门应当设专职或兼职管理人员（科室设备安全员/护士长），在设备科的指导下，具体负责本科室的医学装备日常管理工作。
+**第八条** 使用部门具体管理职责如下：
+1. **逐级建立责任制与账卡物相符**：凡有医疗设备的科室，要逐级建立使用管理责任制，指定专人管理，严格使用登记。认真检查保养，保持仪器设备处于良好状态，随时开机可用，并保证账、卡、物相符；
+2. **共同验收与独立操作考核**：临床医技科室新进仪器设备在使用前要由设备科、使用科室共同负责验收、调试、安装。组织有关科室专业人员进行操作管理、使用和训练，使用科室人员了解仪器的构造、性能、工作原理和使用维护方法后，方可独立使用。凡初次操作者，必须在熟悉该仪器的同志指导下进行。在未熟悉该仪器的操作前，不得连接电源，以免接错电路，造成损坏；
+3. **技术标准规程与操作复位**：仪器使用人员要严格按照仪器的技术标准、说明书和操作规程进行操作。使用仪器前，应判明其技术状态确实良好，使用完毕，应将所有开关、手柄放在规定位置；
+4. **定点安置与严禁带故障运转**：不准搬动的仪器，不得随意挪动。操作过程中操作人员不得擅自离开，发现仪器运转异常时，应立即通知设备科及医院维修技术人员，查找原因，及时排除故障，严禁带故障和超负荷使用和运转。仪器损坏需修理者，可按规定填写《大型设备维修维护申请报告》或系统报修；
+5. **严禁私自丢弃零配件**：仪器设备（包括主机、附件、说明书）一定保持完整无缺，即使破损失灵部件，未经设备科检查亦不得任意丢弃；
+6. **跨科调剂使用审批交接**：凡属临床科研的仪器，科室间调剂使用时，一定要经科室主任批准，仪器管理人员要办理交接手续，用毕及时归还，验收后放回原处；
+7. **用毕检查与责任追究**：仪器用完后，应由科室管理人员检查，关机放好。若发现仪器损坏或发生意外故障，应立即查明原因和责任，如系违章操作所致，要立即报告设备科，视情节轻重进行赔偿或进一步追究责任。
 
-### 第五章 不良事件警戒监测法定报告义务
-**第九条** 发现医疗器械不良事件或者可疑不良事件，应当按照医疗器械不良事件监测和再评价管理办法的规定向监测机构报告，不得隐瞒、漏报。`,
+### 第五章 医学装备三级管理架构图与监督考核机制
+**第九条** 全院构建“决策层（分管院领导）- 归口管理层（医疗设备科）- 执行使用层（临床科室）”严密清晰的三级管理网络架构：
+- **第一级（领导决策）**：分管院领导审定配置预算、规划立项及安全监督；
+- **第二级（归口管控）**：医疗设备科统筹准入、采购、验收、维保、质控、计量与报废全生命周期；
+- **第三级（临床落地）**：各临床医技科室主任及设备管理员负责每日点检、规范操作、在位保养与故障首报。
+**第十条** 医疗设备科每季度对各临床使用科室的设备完好率、点检执行率及账物相符率开展质控考核，考核结果纳入科室综合目标管理。`,
     attachments: [
-      { id: 'att-28', name: '医疗器械监督管理条例(国务院令第739号)单行本及医院宣贯手册.pdf', size: '680 KB', type: 'pdf', downloadCount: 1250 }
+      { id: 'att-28', name: '五莲县人民医院医学装备三级管理组织架构图与岗位职责一览表.pdf', size: '320 KB', type: 'pdf', downloadCount: 1680 },
+      { id: 'att-29', name: '临床医技科室专兼职医学装备管理员(设备安全员)备案登记表.docx', size: '85 KB', type: 'doc', downloadCount: 920 }
     ],
     linkedSystemTab: {
       tab: 'ledger',
-      label: '设备技术台账',
-      description: '前往台账查验全院三类器械注册证、合格证明及在位状态'
+      label: '设备台账与三级责任人',
+      description: '前往台账查验全院各临床使用科室设备归属及三级责任人'
     },
-    readCount: 4580,
+    readCount: 5280,
     isMustReadForHospitalAccreditation: true,
     isArchivedPdf: true,
-    pdfFileName: '医疗器械监督管理条例(国务院令第739号_官方红头扫描归档件).pdf',
-    pdfFileSize: '2.8 MB',
+    pdfFileName: '五莲县人民医院医学装备三级管理制度(院医工发〔2026〕18号_红头归档件).pdf',
+    pdfFileSize: '2.1 MB',
     updatedAt: '2026-05-10T11:00:00Z'
+  },
+  {
+    id: 'REG-019',
+    code: 'YXGC-ZD-2026-19',
+    docNumber: '院医工发〔2026〕19号',
+    title: '《医疗设备维保工单唯一标识编码规范与公文追溯管理制度》',
+    shortTitle: '医疗设备维保工单唯一标识编码规范与公文追溯管理制度',
+    category: '运行维保',
+    level: 'hospital',
+    status: 'active',
+    effectiveDate: '2026-01-01',
+    revisionDate: '2026-10-27',
+    version: 'v2.0',
+    issuedBy: '五莲县人民医院 医务处 / 医学工程保障中心',
+    signatory: '分管业务副院长',
+    applicableDepartments: ['全院临床科室', '医学工程保障中心', '院办公室', '财务科', '审计科', '信息科', '耗材采购科'],
+    keywords: [
+      '医疗设备维保工单唯一标识编码规范与公文追溯管理制度',
+      '五莲县人民医院医疗设备维保工单唯一标识编码规范与公文追溯管理制度',
+      '维保工单唯一标识编码规范',
+      '工单编码规范',
+      '公文追溯管理制度',
+      '公文追溯',
+      'WO复合编码',
+      '唯一标识',
+      '三单勾稽',
+      '请示报告单',
+      '双轨制映射',
+      '返厂大修',
+      '配件更换',
+      '档案追溯',
+      '三甲评审',
+      '院医工发〔2026〕19号',
+      '院医工发〔2026〕15号',
+      'WO-REP',
+      'WO-FAC',
+      'WO-PRT',
+      'WO-PM',
+      'WO-INS',
+      'WO-CAL',
+      'WO-SCR',
+      'WO-SPO',
+      '工单号',
+      '追溯管理制度',
+      '红头公文',
+      'NO. 546',
+      '草料二维码'
+    ],
+    summary: '全面确立全院医疗设备维保工单唯一标识（UID）复合编码体系（WO-业务前缀-年度-4位流水），规范线上全码与线下纸质公文存根（NO. 546）的双轨映射机制，硬化临床报修、医工维修与财务请示“三单勾稽”闭环，统筹草料二维码、外协返厂大修、零修结算与技术档案追溯，保障每一项设备维护有据可查、终身可溯。',
+    tableOfContents: [
+      { id: 'sec-1', title: '第一章 总则与编制依据', level: 1 },
+      { id: 'sec-2', title: '第二章 复合工单编码架构体系(WO-[前缀]-[年份]-[4位流水])', level: 1 },
+      { id: 'sec-3', title: '第三章 业务分类前缀权威定义与适用场景对照表', level: 1 },
+      { id: 'sec-4', title: '第四章 线上全量数字化编码与线下纸质公文存根号双轨映射机制', level: 1 },
+      { id: 'sec-5', title: '第五章 临床报修、草料二维码与“三单勾稽”全流程闭环管控制度', level: 1 },
+      { id: 'sec-6', title: '第六章 跨系统接口互通与主数据标准一致性', level: 1 },
+      { id: 'sec-7', title: '第七章 维保公文档案装订、保管期限与审计查验规范', level: 1 },
+      { id: 'sec-8', title: '第八章 监督考核、违规脱单送修问责机制与附则', level: 1 }
+    ],
+    content: `### 第一章 总则与编制依据
+**第一条** 为进一步加强五莲县人民医院医疗装备科学化、精细化与标准化管理，彻底解决传统简单数字排列（如纯流水号545、546）导致的跨年度重号冲突、业务属性模糊及多系统数据碰撞等隐患，保障医疗设备全生命周期质量安全追溯的严肃性、合规性与法定效力，根据《中华人民共和国基本医疗卫生与健康促进法》、《医疗器械监督管理条例》（国务院令第739号）、《医疗器械临床使用管理办法》（国家卫生健康委员会令第8号）及国家三级综合医院评审标准细则，结合我院医学装备管理实际，制定本制度。
+**第二条** 本制度适用于五莲县人民医院院本部各临床医技科室、急危重症监护单元、手术室、门诊各单元以及外协维保合作单位在医疗设备突发故障报修、现场应急抢修、精密器械原厂返厂大修、高额配件更换、预防性维保(PM)、巡检隐患排查、计量法定复检及报废技术鉴定等全业务场景。
+**第三条** 医疗设备维保工单与公文追溯管理坚持“唯一赋码、业务明确、双轨映射、三单勾稽、全程留痕、终生可溯”的原则。
+
+### 第二章 复合工单编码架构体系
+**第四条** 全院所有维保单据及配套院级公文请示单实行全局唯一的复合标准化编码（Work Order Unique Identifier, WO-UID），语法格式严格统一规范为：
+\`WO-[业务类别前缀]-[业务年度]-[4位年度流水序号]\`
+例如：\`WO-FAC-2026-0546\`（精密器械返厂大修）、\`WO-REP-2026-0001\`（现场应急抢修）、\`WO-PRT-2026-0547\`（核心配件置换审批）。
+**第五条** 编码各段核心组成要素规范释义：
+1. **引导码（WO）**：Work Order 的国际通用标准缩写，代表五莲县人民医院医学装备维保工单与公文申报标准头部；
+2. **业务类别前缀（Prefix）**：统一为 3 位大写英文字母，直观体现单据业务性质与流转通道，严禁混用；
+3. **业务年度（Year）**：4 位公历年份（如 2026），从根源杜绝跨年度号码重复碰撞问题；
+4. **年度流水序号（Sequence）**：4 位自然数字序列（从 0001 至 9999），按系统接单或提报时间先后在各自业务大类内或全院总线内自增编号。
+**第六条** 复杂维保项目子任务拆分规则：若一项大型返厂或翻新工程包含多项分部验收（如同时拆分主机修复与附件重购），采用统一的子任务扩展编码：\`WO-[前缀]-[年份]-[4位流水]-SUB[2位序号]\`（例如 \`WO-FAC-2026-0546-SUB01\`），确保主从关系清晰可辨。
+
+### 第三章 业务分类前缀权威定义与适用场景对照表
+**第七条** 维保工单业务前缀划分标准与适用场景明确如下：
+1. **WO-REP（现场应急抢修）**：适用于临床一线设备突发功能障碍、报警或假故障，由院内工程师或驻场工程师进场抢修、调试恢复的业务；
+2. **WO-FAC（精密器械返厂大修）**：适用于输尿管软硬镜、超声探头、高频电刀主机、呼吸机主机等高精尖器械，需离院返还原厂或国家认证第三方实验室进行深度拆解与翻新维保；
+3. **WO-PRT（核心配件置换审批）**：适用于CT球管、DSA高压发生器、呼吸机吸呼气阀组与氧电池、血液透析反渗透膜等单次更换成本高、需单独履行请示审批的配件购置工单；
+4. **WO-PM（预防性定期维保）**：适用于生命支持及急救类设备按周期开展的电气安全检测、输出功率校准、防尘散热保养与厂家原厂保养；
+5. **WO-INS（质量巡检异常转修）**：适用于医工工程师在日常晨检巡视、主动巡检中发现的安全隐患或功能轻微异常，主动开单转入的处置流程；
+6. **WO-CAL（计量法定检定复检）**：适用于监护仪、心电图机、除颤器等强检计量设备在法定检定周期内检测不合格引发的技术调试与定标排查；
+7. **WO-SCR（设备技术鉴定报废）**：适用于超过安全使用年限、严重老化损坏、无零配件供应或维保费用超过新机现值50%的技术鉴定报废工单；
+8. **WO-SPO（年度框架内零星维保）**：适用于已签署年度综合打包协议的常规病房零星设备维修月度汇总与对账工单。
+
+### 第四章 线上全量数字化编码与线下纸质公文存根号双轨映射机制
+**第八条** 针对临床医护人员手工翻阅纸质公文与院领导审批习惯，全面推行“线上全局系统码 + 线下纸质存根序号”双轨制映射规范：
+1. **线上数字化流转**：全院平台数据库以规范全码（如 \`WO-FAC-2026-0546\`）作为唯一主键，确保系统间数据交互、多维统计、审计查验与病组核算100%精准无碰撞；
+2. **纸质原版公文印制**：打印《五莲县人民医院请示报告单》时，左上角默认印制规范全码 \`NO. WO-FAC-2026-0546\`；同时系统支持勾选显示历史纸质存根序号 \`NO. 546\`，二者在底层由系统自动建立 1:1 双向互通索引；
+3. **双向互通极速检索**：临床医护人员或工程师无论输入简短的 3 位序号 \`546\`，还是输入系统全码 \`WO-FAC-2026-0546\`，系统底层智能解析引擎均须精准定位至同一张请示公文、底层维修工单与验收台账。
+
+### 第五章 临床报修、草料二维码与“三单勾稽”全流程闭环管控制度
+**第九条** 临床科室无论通过微信草料二维码扫码报修、电脑端台账一键报修，还是夜间急诊电话人工登记，系统底层均于接单瞬间自动生成标准全码，杜绝线下“口头报修”和“体外循环”。
+**第十条** 严格落实**“三单勾稽”（临床报修单、医工现场工单、财务报销请示单）**闭环审核制度：
+1. **第一单·临床报修单**：如实记录故障时间、报修人、故障表象及安全状态，系统自动赋以首发工单号；
+2. **第二单·医工现场工单**：由接单工程师核验真实情况，记录初诊工时、故障原因归因（人机料法环）、拟采取维修方案及备件更换明细；
+3. **第三单·财务报销请示单**：凡产生外部外协费用、配件采购支出的，必须基于前述两单信息自动生成附带标准红头文号的《五莲县人民医院请示报告单》，严禁无单请款；
+4. **报销支付强卡点**：财务科与审计科在审核外修发票与付款申请时，必须严格比对三单上的工单全码、设备编码与金额。三单不一致或无合规工单码的，财务一律拒付。
+
+### 第六章 跨系统接口互通与主数据标准一致性
+**第十一条** 本院医学装备数字化平台与医院 HIS（医院信息系统）、HRP（运营管理系统）、OA（办公协同系统）、耗材SPD系统及国家药监局医疗器械唯一标识（UDI）追溯系统进行接口数据交互时，必须统一输出标准工单全码与设备主数据编码。
+**第十二条** 涉及医用耗材与备件更换的，工单编码必须与国家医保医用耗材代码、国家药监局 UDI DI/PI 关联贯通，实现“患者诊疗-设备运行-配件更换-医保清算”全链条闭环。
+
+### 第七章 维保公文档案装订、保管期限与审计查验规范
+**第十三条** 凡涉及院领导批示、临床科室签字及第三方外修合同的《请示报告单》，由医学工程保障中心档案室按业务年度并依据工单流水序号进行实体归类胶装成册。
+**第十四条** 档案保存期限法定要求：
+1. 维保全流程电子数据在数字化平台与云端冷备份中实行永久留存，不可逆物理擦除；
+2. 纸质请示报告单原件、供应商营业资质原件、更换配件合格证明及临床终末验收单，保存期限不得少于设备报废注销后5年；
+3. 大型大型医用设备（CT、MR、DSA、直线加速器等）以及高风险急救生命支持类设备维保公文档案永久保存。
+**第十五条** 电子档案防篡改机制：所有已办结工单与审批批示自动生成数字时间戳防伪签名。任何事后补录、修改必须留存修改轨迹与责任人凭证。
+
+### 第八章 监督考核、违规脱单送修问责机制与附则
+**第十六条** 严禁任何科室或个人私自伪造、篡改工单编号，严禁擅自脱离系统将设备交由无资质个人或未经审批的第三方送修。一经查实，视情节严肃追究当事人及科室负责人责任，涉及违纪违法的移交纪检监察机关严肃查处。
+**第十七条** 本制度由五莲县人民医院医学工程保障中心负责具体解释与日常运维。
+**第十八条** 本制度自印发之日起正式发布执行，此前医院印发的有关设备维保单据规定与本制度不符的，一律以本制度为准。`,
+    attachments: [
+      { id: 'att-29', name: '五莲县人民医院医学装备复合工单编码标准与分类前缀释义表.pdf', size: '320 KB', type: 'pdf', downloadCount: 1120 },
+      { id: 'att-30', name: '五莲县人民医院请示报告单双轨编码装订归档存查指引.docx', size: '185 KB', type: 'docx', downloadCount: 680 },
+      { id: 'att-31', name: '医疗设备维保全流程三单勾稽闭环核算与公文追溯操作SOP.pdf', size: '450 KB', type: 'pdf', downloadCount: 540 }
+    ],
+    linkedSystemTab: {
+      tab: 'repairs',
+      label: '临床报修处置',
+      description: '前往临床报修处置与工单跟踪查看规范编码落地执行'
+    },
+    readCount: 2360,
+    isMustReadForHospitalAccreditation: true,
+    updatedAt: '2026-10-27T08:00:00Z',
+    revisionHistory: [
+      {
+        version: 'v2.0',
+        date: '2026-10-27',
+        approver: '分管业务副院长',
+        author: '医学工程保障中心',
+        summary: '全面确立 WO-[前缀]-[年份]-[4位流水] 复合全码体系，消除简单纯数字重号隐患，建立与纸质请示报告单的双轨映射机制，硬化“三单勾稽”闭环与跨系统追溯标准'
+      },
+      {
+        version: 'v1.0',
+        date: '2026-01-01',
+        approver: '医学工程科主任',
+        author: '医学工程保障中心',
+        summary: '初版印发施行'
+      }
+    ]
   }
 ];
 
@@ -1004,9 +1328,104 @@ export function getStoredRegulations(): RegulationItem[] {
   try {
     const raw = localStorage.getItem(REGULATION_STORAGE_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw);
+      let parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed.map((item: RegulationItem) => {
+        // 1. 迁移/修复旧版本中错误的 duplicate REG-015 或旧编码
+        parsed = parsed.map((item: RegulationItem) => {
+          if (
+            (item.id === 'REG-015' && item.title.includes('工单唯一标识')) ||
+            (item.code === 'YXGC-ZD-2026-15' && item.title.includes('工单唯一标识'))
+          ) {
+            return {
+              ...item,
+              id: 'REG-019',
+              code: 'YXGC-ZD-2026-19',
+              docNumber: '院医工发〔2026〕19号'
+            };
+          }
+          return item;
+        });
+
+        // 2. 规范化制度名称：统一去除单位名称前缀，如将《五莲县人民医院医疗设备维保工单唯一标识编码规范与公文追溯管理制度》统一规范为《医疗设备维保工单唯一标识编码规范与公文追溯管理制度》
+        parsed = parsed.map((item: RegulationItem) => {
+          if (
+            item.id === 'REG-019' || 
+            item.code === 'YXGC-ZD-2026-19' || 
+            item.title.includes('医疗设备维保工单唯一标识编码规范与公文追溯管理制度')
+          ) {
+            return {
+              ...item,
+              id: 'REG-019',
+              code: 'YXGC-ZD-2026-19',
+              docNumber: '院医工发〔2026〕19号',
+              title: '《医疗设备维保工单唯一标识编码规范与公文追溯管理制度》',
+              shortTitle: '医疗设备维保工单唯一标识编码规范与公文追溯管理制度',
+              category: '运行维保',
+              level: 'hospital'
+            };
+          }
+          return item;
+        });
+
+        // 3. 规范化 REG-018：按三甲评审规范全面升级为《医学装备三级管理制度》（主管领导、管理部门、使用科室三级管理制度与架构图）
+        parsed = parsed.map((item: RegulationItem) => {
+          if (
+            item.id === 'REG-018' ||
+            item.code === 'YXGC-ZD-2026-18' ||
+            item.title.includes('医疗器械监督管理条例') ||
+            item.title.includes('医学装备三级管理')
+          ) {
+            const def18 = DEFAULT_REGULATIONS.find(r => r.id === 'REG-018');
+            return def18 || {
+              ...item,
+              id: 'REG-018',
+              code: 'YXGC-ZD-2026-18',
+              docNumber: '院医工发〔2026〕18号',
+              title: '《医学装备三级管理制度》',
+              shortTitle: '医学装备三级管理制度',
+              category: '管理体制',
+              level: 'hospital'
+            };
+          }
+          return item;
+        });
+
+        // 4. 确保最新制度库中所有默认制度均已同步注入，尤其是 REG-019 与 REG-018
+        const hasWoReg = parsed.some(
+          (item: RegulationItem) =>
+            item.id === 'REG-019' ||
+            item.code === 'YXGC-ZD-2026-19' ||
+            item.title.replace(/[《》\s]/g, '').includes('医疗设备维保工单唯一标识编码规范与公文追溯管理制度')
+        );
+
+        let merged = [...parsed];
+        if (!hasWoReg) {
+          const woDefault = DEFAULT_REGULATIONS.find(r => r.id === 'REG-019');
+          if (woDefault) {
+            merged = [woDefault, ...merged];
+          }
+        }
+
+        // 4. 检查是否有其他缺失的 DEFAULT_REGULATIONS，如果有也一并补全
+        const currentIds = new Set(merged.map(m => m.id));
+        DEFAULT_REGULATIONS.forEach(defItem => {
+          if (!currentIds.has(defItem.id)) {
+            merged.push(defItem);
+            currentIds.add(defItem.id);
+          }
+        });
+
+        // 5. 按照“总体到局部”宏观全生命周期与法治层级原则进行全局系统排序
+        const sortedMerged = sortRegulationsByLifecycle(merged);
+
+        // 同步回 localStorage 确保后续读取始终最新
+        try {
+          localStorage.setItem(REGULATION_STORAGE_KEY, JSON.stringify(sortedMerged));
+        } catch {
+          // ignore storage quota error
+        }
+
+        return sortedMerged.map((item: RegulationItem) => {
           if (!item.revisionHistory || item.revisionHistory.length === 0) {
             return {
               ...item,
@@ -1016,7 +1435,7 @@ export function getStoredRegulations(): RegulationItem[] {
                   date: item.revisionDate || item.effectiveDate || '2026-01-01',
                   approver: item.signatory || '主管业务副院长',
                   author: item.issuedBy || '医学工程保障中心',
-                  summary: '经院党委与医工委员会论证通过正式印发施行'
+                  summary: '经院医工管理委员会与院长办公会审议通过正式印发施行'
                 }
               ]
             };
@@ -1028,7 +1447,7 @@ export function getStoredRegulations(): RegulationItem[] {
   } catch (err) {
     console.warn('Failed to load stored regulations:', err);
   }
-  return DEFAULT_REGULATIONS.map(item => {
+  return sortRegulationsByLifecycle(DEFAULT_REGULATIONS).map(item => {
     if (!item.revisionHistory || item.revisionHistory.length === 0) {
       return {
         ...item,
@@ -1061,7 +1480,7 @@ export function resetStoredRegulations(): RegulationItem[] {
   } catch (err) {
     console.warn('Failed to remove stored regulations:', err);
   }
-  return DEFAULT_REGULATIONS;
+  return sortRegulationsByLifecycle(DEFAULT_REGULATIONS);
 }
 
 export function incrementRegulationReadCount(id: string): RegulationItem[] {
@@ -1075,3 +1494,4 @@ export function incrementRegulationReadCount(id: string): RegulationItem[] {
   saveStoredRegulations(updated);
   return updated;
 }
+

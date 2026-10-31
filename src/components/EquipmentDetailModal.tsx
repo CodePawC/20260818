@@ -77,6 +77,7 @@ import { ApprovalApplication } from '../types/approvalTypes';
 import { EquipmentLoanRecord } from '../types';
 import { LoanCountdownBadge, computeLoanTimeProgress } from './LoanTimeProgressBar';
 import { VendorCollaborationRepairTracker } from './VendorCollaborationRepairTracker';
+import { MaintenanceForecastTrendChart } from './MaintenanceForecastTrendChart';
 
 interface EquipmentDetailModalProps {
   equipment: MedicalEquipment | null;
@@ -99,8 +100,11 @@ interface EquipmentDetailModalProps {
   onViewAcceptanceDossier?: (item: MedicalEquipment) => void;
   workOrders?: EngineeringWorkOrder[];
   allEquipment?: MedicalEquipment[];
-  initialTab?: 'basic' | 'timeline' | 'roi' | 'repairs' | 'cost_analysis' | 'logs' | 'loans' | 'acceptance';
+  initialTab?: 'basic' | 'timeline' | 'roi' | 'repairs' | 'cost_analysis' | 'forecast' | 'logs' | 'loans' | 'acceptance';
   onSaveEquipment?: (item: MedicalEquipment) => void;
+  onOpenOfficialReport?: (item: MedicalEquipment, reason?: string) => void;
+  onNavigateToScrap?: (item: MedicalEquipment) => void;
+  onOpenTroubleshootModal?: (item: MedicalEquipment) => void;
   currentUser?: {
     name?: string;
     role?: string;
@@ -132,9 +136,12 @@ export const EquipmentDetailModal: React.FC<EquipmentDetailModalProps> = ({
   workOrders: workOrdersProp,
   initialTab,
   onSaveEquipment,
+  onOpenOfficialReport,
+  onNavigateToScrap,
+  onOpenTroubleshootModal,
   currentUser,
 }) => {
-  const [activeTab, setActiveTab] = useState<'basic' | 'timeline' | 'roi' | 'repairs' | 'cost_analysis' | 'logs' | 'loans' | 'acceptance'>(initialTab || 'basic');
+  const [activeTab, setActiveTab] = useState<'basic' | 'timeline' | 'roi' | 'repairs' | 'cost_analysis' | 'forecast' | 'logs' | 'loans' | 'acceptance'>(initialTab || 'basic');
 
   useEffect(() => {
     if (initialTab) {
@@ -499,6 +506,21 @@ export const EquipmentDetailModal: React.FC<EquipmentDetailModalProps> = ({
               <span>登记报修</span>
             </button>
 
+            {onOpenTroubleshootModal && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onOpenTroubleshootModal(equipment);
+                }}
+                className="px-3.5 py-2 bg-sky-600 hover:bg-sky-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                title="调取 Gemini 3.8 Flash 医工专家大模型对该设备开展多层故障树推理与排障指导"
+              >
+                <Zap className="w-4 h-4 text-sky-200" />
+                <span>AI智能排障</span>
+              </button>
+            )}
+
             {onReportAdverseEvent && (
               <button
                 type="button"
@@ -583,6 +605,33 @@ export const EquipmentDetailModal: React.FC<EquipmentDetailModalProps> = ({
               <FileCheck2 className="w-4 h-4 text-emerald-600" />
               <span>开箱验收单</span>
             </button>
+
+            {onOpenOfficialReport && (
+              <button
+                type="button"
+                onClick={() => onOpenOfficialReport(equipment)}
+                className="px-3.5 py-2 bg-red-50 hover:bg-red-100 text-red-800 border border-red-300 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                title="开具或打印该设备的《五莲县人民医院请示报告单》"
+              >
+                <FileCheck2 className="w-4 h-4 text-red-600" />
+                <span>开具请示单</span>
+              </button>
+            )}
+
+            {onNavigateToScrap && (
+              <button
+                type="button"
+                onClick={() => {
+                  onNavigateToScrap(equipment);
+                  onClose();
+                }}
+                className="px-3.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-300 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                title="对该设备发起国有资产报废技术鉴定与处置审批流程"
+              >
+                <Trash2 className="w-4 h-4 text-rose-600" />
+                <span>报废技术鉴定</span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -704,6 +753,21 @@ export const EquipmentDetailModal: React.FC<EquipmentDetailModalProps> = ({
             {isCostOverThreshold && (
               <span className="w-2 h-2 rounded-full bg-rose-500" title="累计维修已达报废/更新阈值" />
             )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('forecast')}
+            className={`py-3 border-b-2 transition flex items-center gap-2 cursor-pointer shrink-0 ${
+              activeTab === 'forecast'
+                ? 'border-amber-600 text-amber-700 font-bold'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <Sparkles className="w-4 h-4 text-amber-500" />
+            <span>未来12月维保预测</span>
+            <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+              线性回归
+            </span>
           </button>
 
           <button
@@ -2459,6 +2523,23 @@ export const EquipmentDetailModal: React.FC<EquipmentDetailModalProps> = ({
               }}
               onCloseModal={onClose}
             />
+          )}
+
+          {/* ---------------- 未来12个月维保费用预测选项卡 (Linear Regression Forecast) ---------------- */}
+          {activeTab === 'forecast' && (
+            <div className="space-y-4">
+              <MaintenanceForecastTrendChart
+                equipment={equipment}
+                deviceWorkOrders={deviceWorkOrders}
+                onNavigateToApprovals={onNavigateToApprovals}
+                onNavigateToRoi={(eqId) => {
+                  setActiveTab('roi');
+                  if (onNavigateToRoi) {
+                    onNavigateToRoi(eqId);
+                  }
+                }}
+              />
+            </div>
           )}
 
           {/* ---------------- Tab 3: 状态变动审计 (Logs) ---------------- */}

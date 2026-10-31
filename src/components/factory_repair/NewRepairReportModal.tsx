@@ -56,8 +56,6 @@ export const NewRepairReportModal: React.FC<NewRepairReportModalProps> = ({
   equipmentList,
   currentUser
 }) => {
-  if (!isOpen) return null;
-
   // 默认过滤麻醉手术科设备
   const anesthesiaEquipments = equipmentList.filter(
     e => e.department === '麻醉手术科' || e.ownerDepartment === '麻醉手术科' || e.category.includes('内窥镜') || e.category.includes('麻醉')
@@ -180,6 +178,8 @@ export const NewRepairReportModal: React.FC<NewRepairReportModalProps> = ({
       eq.department.toLowerCase().includes(kw)
     );
   });
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">

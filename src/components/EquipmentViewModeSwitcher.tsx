@@ -1,5 +1,5 @@
 import React from 'react';
-import { Table2, LayoutGrid, Images } from 'lucide-react';
+import { Table2, LayoutGrid, Images, Activity, Building2 } from 'lucide-react';
 import { EquipmentViewMode } from '../types';
 
 interface EquipmentViewModeSwitcherProps {
@@ -27,6 +27,20 @@ export const EquipmentViewModeSwitcher: React.FC<EquipmentViewModeSwitcherProps>
       label: '紧凑表格',
       icon: Table2,
       tooltip: '紧凑表格模式：高密度行列网格，适合全量字段排查与批量高通量数据审核',
+    },
+    {
+      id: 'group_by_status',
+      label: '状态聚合卡片',
+      icon: Activity,
+      tooltip: '状态聚合卡片模式：按设备运行状态（正常/维护/待修/报废）动态聚合并分栏展示卡片组',
+      badge: '聚合',
+    },
+    {
+      id: 'group_by_department',
+      label: '科室聚合卡片',
+      icon: Building2,
+      tooltip: '科室聚合卡片模式：按所属临床科室动态聚类并分栏展示各科在册设备卡片组',
+      badge: '聚合',
     },
     {
       id: 'card_grid',

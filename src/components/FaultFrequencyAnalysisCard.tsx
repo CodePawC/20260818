@@ -628,13 +628,13 @@ export const FaultFrequencyAnalysisCard: React.FC<FaultFrequencyAnalysisCardProp
     const { active, payload, label } = props || {};
     if (active && Array.isArray(payload) && payload.length > 0) {
       return (
-        <div className="bg-slate-900/95 text-white p-2.5 rounded-lg shadow-lg border border-slate-700 text-xs z-50 pointer-events-none min-w-[170px]">
+        <div className="bg-slate-900/95 text-white p-2.5 rounded-lg shadow-xl border border-slate-700 text-xs z-50 pointer-events-none select-none min-w-[170px]">
           <div className="font-bold border-b border-slate-700 pb-1 mb-1 text-slate-200 flex items-center justify-between">
             <span>{label}</span>
-            <span className="text-[10px] text-indigo-300 font-normal">对比分析</span>
+            <span className="text-xs text-indigo-300 font-normal">对比分析</span>
           </div>
           {payload.map((item: any, idx: number) => (
-            <div key={item?.name || `compare-tip-${idx}`} className="flex items-center justify-between gap-3 text-[11px] font-mono py-0.5">
+            <div key={item?.name || `compare-tip-${idx}`} className="flex items-center justify-between gap-3 text-xs font-mono py-0.5">
               <div className="flex items-center gap-1.5 truncate">
                 <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: item?.color || '#3b82f6' }} />
                 <span className="text-slate-300 truncate">{item?.name}:</span>
@@ -645,7 +645,7 @@ export const FaultFrequencyAnalysisCard: React.FC<FaultFrequencyAnalysisCardProp
             </div>
           ))}
           {payload.length >= 2 && payload[0] && payload[1] && (
-            <div className="mt-1 pt-1 border-t border-slate-800 text-[10px] text-slate-400 flex justify-between font-mono">
+            <div className="mt-1 pt-1 border-t border-slate-800 text-xs text-slate-400 flex justify-between font-mono">
               <span>差值 (A-B):</span>
               <span className={Number(payload[0].value) - Number(payload[1].value) > 0 ? 'text-rose-400 font-bold' : 'text-emerald-400 font-bold'}>
                 {(Number(payload[0].value) - Number(payload[1].value)).toFixed(1)}
@@ -664,12 +664,12 @@ export const FaultFrequencyAnalysisCard: React.FC<FaultFrequencyAnalysisCardProp
     if (active && Array.isArray(payload) && payload.length > 0 && payload[0]?.payload) {
       const data = payload[0].payload;
       return (
-        <div className="bg-slate-900/95 text-white p-2.5 rounded-lg shadow-lg border border-slate-700 text-xs z-50 pointer-events-none min-w-[150px]">
+        <div className="bg-slate-900/95 text-white p-2.5 rounded-lg shadow-xl border border-slate-700 text-xs z-50 pointer-events-none select-none min-w-[150px]">
           <div className="flex items-center gap-1.5 pb-1 mb-1 border-b border-slate-700 font-bold">
             <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: data.color || '#3b82f6' }} />
             <span>{data.name}</span>
           </div>
-          <div className="space-y-1 font-mono text-[11px]">
+          <div className="space-y-1 font-mono text-xs">
             <div className="flex justify-between text-slate-300">
               <span>故障报修:</span>
               <strong className="text-rose-400">{data.repairCount ?? 0} 次</strong>
@@ -698,12 +698,12 @@ export const FaultFrequencyAnalysisCard: React.FC<FaultFrequencyAnalysisCardProp
     const { active, payload, label } = props || {};
     if (active && Array.isArray(payload) && payload.length > 0) {
       return (
-        <div className="bg-slate-900/95 text-white p-2.5 rounded-lg shadow-lg border border-slate-700 text-xs z-50 pointer-events-none">
+        <div className="bg-slate-900/95 text-white p-2.5 rounded-lg shadow-xl border border-slate-700 text-xs z-50 pointer-events-none select-none">
           <div className="font-bold border-b border-slate-700 pb-1 mb-1 text-slate-200">
             {label}
           </div>
           {payload.map((item: any, idx: number) => (
-            <div key={item?.name || `line-tip-${idx}`} className="flex items-center justify-between gap-3 text-[11px] font-mono py-0.5">
+            <div key={item?.name || `line-tip-${idx}`} className="flex items-center justify-between gap-3 text-xs font-mono py-0.5">
               <span style={{ color: item?.color || '#ef4444' }}>{item?.name}:</span>
               <span className="font-bold text-white">
                 {item?.value} {item?.unit || ''}
@@ -735,7 +735,7 @@ export const FaultFrequencyAnalysisCard: React.FC<FaultFrequencyAnalysisCardProp
                   ? '设备故障率横向对比分析' 
                   : (isDeptView && userDept ? `【${userDept}】故障频率与易损分布` : '设备故障频率统计')}
               </h3>
-              <span className={`px-1.5 py-0.2 rounded text-[10px] font-mono font-bold ${
+              <span className={`px-1.5 py-0.2 rounded text-xs font-mono font-bold ${
                 isCompareMode 
                   ? 'bg-indigo-600 text-white' 
                   : 'bg-rose-50 text-rose-700 border border-rose-200'
@@ -743,7 +743,7 @@ export const FaultFrequencyAnalysisCard: React.FC<FaultFrequencyAnalysisCardProp
                 {isCompareMode ? '对比分析模式' : (dimension === 'category' ? '品类分析' : '科室排行')}
               </span>
             </div>
-            <p className="text-[10px] text-slate-400 mt-0.5 hidden sm:block">
+            <p className="text-xs text-slate-400 mt-0.5 hidden sm:block">
               {isCompareMode 
                 ? `横向对比不同${compareDimension === 'department' ? '临床科室' : '设备品类'}的故障发生率与维保质控效能`
                 : (dimension === 'category' 
@@ -759,7 +759,7 @@ export const FaultFrequencyAnalysisCard: React.FC<FaultFrequencyAnalysisCardProp
             <>
               {/* 🌟 核心需求：维度切换下拉选择器 */}
               <div className="flex items-center gap-1 bg-slate-50 border border-slate-200/90 rounded-lg px-2 py-1 shadow-2xs">
-                <span className="text-[10px] text-slate-500 font-medium shrink-0 flex items-center gap-0.5">
+                <span className="text-xs text-slate-500 font-medium shrink-0 flex items-center gap-0.5">
                   {dimension === 'category' ? <Layers className="w-3 h-3 text-indigo-500" /> : <Building2 className="w-3 h-3 text-emerald-600" />}
                   <span className="hidden sm:inline">统计维度:</span>
                 </span>
@@ -779,7 +779,7 @@ export const FaultFrequencyAnalysisCard: React.FC<FaultFrequencyAnalysisCardProp
               </div>
 
               {/* 时间周期筛选器 */}
-              <div className="flex items-center bg-slate-100 p-0.5 rounded-lg text-[10px] font-medium text-slate-600">
+              <div className="flex items-center bg-slate-100 p-0.5 rounded-lg text-xs font-medium text-slate-600">
                 <button
                   type="button"
                   onClick={() => setTimeRange('30d')}
@@ -815,7 +815,7 @@ export const FaultFrequencyAnalysisCard: React.FC<FaultFrequencyAnalysisCardProp
               </div>
 
               {/* 饼图 / 折线图 模式切换开关 */}
-              <div className="flex items-center bg-slate-100 p-0.5 rounded-lg text-[10px] font-medium text-slate-600">
+              <div className="flex items-center bg-slate-100 p-0.5 rounded-lg text-xs font-medium text-slate-600">
                 <button
                   type="button"
                   onClick={() => setChartMode('pie')}
@@ -885,19 +885,19 @@ export const FaultFrequencyAnalysisCard: React.FC<FaultFrequencyAnalysisCardProp
           {/* 核心统计指标条 */}
       <div className="grid grid-cols-3 gap-2 py-2 border-b border-slate-100 bg-slate-50/50 rounded-lg px-2 mt-1.5 shrink-0">
         <div className="text-center">
-          <div className="text-[10px] text-slate-500 font-medium">统计报修总量</div>
+          <div className="text-xs text-slate-500 font-medium">统计报修总量</div>
           <div className="text-sm font-bold font-mono text-rose-600 mt-0.5">
-            {analysisData.totalRepairsAll} <span className="text-[10px] text-slate-400 font-normal">次</span>
+            {analysisData.totalRepairsAll} <span className="text-xs text-slate-400 font-normal">次</span>
           </div>
         </div>
         <div className="text-center border-x border-slate-200/80">
-          <div className="text-[10px] text-slate-500 font-medium">综合故障率</div>
+          <div className="text-xs text-slate-500 font-medium">综合故障率</div>
           <div className="text-sm font-bold font-mono text-amber-600 mt-0.5">
             {analysisData.averageRepairRate}%
           </div>
         </div>
         <div className="text-center">
-          <div className="text-[10px] text-slate-500 font-medium">
+          <div className="text-xs text-slate-500 font-medium">
             {dimension === 'category' ? '高发故障品类' : '故障率居首科室'}
           </div>
           <div className="text-xs font-bold text-slate-800 mt-0.5 truncate" title={analysisData.topItemName}>
@@ -919,7 +919,10 @@ export const FaultFrequencyAnalysisCard: React.FC<FaultFrequencyAnalysisCardProp
             <div className="w-1/2 h-full relative">
               <ResponsiveContainer width="100%" height="100%">
                 <RechartsPieChart>
-                  <Tooltip content={<CustomPieTooltip />} />
+                  <Tooltip 
+                    content={<CustomPieTooltip />} 
+                    wrapperStyle={{ pointerEvents: 'none', zIndex: 100 }} 
+                  />
                   <Pie
                     data={analysisData.groupData}
                     dataKey="repairCount"
@@ -945,7 +948,7 @@ export const FaultFrequencyAnalysisCard: React.FC<FaultFrequencyAnalysisCardProp
               </ResponsiveContainer>
               {/* 环心微标 */}
               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                <span className="text-[9px] text-slate-400 font-medium">总报修</span>
+                <span className="text-xs text-slate-400 font-medium">总报修</span>
                 <span className="text-xs font-bold font-mono text-slate-800">{analysisData.totalRepairsAll}</span>
               </div>
             </div>
@@ -964,16 +967,16 @@ export const FaultFrequencyAnalysisCard: React.FC<FaultFrequencyAnalysisCardProp
                   >
                     <div className="flex items-center gap-1.5 truncate">
                       {dimension === 'department' && (
-                        <span className="text-[9px] font-mono font-bold text-slate-400 w-3 shrink-0">
+                        <span className="text-xs font-mono font-bold text-slate-400 w-3 shrink-0">
                           {idx + 1}.
                         </span>
                       )}
                       <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
-                      <span className="truncate text-[11px]" title={item.name}>{item.name}</span>
+                      <span className="truncate text-xs" title={item.name}>{item.name}</span>
                     </div>
                     <div className="text-right font-mono shrink-0 ml-1">
-                      <span className="text-[11px] font-bold text-slate-800">{item.repairRate}%</span>
-                      <span className="text-[10px] text-slate-400 ml-1">({item.repairCount}次)</span>
+                      <span className="text-xs font-bold text-slate-800">{item.repairRate}%</span>
+                      <span className="text-xs text-slate-400 ml-1">({item.repairCount}次)</span>
                     </div>
                   </div>
                 );
@@ -1002,7 +1005,10 @@ export const FaultFrequencyAnalysisCard: React.FC<FaultFrequencyAnalysisCardProp
                   axisLine={false}
                   unit="%"
                 />
-                <Tooltip content={<CustomLineTooltip />} />
+                <Tooltip 
+                  content={<CustomLineTooltip />} 
+                  wrapperStyle={{ pointerEvents: 'none', zIndex: 100 }} 
+                />
                 <Legend 
                   wrapperStyle={{ fontSize: '10px', paddingTop: '4px' }}
                   iconSize={8}
@@ -1045,7 +1051,7 @@ export const FaultFrequencyAnalysisCard: React.FC<FaultFrequencyAnalysisCardProp
               <button
                 type="button"
                 onClick={() => setSelectedItemName(null)}
-                className="text-[9px] text-slate-400 hover:text-slate-600 underline cursor-pointer ml-1"
+                className="text-xs text-slate-400 hover:text-slate-600 underline cursor-pointer ml-1"
               >
                 (清除过滤)
               </button>
@@ -1055,7 +1061,7 @@ export const FaultFrequencyAnalysisCard: React.FC<FaultFrequencyAnalysisCardProp
             <button
               type="button"
               onClick={() => onNavigateToTab('repairs')}
-              className="text-[10px] text-indigo-600 hover:text-indigo-800 font-semibold flex items-center gap-0.5 cursor-pointer"
+              className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold flex items-center gap-0.5 cursor-pointer"
             >
               <span>查看全部报修</span>
               <ChevronRight className="w-3 h-3" />
@@ -1065,7 +1071,7 @@ export const FaultFrequencyAnalysisCard: React.FC<FaultFrequencyAnalysisCardProp
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
           {topFaultyEquipment.length === 0 ? (
-            <div className="col-span-2 text-center text-[11px] text-slate-400 py-1.5">
+            <div className="col-span-2 text-center text-xs text-slate-400 py-1.5">
               暂无多发故障设备，设备运行平稳
             </div>
           ) : (
@@ -1078,14 +1084,14 @@ export const FaultFrequencyAnalysisCard: React.FC<FaultFrequencyAnalysisCardProp
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1">
-                    <span className="font-bold text-slate-800 text-[11px] truncate group-hover:text-rose-600">
+                    <span className="font-bold text-slate-800 text-xs truncate group-hover:text-rose-600">
                       {device.name}
                     </span>
-                    <span className="text-[9px] text-slate-400 font-mono shrink-0">
+                    <span className="text-xs text-slate-400 font-mono shrink-0">
                       {device.model}
                     </span>
                   </div>
-                  <div className="text-[10px] text-slate-500 truncate mt-0.5">
+                  <div className="text-xs text-slate-500 truncate mt-0.5">
                     <span className="text-slate-700 font-medium">{device.department}</span>
                     <span className="mx-1">·</span>
                     <span className="text-rose-600 font-mono font-semibold">报修 {repairsInPeriod}次</span>
@@ -1094,7 +1100,7 @@ export const FaultFrequencyAnalysisCard: React.FC<FaultFrequencyAnalysisCardProp
                 </div>
 
                 <div className="shrink-0 flex items-center">
-                  <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold ${
+                  <span className={`px-1.5 py-0.2 rounded text-xs font-bold ${
                     device.status === '故障待修' 
                       ? 'bg-rose-100 text-rose-700 border border-rose-200' 
                       : 'bg-slate-200/80 text-slate-600'

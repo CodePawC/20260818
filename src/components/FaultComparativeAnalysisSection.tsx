@@ -78,7 +78,7 @@ const CustomCompareTooltip = (props: any) => {
     const unit = itemA?.payload?.unit || '%';
 
     return (
-      <div className="bg-slate-900/95 backdrop-blur-xs text-white text-xs p-2.5 rounded-lg shadow-xl border border-slate-700 min-w-[200px]">
+      <div className="bg-slate-900/95 backdrop-blur-xs text-white text-xs p-2.5 rounded-lg shadow-xl border border-slate-700 min-w-[200px] pointer-events-none select-none z-50">
         <div className="font-bold text-slate-200 border-b border-slate-700 pb-1 mb-2 flex items-center justify-between">
           <span>{label}</span>
           <span className="text-[10px] text-slate-400 font-mono">横向对比</span>
@@ -338,7 +338,10 @@ export const FaultComparativeAnalysisSection: React.FC<FaultComparativeAnalysisS
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
               <XAxis dataKey="metric" tick={{ fontSize: 11, fill: '#475569' }} axisLine={{ stroke: '#e2e8f0' }} tickLine={false} />
               <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
-              <Tooltip content={<CustomCompareTooltip />} />
+              <Tooltip 
+                content={<CustomCompareTooltip />} 
+                wrapperStyle={{ pointerEvents: 'none', zIndex: 100 }} 
+              />
               <Legend 
                 wrapperStyle={{ fontSize: 11, paddingTop: 2 }} 
                 iconSize={8}
@@ -353,7 +356,10 @@ export const FaultComparativeAnalysisSection: React.FC<FaultComparativeAnalysisS
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
               <XAxis dataKey="period" tick={{ fontSize: 11, fill: '#475569' }} axisLine={{ stroke: '#e2e8f0' }} tickLine={false} />
               <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} unit="%" axisLine={false} tickLine={false} />
-              <Tooltip content={<CustomCompareTooltip />} />
+              <Tooltip 
+                content={<CustomCompareTooltip />} 
+                wrapperStyle={{ pointerEvents: 'none', zIndex: 100 }} 
+              />
               <Legend 
                 wrapperStyle={{ fontSize: 11, paddingTop: 2 }} 
                 iconSize={8}

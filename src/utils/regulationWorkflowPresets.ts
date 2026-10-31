@@ -4,6 +4,87 @@ import { RegulationWorkflow, RegulationCategory, RegulationFormTemplate } from '
  * 医院各业务分类的标准默认流转 SOP 流程规范与节点库
  */
 export const CATEGORY_DEFAULT_WORKFLOWS: Record<RegulationCategory, RegulationWorkflow> = {
+  '管理体制': {
+    workflowCode: 'SOP-FLOW-JG-00',
+    workflowName: '医学装备主管领导、医疗设备科与使用科室三级管理协同运转规程',
+    purpose: '遵循统一领导、归口管理、分级负责、权责一致原则，构建覆盖主管院领导、医疗设备科、使用科室的三级管理架构与全生命周期协同联动机制。',
+    triggerCondition: '医院年度装备预算统筹、全院医疗装备日常调配、重大质量安全监督与科室三级责任制履责考核。',
+    cycleTime: '日常运转常态化长效执行；年度统筹与三甲质控复审定期开展',
+    emergencyException: '突发公共卫生事件或全院重大抢险任务，由分管院领导直接调度启动一级绿色响应通道。',
+    steps: [
+      {
+        stepNumber: 1,
+        title: '第一级：分管院领导统筹规划与预算决策',
+        role: '分管院领导 / 院党委会',
+        slaTime: '年度规划期及重大事项审议期',
+        actionDescription: '直接领导全院医学装备管理工作，配备适宜专业技术人员；负责全院资金预算管理、统筹安排与大型医用设备配置许可审定。',
+        deliverables: '《医学装备年度资金预算规划案》、《大型医用设备配置决策纪要》',
+        riskControlPoint: '严格履行“三重一大”集体决策程序，严禁无预算盲目申购。',
+        systemAction: {
+          label: '查看全院资产总览',
+          tab: 'dashboard',
+          tooltip: '查看全院医学装备整体分布与资产运行概况'
+        }
+      },
+      {
+        stepNumber: 2,
+        title: '第二级：医疗设备科全过程专业归口管理',
+        role: '医疗设备科 / 医工专业技术团队',
+        slaTime: '全生命周期常态化介入',
+        actionDescription: '负责规划调研、立项论证、申报审批、招标采购、合同签订、安装验收、维护保养、培训使用、报废鉴定；负责医用监护与计量仪器强制检定、大中型设备合理应用分析与医用材料供应。',
+        deliverables: '《医疗设备立项论证报告》、《全生命周期质量控制程序文件》、《计量检定台账》',
+        riskControlPoint: '必须执行医用监护与计量仪器100%强制检定；不合格设备坚决淘汰并停用。',
+        systemAction: {
+          label: '查验全院台账在册',
+          tab: 'ledger',
+          tooltip: '查验全生命周期台账与技术档案'
+        }
+      },
+      {
+        stepNumber: 3,
+        title: '第三级：使用部门专人管理与责任落实',
+        role: '使用科室主任 / 护士长 / 专兼职设备管理员',
+        slaTime: '临床日常每班次及仪器使用前后',
+        actionDescription: '建立科室使用管理责任制，指定专人负责日常管理，严格使用登记与认真检查保养，确保随时开机可用、账卡物相符；严格按照操作规程操作，初次使用必须在熟悉人员指导下进行。',
+        deliverables: '《科室医学装备使用登记簿》、《科室专兼职管理员岗位备案表》',
+        riskControlPoint: '严禁带故障或超负荷运转；初次操作未掌握前严禁接电开机；非批准不准随意挪动。',
+        systemAction: {
+          label: '查看临床报修台账',
+          tab: 'repairs',
+          tooltip: '查看临床使用科室设备日常使用与故障报修状态'
+        }
+      },
+      {
+        stepNumber: 4,
+        title: '二级与三级联动协同：验收、调剂与故障应急',
+        role: '医疗设备科工程师 / 使用科室责任人',
+        slaTime: '新机到货7日内 / 故障报修15分钟响应',
+        actionDescription: '新进仪器由设备科与使用科室共同负责验收调试与操作培训，考核合格后方可独立使用；科研仪器科室间调剂需经主任批准并办妥交接；仪器异常立即停机并报设备科维修，按规定填报申请。',
+        deliverables: '《安装调试与培训验收单》、《仪器科室调剂借还单》、《大型设备维修维护申请报告》',
+        riskControlPoint: '未经检查破损失灵部件不得任意丢弃；违章操作致损严肃追责赔偿。',
+        systemAction: {
+          label: '查看维修闭环',
+          tab: 'repair_closed_loop',
+          tooltip: '查看二级医工与三级使用科室协同闭环'
+        }
+      },
+      {
+        stepNumber: 5,
+        title: '三级闭环考核：完好率核查与三甲追溯评估',
+        role: '分管院领导 / 医工质控组 / 使用科室',
+        slaTime: '月度抽查、季度考核、年度复审',
+        actionDescription: '对全院医疗设备完好状态、急救设备待命状态、检测系统定期校准情况开展监督检查考核，实施质量问题纠正和预防措施并跟踪验证，形成三级管理持续改进机制。',
+        deliverables: '《三级管理质量考核评价通报》、《三甲评审医学装备自查整改报告》',
+        riskControlPoint: '急救设备必须100%完好满足临床救治需要；考核结果纳入科室绩效评价。',
+        systemAction: {
+          label: '查验质控指标',
+          tab: 'analytics',
+          tooltip: '查看全院设备完好率与质控达标报表'
+        }
+      }
+    ]
+  },
+
   '采购准入': {
     workflowCode: 'SOP-FLOW-CG-01',
     workflowName: '医疗装备配置准入、需求论证与招标采购全流程SOP',
@@ -735,6 +816,11 @@ export const CATEGORY_DEFAULT_WORKFLOWS: Record<RegulationCategory, RegulationWo
  * 标准配套表单模版预设
  */
 export const STANDARD_FORM_TEMPLATES: Record<RegulationCategory, RegulationFormTemplate[]> = {
+  '管理体制': [
+    { id: 'f-gl-01', formCode: 'FORM-GL-01', name: '五莲县人民医院医学装备三级管理体系责任人备案表', description: '主管院领导、医疗设备科专兼职工程师及各临床医技科室设备安全员岗位职责备案', department: '主管院领导/医疗设备科/各使用科室', isMandatoryForAccreditation: true },
+    { id: 'f-gl-02', formCode: 'FORM-GL-02', name: '临床科室医疗仪器设备使用责任登记簿与交接核查表', description: '逐级责任制落实、专人管理、开机自检与账卡物相符现场核验', department: '各临床医技科室', isMandatoryForAccreditation: true },
+    { id: 'f-gl-03', formCode: 'FORM-GL-03', name: '大型仪器设备科室间调剂使用交接与技术状态验收单', description: '科研及专用仪器跨科室调剂审批、精度状态确认与归还验收凭证', department: '出借科室/借用科室/医疗设备科', isMandatoryForAccreditation: true }
+  ],
   '采购准入': [
     { id: 'f-cg-01', formCode: 'FORM-CG-01', name: '五莲县人民医院医疗设备年度购置可行性技术论证表', description: '包含临床指征、预期人次测算、耗材成本及ROI投资回收期测算', department: '临床科室/医工保障中心', isMandatoryForAccreditation: true },
     { id: 'f-cg-02', formCode: 'FORM-CG-02', name: '大型医用设备机房环境与水电气屏蔽勘查预审单', description: '机房承重、防辐射铅防护、双回路电源及冷热通风现场勘查记录', department: '医工科/总务动力科', isMandatoryForAccreditation: true },
@@ -791,8 +877,87 @@ export function getRegulationWorkflow(regulation: {
   code: string;
   workflow?: RegulationWorkflow;
 }): RegulationWorkflow {
-  if (regulation.workflow && regulation.workflow.steps?.length > 0) {
-    return regulation.workflow;
+  if (regulation.code === 'YXGC-ZD-2026-19' || regulation.title.includes('工单唯一标识编码规范与公文追溯管理制度') || regulation.title.includes('维保工单唯一标识编码')) {
+    return {
+      workflowCode: 'SOP-FLOW-WO-CODE-01',
+      workflowName: '医疗设备维保工单复合唯一标识编码与公文追溯流转SOP',
+      purpose: '确立全院统一的工单复合编码（WO-[前缀]-[年份]-[4位流水]）与纸质公文存根双轨映射机制，硬化临床报修、医工维修与财务请示“三单勾稽”闭环核算。',
+      triggerCondition: '临床报修生成、精密器械返厂、高额备件置换、预防性保养或年度零修工单受理瞬间自动触发。',
+      cycleTime: '现场抢修 2-4 小时；返厂大修 3-7 工作日；公文归档流转 1-3 工作日',
+      emergencyException: '夜间重症急救开辟绿色通道现场先修，工单系统2小时内补录自动按序分配标准全码。',
+      steps: [
+        {
+          stepNumber: 1,
+          title: '首发报修触达与系统自动复合编码赋码',
+          role: '临床报修人 / 接单工程师 / 系统算法',
+          slaTime: '即刻 (系统毫秒级生成)',
+          actionDescription: '根据报修入口类型（草料二维码扫码、台账一键报修或工程师开单），系统自动解析业务类别并生成全局唯一的标准复合全码（如 WO-FAC-2026-0546、WO-REP-2026-0001），同时生成纸质存根序号 NO. 546。',
+          deliverables: '《医疗设备首发报修工单登记（含WO-UID规范全码）》',
+          riskControlPoint: '严禁脱离系统线下口头送修；同一故障严禁跨系统重复报送生成碰撞工单。',
+          systemAction: {
+            label: '前往临床报修查看',
+            tab: 'repairs',
+            tooltip: '进入报修跟踪台账查看编码落地'
+          }
+        },
+        {
+          stepNumber: 2,
+          title: '现场诊断与“双轨编码”技术初审核定',
+          role: '医工保障中心 主管工程师',
+          slaTime: '15分钟响应，2小时内出具方案',
+          actionDescription: '工程师核验设备物理状态与主数据在位信息，确认维修路径（现场修复 REP / 返厂大修 FAC / 备件置换 PRT）。如需外协返厂或申购高额配件，在系统中确认前缀属性并锁定该工单主键。',
+          deliverables: '《医学装备故障初诊与技术处置方案单》',
+          riskControlPoint: '前缀属性一经锁定不可随意篡改；严禁以常规零修拆分逃避返厂大修审批。',
+          systemAction: {
+            label: '查看返厂工作流',
+            tab: 'factory_repair_workflow',
+            tooltip: '进入精密器械返厂大修闭环流转'
+          }
+        },
+        {
+          stepNumber: 3,
+          title: '《请示报告单》公文自动生成与阶梯会签审批',
+          role: '医工科长 / 院办 / 分管院长 / 财务科',
+          slaTime: '常规1-2个工作日；急件半个工作日',
+          actionDescription: '基于工单全码自动拉取设备主数据、维修预算与外修厂家资质，生成标准红头版式的《五莲县人民医院请示报告单》，左上角同步印制规范全码与存根号。由科室、医工、院办、院领导完成线上线下双轨签署。',
+          deliverables: '《五莲县人民医院请示报告单（红头归档件）》',
+          riskControlPoint: '严格履行审批权限阶梯；请示报告单文号必须与工单全码保持 1:1 双向锁定。',
+          systemAction: {
+            label: '前往审批中心',
+            tab: 'approvals',
+            tooltip: '查验审批留痕记录'
+          }
+        },
+        {
+          stepNumber: 4,
+          title: '实施维修与“三单勾稽”（报修单+维修单+请示单）验证',
+          role: '工程师 / 供应商工程师 / 临床护士长',
+          slaTime: '按合同约定时限实施完毕',
+          actionDescription: '完成现场修复或原厂返厂修复验收，上传更换旧件照片、序列号及厂家检测合格报告。临床科室核实设备各项指标恢复正常，完成电子签署确认。',
+          deliverables: '《医疗设备临床终末验收评价单》、《旧件回收销毁凭证》',
+          riskControlPoint: '高价值旧件必须 100% 回收封存核销；临床未签署终末验收严禁办结工单。',
+          systemAction: {
+            label: '前往维修闭环',
+            tab: 'repair_closed_loop',
+            tooltip: '进入全流程维修闭环监管'
+          }
+        },
+        {
+          stepNumber: 5,
+          title: '业财融合对账、公文档案归档与终身追溯入库',
+          role: '财务科结算专员 / 医工中心档案员 / 审计科',
+          slaTime: '验收合格后3个工作日内',
+          actionDescription: '财务科与审计科依据工单全码进行“三单勾稽”比对（临床报修单、医工维修单、财务请示结算单），比对一致后拨付维修款。纸质公文按年度流水号装订排架入库，系统底层电子数据永久留存，建立设备终身质量追溯档案。',
+          deliverables: '《公立医院维保公文纸质实体装订卷宗》、《财务勾稽记账凭证》',
+          riskControlPoint: '无合规工单码或三单勾稽不符的一律拒付；大型医用设备维保档案终生永久留存。',
+          systemAction: {
+            label: '查看设备技术档案',
+            tab: 'ledger',
+            tooltip: '查验该设备一机一档终身维保轨迹'
+          }
+        }
+      ]
+    };
   }
 
   const categoryPreset = CATEGORY_DEFAULT_WORKFLOWS[regulation.category];

@@ -56,12 +56,15 @@ import {
   getStoredRegulations, 
   saveStoredRegulations, 
   resetStoredRegulations, 
-  incrementRegulationReadCount 
+  incrementRegulationReadCount,
+  REGULATION_CATEGORY_ORDER,
+  sortRegulationsByLifecycle
 } from '../utils/regulationData';
 import { AddRegulationModal } from './AddRegulationModal';
 import { UploadRegulationPdfModal } from './UploadRegulationPdfModal';
 import { RegulationWorkflowViewer } from './RegulationWorkflowViewer';
 import { RegulationCompilationPdfModal } from './RegulationCompilationPdfModal';
+import { ThreeTierManagementArchitectureDiagram } from './ThreeTierManagementArchitectureDiagram';
 import { getRegulationWorkflow } from '../utils/regulationWorkflowPresets';
 import { ActiveTab, AuthUser } from '../types';
 import { getUserDepartment, isHeadNurse, isDepartmentRestricted, canUploadRegulationPdf } from '../utils/authUtils';
@@ -71,10 +74,12 @@ interface RegulationsViewProps {
   departments?: { name: string }[];
   onNavigateToTab?: (tab: ActiveTab) => void;
   showToast?: (message: string) => void;
+  initialSelectedId?: string;
 }
 
 const CATEGORIES: { id: string; label: string; icon?: string }[] = [
   { id: 'all', label: '全部制度' },
+  { id: '管理体制', label: '管理体制' },
   { id: '法规依据', label: '法规依据' },
   { id: '采购准入', label: '采购准入' },
   { id: '运行维保', label: '运行维保' },
@@ -107,7 +112,8 @@ export const RegulationsView: React.FC<RegulationsViewProps> = ({
   currentUser,
   departments = [],
   onNavigateToTab,
-  showToast
+  showToast,
+  initialSelectedId
 }) => {
   const userDept = getUserDepartment(currentUser);
   const isNurse = isHeadNurse(currentUser) || isDepartmentRestricted(currentUser);
@@ -119,9 +125,24 @@ export const RegulationsView: React.FC<RegulationsViewProps> = ({
 
   // 选中当前阅读查看的制度
   const [selectedRegulationId, setSelectedRegulationId] = useState<string>(() => {
+    if (initialSelectedId) return initialSelectedId;
     const list = getStoredRegulations();
     return list[0]?.id || '';
   });
+
+  useEffect(() => {
+    if (initialSelectedId) {
+      setSelectedRegulationId(initialSelectedId);
+      // 清空限制性过滤确保直接可见
+      setFilters(prev => ({
+        ...prev,
+        keyword: '',
+        category: 'all',
+        level: 'all',
+        status: 'all'
+      }));
+    }
+  }, [initialSelectedId]);
 
   // 视图模式: 'split' (左右分屏精读) vs 'grid' (卡片平铺)
   const [viewMode, setViewMode] = useState<'split' | 'grid'>('split');
@@ -134,7 +155,7 @@ export const RegulationsView: React.FC<RegulationsViewProps> = ({
     status: 'all',
     department: 'all',
     mustReadAccreditationOnly: false,
-    sortBy: 'effectiveDate',
+    sortBy: 'lifecycle',
     sortOrder: 'desc'
   });
 
@@ -220,28 +241,44 @@ export const RegulationsView: React.FC<RegulationsViewProps> = ({
 
   // 过滤后的制度列表
   const filteredRegulations = useMemo(() => {
-    const kw = filters.keyword.trim().toLowerCase();
+    const rawKw = filters.keyword.trim();
+    const kw = rawKw.toLowerCase();
+    const normKw = rawKw.replace(/[《》\s\-—_〔〕[\]]/g, '').toLowerCase();
 
     return regulations.filter(item => {
-      // 1. 关键词全文检索
+      // 1. 关键词全文检索 (支持去掉《》、空格、连字符等全匹配与模糊匹配)
       if (kw) {
-        const inTitle = item.title.toLowerCase().includes(kw);
+        const normTitle = item.title.replace(/[《》\s\-—_]/g, '').toLowerCase();
+        const normShort = (item.shortTitle || '').replace(/[《》\s\-—_]/g, '').toLowerCase();
+        const normDocNo = item.docNumber.replace(/[《》\s\-—_〔〕[\]]/g, '').toLowerCase();
+
+        const inTitle = item.title.toLowerCase().includes(kw) || normTitle.includes(normKw);
+        const inShortTitle = (item.shortTitle || '').toLowerCase().includes(kw) || (normShort && normShort.includes(normKw));
         const inCode = item.code.toLowerCase().includes(kw);
-        const inDocNo = item.docNumber.toLowerCase().includes(kw);
-        const inKeywords = item.keywords.some(k => k.toLowerCase().includes(kw));
+        const inDocNo = item.docNumber.toLowerCase().includes(kw) || normDocNo.includes(normKw);
+        const inKeywords = item.keywords.some(k => 
+          k.toLowerCase().includes(kw) || 
+          k.replace(/[《》\s\-—_]/g, '').toLowerCase().includes(normKw)
+        );
         const inDept = item.applicableDepartments.some(d => d.toLowerCase().includes(kw));
         const inSignatory = item.signatory.toLowerCase().includes(kw);
-        const inSummary = item.summary.toLowerCase().includes(kw);
+        const inSummary = item.summary.toLowerCase().includes(kw) || item.summary.replace(/[《》\s\-—_]/g, '').toLowerCase().includes(normKw);
         const inContent = item.content.toLowerCase().includes(kw);
 
-        if (!inTitle && !inCode && !inDocNo && !inKeywords && !inDept && !inSignatory && !inSummary && !inContent) {
+        if (!inTitle && !inShortTitle && !inCode && !inDocNo && !inKeywords && !inDept && !inSignatory && !inSummary && !inContent) {
           return false;
         }
       }
 
-      // 2. 业务分类过滤
-      if (filters.category !== 'all' && item.category !== filters.category) {
-        return false;
+      // 2. 业务分类过滤 (REG-019 维保工单唯一标识编码与公文追溯管理制度 兼具 运行维保 和 维修闭环 属性)
+      if (filters.category !== 'all') {
+        if (item.id === 'REG-019') {
+          if (filters.category !== '运行维保' && filters.category !== '维修闭环') {
+            return false;
+          }
+        } else if (item.category !== filters.category) {
+          return false;
+        }
       }
 
       // 3. 制度层级过滤
@@ -274,6 +311,16 @@ export const RegulationsView: React.FC<RegulationsViewProps> = ({
 
       return true;
     }).sort((a, b) => {
+      if (filters.sortBy === 'lifecycle') {
+        const catIdxA = REGULATION_CATEGORY_ORDER.indexOf(a.category);
+        const catIdxB = REGULATION_CATEGORY_ORDER.indexOf(b.category);
+        const safeCatA = catIdxA >= 0 ? catIdxA : 999;
+        const safeCatB = catIdxB >= 0 ? catIdxB : 999;
+        if (safeCatA !== safeCatB) {
+          return safeCatA - safeCatB;
+        }
+        return a.code.localeCompare(b.code, 'zh-CN', { numeric: true });
+      }
       if (filters.sortBy === 'readCount') {
         return (b.readCount || 0) - (a.readCount || 0);
       }
@@ -771,6 +818,7 @@ export const RegulationsView: React.FC<RegulationsViewProps> = ({
               onChange={e => setFilters(prev => ({ ...prev, sortBy: e.target.value as any }))}
               className="px-2.5 py-1.5 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-2xs"
             >
+              <option value="lifecycle">按体系总体到局部排序</option>
               <option value="effectiveDate">按施行时间排序</option>
               <option value="readCount">按查阅热度排序</option>
               <option value="code">按编号顺序排序</option>
@@ -836,6 +884,79 @@ export const RegulationsView: React.FC<RegulationsViewProps> = ({
               </button>
             );
           })}
+        </div>
+
+        {/* 核心制度与规范速达快捷条 */}
+        <div className="flex items-center gap-2 overflow-x-auto mt-2.5 pt-2 border-t border-slate-100 no-scrollbar text-[11px]">
+          <span className="text-slate-500 font-semibold shrink-0 flex items-center gap-1">
+            <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+            <span>重点制度快速直达:</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedRegulationId('REG-018');
+              setFilters(prev => ({ ...prev, keyword: '', category: 'all', level: 'all', status: 'all' }));
+              triggerToast('已切换至《医学装备三级管理制度》');
+            }}
+            className={`px-2.5 py-1 rounded-lg font-bold shrink-0 transition-all border flex items-center gap-1.5 cursor-pointer shadow-2xs ${
+              selectedRegulationId === 'REG-018'
+                ? 'bg-blue-600 text-white border-blue-700 ring-2 ring-blue-300'
+                : 'bg-gradient-to-r from-indigo-50 to-blue-50 hover:bg-blue-100 text-indigo-950 border-indigo-200'
+            }`}
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-indigo-600" />
+            <span>🏛️ 医学装备三级管理制度 (院医工发〔2026〕18号)</span>
+            <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1 py-0.2 rounded font-mono font-bold">三级管理核心</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedRegulationId('REG-019');
+              setFilters(prev => ({ ...prev, keyword: '', category: 'all', level: 'all', status: 'all' }));
+              triggerToast('已切换至《医疗设备维保工单唯一标识编码规范与公文追溯管理制度》');
+            }}
+            className={`px-2.5 py-1 rounded-lg font-bold shrink-0 transition-all border flex items-center gap-1.5 cursor-pointer shadow-2xs ${
+              selectedRegulationId === 'REG-019'
+                ? 'bg-blue-600 text-white border-blue-700 ring-2 ring-blue-300'
+                : 'bg-gradient-to-r from-blue-50 to-indigo-50 hover:bg-blue-100 text-blue-900 border-blue-200'
+            }`}
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-blue-600" />
+            <span>📜 医疗设备维保工单唯一标识编码规范与公文追溯管理制度 (院医工发〔2026〕19号)</span>
+            <span className="text-[10px] bg-red-100 text-red-700 px-1 py-0.2 rounded font-mono font-bold">WO-UID规范</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedRegulationId('REG-006');
+              setFilters(prev => ({ ...prev, keyword: '', category: 'all', level: 'all', status: 'all' }));
+            }}
+            className={`px-2 py-0.5 rounded-lg font-medium shrink-0 transition-all border flex items-center gap-1 cursor-pointer ${
+              selectedRegulationId === 'REG-006'
+                ? 'bg-blue-600 text-white border-blue-700'
+                : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
+            }`}
+          >
+            <span>临床报修与闭环管理制度</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedRegulationId('REG-008');
+              setFilters(prev => ({ ...prev, keyword: '', category: 'all', level: 'all', status: 'all' }));
+            }}
+            className={`px-2 py-0.5 rounded-lg font-medium shrink-0 transition-all border flex items-center gap-1 cursor-pointer ${
+              selectedRegulationId === 'REG-008'
+                ? 'bg-blue-600 text-white border-blue-700'
+                : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
+            }`}
+          >
+            <span>超期服役安全性评估与准用备案制度</span>
+          </button>
         </div>
       </div>
 
@@ -1144,6 +1265,7 @@ export const RegulationsView: React.FC<RegulationsViewProps> = ({
                     <div className="p-3 sm:p-6 lg:p-8 min-w-0 w-full">
                       <RegulationWorkflowViewer
                         regulation={currentRegulation}
+                        currentUser={currentUser}
                         onNavigateToTab={onNavigateToTab}
                         showToast={triggerToast}
                       />
@@ -1236,14 +1358,34 @@ export const RegulationsView: React.FC<RegulationsViewProps> = ({
                           </p>
                         </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setReaderActiveTab('workflow')}
-                        className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 transition-colors shadow-2xs shrink-0 self-start sm:self-auto"
-                      >
-                        <span>查看配套流程图</span>
-                        <ArrowRight className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto flex-wrap">
+                        {currentRegulation.id === 'REG-018' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const elem = document.getElementById('three-tier-architecture-section');
+                              if (elem) {
+                                elem.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                              } else {
+                                const chap = document.getElementById('chap-4');
+                                if (chap) chap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                              }
+                            }}
+                            className="px-3.5 py-1.5 bg-gradient-to-r from-indigo-700 to-blue-800 hover:from-indigo-800 hover:to-blue-900 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+                          >
+                            <Building2 className="w-3.5 h-3.5 text-indigo-300" />
+                            <span>三级管理架构交互图</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setReaderActiveTab('workflow')}
+                          className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 transition-colors shadow-2xs"
+                        >
+                          <span>查看配套流程图</span>
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
 
                     {/* 适用科室范围 */}
@@ -1405,6 +1547,10 @@ export const RegulationsView: React.FC<RegulationsViewProps> = ({
                       const trimmed = block.trim();
                       if (trimmed.startsWith('### ')) {
                         const headingText = trimmed.replace('### ', '');
+                        const isArchitectureChapter = 
+                          headingText.includes('医学装备三级管理架构图') || 
+                          headingText.includes('三级管理架构图') ||
+                          (currentRegulation.id === 'REG-018' && (headingText.includes('架构图') || idx === 4));
                         return (
                           <div 
                             key={idx} 
@@ -1415,6 +1561,15 @@ export const RegulationsView: React.FC<RegulationsViewProps> = ({
                               <span className="w-1.5 h-4 bg-blue-600 rounded-full inline-block" />
                               <span>{renderHighlightedText(headingText, filters.keyword)}</span>
                             </h3>
+                            {isArchitectureChapter && (
+                              <div id="three-tier-architecture-section" className="mt-5 mb-2">
+                                <ThreeTierManagementArchitectureDiagram
+                                  onNavigateToTab={onNavigateToTab}
+                                  showToast={triggerToast}
+                                  currentUser={currentUser}
+                                />
+                              </div>
+                            )}
                           </div>
                         );
                       }

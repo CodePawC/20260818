@@ -36,6 +36,7 @@ interface AddRegulationModalProps {
 }
 
 const CATEGORY_OPTIONS: { value: RegulationCategory; label: string }[] = [
+  { value: '管理体制', label: '管理体制与三级架构' },
   { value: '法规依据', label: '法规依据与上级准则' },
   { value: '采购准入', label: '配置论证与采购准入' },
   { value: '运行维保', label: '日常运行与预防性维护(PM)' },

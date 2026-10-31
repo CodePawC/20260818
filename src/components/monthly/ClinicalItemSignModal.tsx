@@ -67,12 +67,11 @@ export const ClinicalItemSignModal: React.FC<ClinicalItemSignModalProps> = ({
   onClose,
   onSaveSignature
 }) => {
-  if (!isOpen || !item) return null;
-
   // 1. 关联主数据科室判定
-  const initialDeptInput = (item.department === '手术室' || item.department === '手术科' || item.department === '麻醉科' || item.department === '手术麻醉科')
+  const itemDept = item?.department || '';
+  const initialDeptInput = (itemDept === '手术室' || itemDept === '手术科' || itemDept === '麻醉科' || itemDept === '手术麻醉科')
     ? '麻醉手术科'
-    : item.department;
+    : itemDept;
   const initialMasterDept = resolveMasterDepartment(initialDeptInput, departments);
   const [selectedDeptName, setSelectedDeptName] = useState<string>(
     initialMasterDept ? initialMasterDept.name : initialDeptInput
@@ -83,10 +82,10 @@ export const ClinicalItemSignModal: React.FC<ClinicalItemSignModalProps> = ({
   const currentMasterDept = resolveMasterDepartment(selectedDeptName, departments) || initialMasterDept;
 
   // 2. 签署人与科室身份
-  const sanitizedSignee = (item.clinicalSignee || '').replace(/手术室/g, '麻醉手术科');
+  const sanitizedSignee = ((item?.clinicalSignee) || '').replace(/手术室/g, '麻醉手术科');
   const defaultSignerName = sanitizedSignee || (currentMasterDept?.defaultManager ? `${currentMasterDept.defaultManager} (护士长)` : `${selectedDeptName} 护士长`);
   const [signerName, setSignerName] = useState<string>(defaultSignerName);
-  const sanitizedRole = (item.clinicalSignerRole || '').replace(/手术室/g, '麻醉手术科');
+  const sanitizedRole = ((item?.clinicalSignerRole) || '').replace(/手术室/g, '麻醉手术科');
   const [signerRole, setSignerRole] = useState<string>(
     sanitizedRole || (selectedDeptName.includes('室') ? '科室技师长 / 护士长' : '科室护士长 / 设备安全员')
   );
@@ -95,22 +94,22 @@ export const ClinicalItemSignModal: React.FC<ClinicalItemSignModalProps> = ({
   const [checkAppearance, setCheckAppearance] = useState<boolean>(true);
   const [checkFunctionality, setCheckFunctionality] = useState<boolean>(true);
   const [checkSafety, setCheckSafety] = useState<boolean>(true);
-  const [oldPartsConfirmed, setOldPartsConfirmed] = useState<boolean>(item.oldPartsReturned ?? true);
+  const [oldPartsConfirmed, setOldPartsConfirmed] = useState<boolean>(item?.oldPartsReturned ?? true);
 
   // 4. 满意度与反馈
-  const [rating, setRating] = useState<number>(item.clinicalRating || 5);
+  const [rating, setRating] = useState<number>(item?.clinicalRating || 5);
   const [feedback, setFeedback] = useState<string>(
-    item.clinicalFeedback || '现场开机试运转平稳，参数达到临床诊疗要求，电气绝缘自检正常，旧件已退库，准予恢复临床使用。'
+    item?.clinicalFeedback || '现场开机试运转平稳，参数达到临床诊疗要求，电气绝缘自检正常，旧件已退库，准予恢复临床使用。'
   );
 
   // 5. 手写签名板 (Canvas)
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState<boolean>(false);
-  const [hasDrawn, setHasDrawn] = useState<boolean>(!!item.clinicalSignatureData);
-  const [signatureDataUrl, setSignatureDataUrl] = useState<string>(item.clinicalSignatureData || '');
+  const [hasDrawn, setHasDrawn] = useState<boolean>(!!item?.clinicalSignatureData);
+  const [signatureDataUrl, setSignatureDataUrl] = useState<string>(item?.clinicalSignatureData || '');
 
   // 6. CA存证号与时间戳
-  const defaultCertId = item.clinicalSignatureCertId || `CASIG-${(item.serviceDate || '20260901').replace(/[/.-]/g, '')}-${item.id.replace(/[^a-zA-Z0-9]/g, '').slice(-4) || '8921'}`;
+  const defaultCertId = item?.clinicalSignatureCertId || `CASIG-${(item?.serviceDate || '20260901').replace(/[/.-]/g, '')}-${item ? item.id.replace(/[^a-zA-Z0-9]/g, '').slice(-4) : '8921'}`;
   const [certId] = useState<string>(defaultCertId);
   const [activeTab, setActiveTab] = useState<'SIGN' | 'PREVIEW'>('SIGN');
 
@@ -125,7 +124,7 @@ export const ClinicalItemSignModal: React.FC<ClinicalItemSignModalProps> = ({
 
   // Canvas 初始化与绘制逻辑
   useEffect(() => {
-    if (activeTab !== 'SIGN') return;
+    if (!isOpen || !item || activeTab !== 'SIGN') return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -310,6 +309,8 @@ export const ClinicalItemSignModal: React.FC<ClinicalItemSignModalProps> = ({
     (d.code && d.code.toLowerCase().includes(deptSearchQuery.toLowerCase())) ||
     (d.buildingName && d.buildingName.includes(deptSearchQuery))
   );
+
+  if (!isOpen || !item) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-900/60 backdrop-blur-xs overflow-y-auto animate-fadeIn">

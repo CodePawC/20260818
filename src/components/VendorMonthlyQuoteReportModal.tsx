@@ -45,8 +45,6 @@ export const VendorMonthlyQuoteReportModal: React.FC<VendorMonthlyQuoteReportMod
   departments: passedDepartments,
   isOpen = true,
 }) => {
-  if (!isOpen) return null;
-
   // 当前年份与月份状态
   const [selectedYear, setSelectedYear] = useState<string>(() => {
     if (initialYear) return initialYear;
@@ -326,6 +324,8 @@ export const VendorMonthlyQuoteReportModal: React.FC<VendorMonthlyQuoteReportMod
   };
 
   const months = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'];
+
+  if (!isOpen) return null;
 
   return (
     <div id="vendor-monthly-quote-report-modal" className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5">

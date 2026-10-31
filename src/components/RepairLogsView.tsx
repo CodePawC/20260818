@@ -30,7 +30,9 @@ import {
   UserCheck,
   Phone,
   FileText,
-  QrCode
+  QrCode,
+  Eye,
+  BookOpen
 } from 'lucide-react';
 import { CaoliaoRepairIntegrationOverview } from './CaoliaoRepairIntegrationOverview';
 import { ActiveTab } from '../types';
@@ -45,9 +47,13 @@ import { DEFAULT_DEPARTMENTS, resolveMasterDepartment, matchesDepartment } from 
 import { RepairTrackingTimeline } from './RepairTrackingTimeline';
 import { getVendorCollaborationOrders, saveVendorCollaborationOrders } from '../utils/vendorCollaborationData';
 import { VendorCollaborationRepairTracker } from './VendorCollaborationRepairTracker';
+import { RepairReportDetailModal, RepairReportDetailData } from './RepairReportDetailModal';
+import { standardizeRepairRecordCode, StandardWorkOrderInfo } from '../utils/workOrderCodeGenerator';
 
 export interface UnifiedRepairLog {
-  id: string;
+  id: string; // 规范全码工单号，例如 WO-REP-2026-0546
+  originalRawId?: string; // 原始系统流水号或旧版编号（便于历史审计追溯）
+  standardWorkOrderCode: string; // 标准规范全码
   category: 'standard' | 'framework_sporadic'; // standard = 设备台账故障报修, framework_sporadic = 零修工单 (月度框架零星维保)
   equipmentId?: string;
   equipmentName: string;
@@ -85,6 +91,7 @@ interface RepairLogsViewProps {
   onOpenStatusChange?: (device: MedicalEquipment) => void;
   onViewEquipmentDetails?: (item: any, initialTab?: string) => void;
   onNavigateToTab?: (tab: ActiveTab) => void;
+  onOpenRegulation?: (regulationId: string) => void;
 }
 
 export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
@@ -96,9 +103,10 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
   onNavigateToApprovals,
   onOpenStatusChange,
   onViewEquipmentDetails,
-  onNavigateToTab
+  onNavigateToTab,
+  onOpenRegulation
 }) => {
-  const [showCaoliaoOverview, setShowCaoliaoOverview] = useState<boolean>(true);
+  const [showCaoliaoOverview, setShowCaoliaoOverview] = useState<boolean>(false);
   const [searchKey, setSearchKey] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<'ALL' | '处理中' | '待配件' | '已完成' | 'PENDING_SIGN'>('ALL');
   const [selectedCategory, setSelectedCategory] = useState<'ALL' | 'framework_sporadic' | 'standard'>('ALL');
@@ -115,6 +123,9 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
   // 科室报修跟踪详情模态框
   const [selectedTrackingRecord, setSelectedTrackingRecord] = useState<UnifiedRepairLog | null>(null);
   const [showFullVendorCollabModal, setShowFullVendorCollabModal] = useState<boolean>(false);
+
+  // 现场报修单据完整详情模态框
+  const [selectedRepairDetail, setSelectedRepairDetail] = useState<RepairReportDetailData | null>(null);
 
   // 加载月度零修框架结算批次数据
   const [frameworkBatches, setFrameworkBatches] = useState<MonthlyFrameworkBatch[]>(() => {
@@ -156,11 +167,15 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
     const list: UnifiedRepairLog[] = [];
 
     // 1. 提取院内设备故障报修与常规维保台账 (standard)
-    equipmentList.forEach(e => {
-      (e.repairRecords || []).forEach(r => {
+    equipmentList.forEach((e, eqIdx) => {
+      (e.repairRecords || []).forEach((r, rIdx) => {
         const isSporadic = r.repairType?.includes('零修') || r.repairType?.includes('零星');
+        const standardInfo = standardizeRepairRecordCode(r.id, r.repairType, r.equipmentName || e.name, (eqIdx * 10) + rIdx + 1);
+        const standardCode = standardInfo.fullCode;
         list.push({
-          id: r.id,
+          id: standardCode,
+          originalRawId: r.id,
+          standardWorkOrderCode: standardCode,
           category: isSporadic ? 'framework_sporadic' : 'standard',
           equipmentId: e.id,
           equipmentName: r.equipmentName || e.name,
@@ -182,8 +197,8 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
     });
 
     // 2. 提取全院月度框架零星维保明细 (framework_sporadic - 零修单)
-    frameworkBatches.forEach(batch => {
-      (batch.items || []).forEach(item => {
+    frameworkBatches.forEach((batch, bIdx) => {
+      (batch.items || []).forEach((item, itemIdx) => {
         // 尝试匹配科室同类在册设备以支持一键联动 AI 诊断与设备档案
         const matchedEquip = equipmentList.find(e => 
           matchesDepartment(e.department, item.department) &&
@@ -201,9 +216,13 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
 
         const isSigned = item.clinicalReceiveStatus === 'SIGNED';
         const isCompleted = item.status === 'COMPLETED' || isSigned;
+        const standardInfo = standardizeRepairRecordCode(item.workOrderNo || item.id, '零修', item.itemName, (bIdx * 100) + itemIdx + 1);
+        const standardCode = standardInfo.fullCode;
 
         list.push({
-          id: item.id,
+          id: standardCode,
+          originalRawId: item.workOrderNo || item.id,
+          standardWorkOrderCode: standardCode,
           category: 'framework_sporadic',
           equipmentId: matchedEquip?.id,
           equipmentName: item.itemName,
@@ -438,16 +457,18 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
         return false;
       }
 
-      // 6. 关键词检索（支持编号、设备名、零修项目、SN、工程师、处理方案、科室、签名人）
+      // 6. 关键词检索（支持规范工单全码、原系统流水号、设备名、零修项目、SN、工程师、处理方案、科室、签名人）
       const query = searchKey.trim().toLowerCase();
       if (query) {
         const matchesQuery = 
+          (r.id || '').toLowerCase().includes(query) ||
+          (r.standardWorkOrderCode || '').toLowerCase().includes(query) ||
+          (r.originalRawId || '').toLowerCase().includes(query) ||
           (r.equipmentName || '').toLowerCase().includes(query) ||
           (r.equipmentSn || '').toLowerCase().includes(query) ||
           (r.faultDescription || '').toLowerCase().includes(query) ||
           (r.technician || '').toLowerCase().includes(query) ||
           (r.repairType || '').toLowerCase().includes(query) ||
-          (r.id || '').toLowerCase().includes(query) ||
           (r.partsReplaced || '').toLowerCase().includes(query) ||
           (r.department || '').toLowerCase().includes(query) ||
           (r.clinicalSignee || '').toLowerCase().includes(query) ||
@@ -660,6 +681,42 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
           />
         </div>
       )}
+
+      {/* 制度性文件指引通知横幅（院医工发〔2026〕15号） */}
+      <div className="mx-3 my-1.5 px-3.5 py-2 bg-gradient-to-r from-blue-50/90 via-indigo-50/70 to-slate-50 border border-blue-200/90 rounded-lg text-xs flex flex-wrap items-center justify-between gap-2 shadow-2xs">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-6 h-6 rounded-md bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+            <BookOpen className="w-3.5 h-3.5" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold text-blue-950">
+                工单编码制度依据：院医工发〔2026〕19号《医疗设备维保工单唯一标识编码规范与公文追溯管理制度》
+              </span>
+              <span className="px-1.5 py-0.2 bg-blue-100 text-blue-800 text-[10.5px] rounded font-medium">已列入院级管理制度库</span>
+            </div>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              全院各类型临床报修、精密器械返厂、高额配件置换、月度零修工单严格执行统一复合全码规范（如 WO-REP-2026-0546、WO-FAC-2026-0546、WO-SPO-2026-0128），实行请示报告公文与现场维保一码贯通。
+            </p>
+          </div>
+        </div>
+        {(onOpenRegulation || onNavigateToTab) && (
+          <button
+            type="button"
+            onClick={() => {
+              if (onOpenRegulation) {
+                onOpenRegulation('REG-019');
+              } else if (onNavigateToTab) {
+                onNavigateToTab('regulations');
+              }
+            }}
+            className="px-2.5 py-1 bg-white hover:bg-blue-50 text-blue-700 hover:text-blue-800 border border-blue-300 font-semibold rounded text-[11px] transition flex items-center gap-1 cursor-pointer shadow-2xs shrink-0"
+          >
+            <span>查阅正式制度规章 (院医工发〔2026〕19号)</span>
+            <ArrowUpRight className="w-3 h-3" />
+          </button>
+        )}
+      </div>
 
       {/* Filter Ribbon */}
       <div className="p-2.5 bg-slate-50/80 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs flex-none">
@@ -921,18 +978,60 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
                   <tr key={record.id} className="hover:bg-slate-50/80 transition group">
                     {/* 工单编号 */}
                     <td className="px-3.5 py-2.5 font-mono font-medium text-slate-600 whitespace-nowrap">
-                      <div className="flex items-center gap-1">
-                        <span className={`px-1.5 py-0.5 rounded text-[11px] font-mono ${
-                          isSporadic 
-                            ? 'bg-amber-50 text-amber-900 border border-amber-200 font-bold'
-                            : 'bg-slate-100 text-slate-700'
-                        }`}>
-                          {record.id}
-                        </span>
-                        {isSporadic && (
-                          <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-100 text-amber-800 shrink-0">
-                            ⚡ 零修
-                          </span>
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedRepairDetail({
+                                id: record.standardWorkOrderCode || record.id,
+                                workOrderId: record.standardWorkOrderCode || record.id,
+                                recordNo: record.originalRawId || record.id,
+                                recordId: record.originalRawId || record.id,
+                                timestamp: record.faultDate,
+                                faultDate: record.faultDate,
+                                equipmentId: record.equipmentId,
+                                equipmentName: record.equipmentName,
+                                equipmentSn: record.equipmentSn,
+                                model: record.equipmentModel || record.equipmentOriginal?.model,
+                                category: record.equipmentOriginal?.category,
+                                department: record.department,
+                                location: record.equipmentOriginal?.location,
+                                reporterName: (record as any).reporterName || (isSporadic ? record.frameworkItem?.clinicalSignee : '临床医护'),
+                                reporterPhone: (record as any).reporterPhone,
+                                faultDescription: record.faultDescription,
+                                photoUrl: (record as any).photoUrl,
+                                videoUrl: (record as any).videoUrl,
+                                urgency: (record.repairType?.includes('急') || record.faultDescription?.includes('紧急') || record.faultDescription?.includes('报警')) ? 'P1' : 'P2',
+                                source: (record as any).source || 'caoliao',
+                                status: record.status,
+                                technician: record.technician,
+                                cost: record.cost,
+                                partsReplaced: record.partsReplaced,
+                                resolution: record.resolution
+                              });
+                            }}
+                            className={`px-2 py-0.5 rounded text-[11px] font-mono cursor-pointer hover:underline flex items-center gap-1 font-bold ${
+                              isSporadic 
+                                ? 'bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300'
+                                : 'bg-slate-100 hover:bg-blue-50 text-blue-900 hover:text-blue-700 border border-slate-300'
+                            }`}
+                            title={`查看单据详情：${record.standardWorkOrderCode}${record.originalRawId ? ` (原单号: ${record.originalRawId})` : ''}`}
+                          >
+                            <span>{record.standardWorkOrderCode || record.id}</span>
+                            <Eye className="w-2.5 h-2.5 opacity-60" />
+                          </button>
+                          {isSporadic && (
+                            <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-100 text-amber-800 shrink-0">
+                              ⚡ 零修
+                            </span>
+                          )}
+                        </div>
+                        {record.originalRawId && record.originalRawId !== record.standardWorkOrderCode && (
+                          <div className="flex items-center gap-1 text-[10px] text-slate-400 pl-0.5">
+                            <span className="text-slate-400">原码:</span>
+                            <span className="font-mono text-slate-500">{record.originalRawId}</span>
+                          </div>
                         )}
                       </div>
                     </td>
@@ -1090,6 +1189,45 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
                     {/* 操作 */}
                     <td className="px-3.5 py-2.5 text-right whitespace-nowrap">
                       <div className="inline-flex items-center gap-1 justify-end">
+                        {/* 现场报修单据完整详情 */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedRepairDetail({
+                              id: record.id,
+                              workOrderId: record.id,
+                              recordNo: (record as any).recordNo || `REC-${record.id}`,
+                              recordId: (record as any).recordNo || record.id,
+                              timestamp: record.faultDate,
+                              faultDate: record.faultDate,
+                              equipmentId: record.equipmentId,
+                              equipmentName: record.equipmentName,
+                              equipmentSn: record.equipmentSn,
+                              model: record.equipmentModel || record.equipmentOriginal?.model,
+                              category: record.equipmentOriginal?.category,
+                              department: record.department,
+                              location: record.equipmentOriginal?.location,
+                              reporterName: (record as any).reporterName || (isSporadic ? record.frameworkItem?.clinicalSignee : '临床医护'),
+                              reporterPhone: (record as any).reporterPhone,
+                              faultDescription: record.faultDescription,
+                              photoUrl: (record as any).photoUrl,
+                              videoUrl: (record as any).videoUrl,
+                              urgency: (record.repairType?.includes('急') || record.faultDescription?.includes('紧急') || record.faultDescription?.includes('报警')) ? 'P1' : 'P2',
+                              source: (record as any).source || 'caoliao',
+                              status: record.status,
+                              technician: record.technician,
+                              cost: record.cost,
+                              partsReplaced: record.partsReplaced,
+                              resolution: record.resolution
+                            });
+                          }}
+                          className="px-2 py-0.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded text-[11px] font-bold transition cursor-pointer flex items-center gap-1 shadow-2xs"
+                          title="查看完整报修详情、临床诉求、现场图片与排查建议"
+                        >
+                          <FileText className="w-3 h-3 text-blue-600" />
+                          <span>报修详情</span>
+                        </button>
+
                         {/* 报修跟踪与外协协同流程 (5阶段横向时序) */}
                         <button
                           type="button"
@@ -1525,6 +1663,22 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* 现场报修单据完整详情模态框 */}
+      <RepairReportDetailModal
+        isOpen={!!selectedRepairDetail}
+        onClose={() => setSelectedRepairDetail(null)}
+        data={selectedRepairDetail}
+        equipmentList={equipmentList}
+        onFastDispatch={(device) => {
+          setSelectedRepairDetail(null);
+          onOpenRepairModal?.(device);
+        }}
+        onViewEquipmentDetail={(device) => {
+          setSelectedRepairDetail(null);
+          onViewEquipmentDetails?.(device);
+        }}
+      />
     </div>
   );
 };

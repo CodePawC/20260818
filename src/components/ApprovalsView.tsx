@@ -22,6 +22,7 @@ import {
   Check,
   X,
   FileCheck,
+  FileCheck2,
   Send,
   Eye,
   Paperclip,
@@ -63,6 +64,7 @@ interface ApprovalsViewProps {
   currentUser: AuthUser | null;
   initialCreateData?: Partial<ApprovalApplication> | null;
   onClearInitialCreateData?: () => void;
+  onOpenOfficialReport?: (approval: ApprovalApplication) => void;
 }
 
 export const ApprovalsView: React.FC<ApprovalsViewProps> = ({
@@ -75,7 +77,8 @@ export const ApprovalsView: React.FC<ApprovalsViewProps> = ({
   onOpenOverdueFilingModal,
   currentUser,
   initialCreateData,
-  onClearInitialCreateData
+  onClearInitialCreateData,
+  onOpenOfficialReport
 }) => {
   // 当前用户的科室识别与护士长专属属性
   const userDept = getUserDepartment(currentUser);
@@ -1042,6 +1045,19 @@ export const ApprovalsView: React.FC<ApprovalsViewProps> = ({
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
+                              onOpenOfficialReport?.(app);
+                            }}
+                            className="px-2.5 py-1 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-md text-xs font-semibold transition flex items-center gap-1 shadow-2xs cursor-pointer whitespace-nowrap"
+                            title="生成与打印《五莲县人民医院请示报告单》"
+                          >
+                            <FileCheck2 className="w-3.5 h-3.5 text-red-600" />
+                            <span>打印请示单</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
                               setSelectedAppDetail(app);
                               setActiveDetailViewTab('document');
                             }}
@@ -1221,6 +1237,16 @@ export const ApprovalsView: React.FC<ApprovalsViewProps> = ({
               </div>
 
               <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => onOpenOfficialReport?.(selectedAppDetail)}
+                  className="px-2.5 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-bold transition flex items-center gap-1 cursor-pointer shadow-xs"
+                  title="开具或打印《五莲县人民医院请示报告单》"
+                >
+                  <FileCheck2 className="w-3.5 h-3.5" />
+                  <span>开具院请示单</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => window.print()}

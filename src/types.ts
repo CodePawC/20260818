@@ -19,7 +19,7 @@ export interface MetrologyCatalogueItem {
   notes?: string;
 }
 
-export type ActiveTab = 'welcome' | 'ledger' | 'dashboard' | 'maintenance' | 'repairs' | 'dispatch' | 'parts_inventory' | 'adverse_events' | 'emergency_reserve' | 'tracking' | 'analytics' | 'roi' | 'ai' | 'partners' | 'master_data' | 'approvals' | 'mobile_inspection' | 'vendor_collaboration' | 'factory_repair_workflow' | 'repair_closed_loop' | 'regulations' | 'project_concluding' | 'ai_config' | 'database_backup' | 'system_update' | 'system_ops' | 'caoliao_integration' | 'caoliao_sync_settings';
+export type ActiveTab = 'welcome' | 'ledger' | 'dashboard' | 'maintenance' | 'repairs' | 'dispatch' | 'parts_inventory' | 'adverse_events' | 'emergency_reserve' | 'tracking' | 'analytics' | 'roi' | 'drg_cost_audit' | 'ai' | 'partners' | 'master_data' | 'approvals' | 'mobile_inspection' | 'vendor_collaboration' | 'factory_repair_workflow' | 'repair_closed_loop' | 'regulations' | 'project_concluding' | 'ai_config' | 'database_backup' | 'system_update' | 'system_ops' | 'caoliao_integration' | 'caoliao_sync_settings' | 'caoliao_webhook_logs' | 'mobile_collaboration' | 'accreditation_quality' | 'scrap_workflow' | 'smart_management' | 'digital_twin_sandbox';
 
 // ==================== 草料二维码接口对接与分类映射规则配置 ====================
 export interface CaoliaoCategoryMappingRule {
@@ -508,8 +508,8 @@ export interface MedicalEquipment {
   statusLogs: StatusLog[];
 }
 
-// 台账列表视图模式：紧凑表格 | 大卡片平铺 | 设备照片流
-export type EquipmentViewMode = 'compact_table' | 'card_grid' | 'photo_stream';
+// 台账列表视图模式：紧凑表格 | 状态聚合卡片组 | 科室聚合卡片组 | 大卡片平铺 | 设备照片流
+export type EquipmentViewMode = 'compact_table' | 'group_by_status' | 'group_by_department' | 'card_grid' | 'photo_stream';
 
 // 视图模式专属快速筛选关键字
 export type EquipmentQuickFilterKey =
@@ -803,5 +803,94 @@ export interface EquipmentAcceptanceDossier {
   // 9. 多联凭单与印鉴防伪
   securityVerificationCode: string; // 防伪验证码 (如 WL-SEC-883921)
   officialStampText: string; // 医院公章文字 (五莲县人民医院 医学装备科 设备验收入库专用章)
+}
+
+// ==================== 国家卫健委医院智慧管理分级评估与HIS/PACS互联模型 ====================
+export type SmartManagementLevel = 1 | 2 | 3 | 4 | 5;
+
+export interface SmartManagementRatingMetric {
+  id: string; // e.g. "SM-L4-01"
+  level: SmartManagementLevel; // 1-5级
+  category: string; // e.g. "资产账目电子化", "跨部门业务协同", "物联网与移动核验", "HIS/PACS集成闭环", "大数据AI运营"
+  name: string; // 指标名称
+  standardRequirement: string; // 国家评估标准详细要求
+  maxScore: number; // 满分
+  actualScore: number; // 当前自评分数
+  status: 'fully_compliant' | 'partially_compliant' | 'gap_pending'; // 完全达标 | 部分达标 | 存在差距
+  evidenceProof: string; // 支撑材料/系统功能点依据
+  gapDescription?: string; // 差距原因诊断
+  rectificationPlan?: string; // 针对性整改举措
+}
+
+export interface HisPacsLinkageRecord {
+  id: string; // e.g. "LINK-20261029-001"
+  timestamp: string; // 检查/计费发生时间
+  equipmentId: string; // 设备台账编码 (如 EQ-002)
+  equipmentName: string; // 设备名称 (如 西门子64排螺旋CT)
+  department: string; // 使用科室 (如 医学影像科)
+  modality: 'CT' | 'MR' | 'DR' | 'US' | 'DSA' | 'MONITOR' | 'VENTILATOR'; // 检查模态
+  patientStudyUid: string; // PACS 检查号 (如 ST-20261029-8831)
+  examItemName: string; // 检查项目 (如 胸部低剂量平扫CT)
+  hisChargeCode: string; // HIS 收费项目编码 (如 310201011)
+  hisBilledFee: number; // 计费金额 (元)
+  pacsExposureCount: number; // PACS曝光/扫描序列数
+  actualWorkMinutes: number; // 实际曝光/采集时长 (分钟)
+  reconciliationStatus: 'matched' | 'unbilled_exposure' | 'billed_without_pacs' | 'overload_duration'; // 匹配正常 | 漏计费(有扫描无收费) | 异常计费(无影像记录) | 超负荷曝光
+  discrepancyAmount: number; // 差异损益金额 (元)
+  remark?: string; // 稽核说明
+}
+
+// ==================== 全院设备数字孪生与应急调配空间沙盘模型 ====================
+export interface DigitalTwinDeviceItem {
+  id: string; // 设备ID
+  name: string;
+  model: string;
+  category: string;
+  department: string;
+  buildingCode: string; // HQ-EMERGENCY, HQ-INPATIENT-1, HQ-INPATIENT-2, HQ-MEDTECH
+  buildingName: string;
+  floor: number; // 楼层 (如 1, 2, 3, 4, 5)
+  roomName: string; // 房间名称 (如 "急诊重症监护室床旁1", "放射科CT 1号机房")
+  status: 'running' | 'idle' | 'maintenance' | 'borrowed' | 'faulty';
+  loadRatio: number; // 当前负荷率 0 - 100%
+  isLifeSupport: boolean; // 是否急救生命支持机具
+  batteryLevel?: number; // 移动便携机具电量
+  lastMovedTime?: string; // 最近位置变动时间
+  sn: string;
+}
+
+export interface FloorSpaceTopology {
+  buildingCode: string;
+  buildingName: string;
+  floor: number;
+  floorLabel: string; // e.g. "急诊综合楼 3F - 重症医学科(ICU)"
+  departments: string[];
+  totalEquipmentCount: number;
+  runningCount: number;
+  faultyCount: number;
+  idleCount: number;
+  devices: DigitalTwinDeviceItem[];
+}
+
+export interface EmergencySimulationScenario {
+  id: string; // e.g. "SIM-RESP-01"
+  title: string; // e.g. "突发批量群体呼吸窘迫·全院生命支持呼吸机紧急征集"
+  triggerCause: string; // 触发诱因
+  targetNeedCount: number; // 目标需求机具数
+  deviceCategory: string; // 需求机具类别 (如 "急救转运呼吸机 / 有创呼吸机")
+  targetDepartment: string; // 接收目标科室 (如 "急诊综合科 / 重症医学科")
+  estimatedMobilizeMinutes: number; // 预计调集动员耗时
+  sourceDepartments: {
+    department: string;
+    availableCount: number;
+    proposedBorrowCount: number;
+    safetyReserveRemaining: number; // 借出后本科室留存安全底线
+  }[];
+  steps: {
+    phase: string;
+    description: string;
+    actionType: 'check' | 'dispatch' | 'transfer' | 'signoff';
+    durationMin: number;
+  }[];
 }
 

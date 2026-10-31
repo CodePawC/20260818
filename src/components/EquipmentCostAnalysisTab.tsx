@@ -35,6 +35,7 @@ import { EngineeringWorkOrder } from '../types/dispatchTypes';
 import { ApprovalApplication } from '../types/approvalTypes';
 import { estimateRealisticPurchasePrice, calculateEquipmentFinancialProfile } from '../utils/roiEconomicsUtils';
 import { PeerEquipmentCostComparison } from './PeerEquipmentCostComparison';
+import { MaintenanceForecastTrendChart } from './MaintenanceForecastTrendChart';
 
 export interface EquipmentCostAnalysisTabProps {
   equipment: MedicalEquipment;
@@ -754,7 +755,10 @@ export const EquipmentCostAnalysisTab: React.FC<EquipmentCostAnalysisTabProps> =
                 }}
               />
 
-              <Tooltip content={<CustomChartTooltip />} />
+              <Tooltip 
+                content={<CustomChartTooltip />} 
+                wrapperStyle={{ pointerEvents: 'none', zIndex: 100 }} 
+              />
 
               <Legend
                 wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }}
@@ -883,6 +887,14 @@ export const EquipmentCostAnalysisTab: React.FC<EquipmentCostAnalysisTabProps> =
         currentEquipmentPurchasePrice={purchasePrice}
         allEquipment={allEquipment}
         deviceWorkOrders={deviceWorkOrders}
+      />
+
+      {/* ===================== 3.5 未来12个月维保费用预测 (OLS 线性回归趋势与预算建议) ===================== */}
+      <MaintenanceForecastTrendChart
+        equipment={equipment}
+        deviceWorkOrders={deviceWorkOrders}
+        onNavigateToApprovals={onNavigateToApprovals}
+        onNavigateToRoi={onNavigateToRoi}
       />
 
       {/* ===================== 4. 报废/更新技术鉴定与经济学决策评估卡 ===================== */}

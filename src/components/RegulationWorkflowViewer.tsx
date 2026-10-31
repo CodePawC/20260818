@@ -31,16 +31,19 @@ import {
   getRegulationWorkflow, 
   getRegulationFormTemplates 
 } from '../utils/regulationWorkflowPresets';
-import { ActiveTab } from '../types';
+import { ActiveTab, AuthUser } from '../types';
+import { ThreeTierManagementArchitectureDiagram } from './ThreeTierManagementArchitectureDiagram';
 
 interface RegulationWorkflowViewerProps {
   regulation: RegulationItem;
+  currentUser?: AuthUser;
   onNavigateToTab?: (tab: ActiveTab) => void;
   showToast?: (message: string) => void;
 }
 
 export const RegulationWorkflowViewer: React.FC<RegulationWorkflowViewerProps> = ({
   regulation,
+  currentUser,
   onNavigateToTab,
   showToast
 }) => {
@@ -48,8 +51,11 @@ export const RegulationWorkflowViewer: React.FC<RegulationWorkflowViewerProps> =
   const workflow = getRegulationWorkflow(regulation);
   const formTemplates = regulation.formTemplates || getRegulationFormTemplates(regulation.category);
 
-  // 视图子模式: 'stepper' (图形流转图) | 'matrix' (责任矩阵详表) | 'forms' (配套表单库)
-  const [subTab, setSubTab] = useState<'stepper' | 'matrix' | 'forms'>('stepper');
+  // 视图子模式: 'architecture' (三级管理架构图) | 'stepper' (图形流转图) | 'matrix' (责任矩阵详表) | 'forms' (配套表单库)
+  const isArchitectureAvailable = regulation.id === 'REG-018' || regulation.category === '管理体制' || workflow.workflowCode === 'SOP-FLOW-JG-00';
+  const [subTab, setSubTab] = useState<'architecture' | 'stepper' | 'matrix' | 'forms'>(
+    isArchitectureAvailable ? 'architecture' : 'stepper'
+  );
 
   // 当前高亮选中的流程节点 (用于侧边卡片高亮或聚焦)
   const [selectedStepNumber, setSelectedStepNumber] = useState<number>(1);
@@ -208,10 +214,24 @@ export const RegulationWorkflowViewer: React.FC<RegulationWorkflowViewerProps> =
       <div className="bg-white rounded-xl border border-slate-200 p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
         {/* 子视图切换 */}
         <div className="bg-slate-100 p-1 rounded-xl flex items-center border border-slate-200/80 text-xs overflow-x-auto max-w-full">
+          {isArchitectureAvailable && (
+            <button
+              type="button"
+              onClick={() => setSubTab('architecture')}
+              className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                subTab === 'architecture'
+                  ? 'bg-blue-600 text-white shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Building2 className="w-3.5 h-3.5" />
+              <span>三级管理架构图 (交互全景)</span>
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setSubTab('stepper')}
-            className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all ${
+            className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
               subTab === 'stepper'
                 ? 'bg-white text-blue-700 shadow-2xs'
                 : 'text-slate-600 hover:text-slate-900'
@@ -223,7 +243,7 @@ export const RegulationWorkflowViewer: React.FC<RegulationWorkflowViewerProps> =
           <button
             type="button"
             onClick={() => setSubTab('matrix')}
-            className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all ${
+            className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
               subTab === 'matrix'
                 ? 'bg-white text-blue-700 shadow-2xs'
                 : 'text-slate-600 hover:text-slate-900'
@@ -235,7 +255,7 @@ export const RegulationWorkflowViewer: React.FC<RegulationWorkflowViewerProps> =
           <button
             type="button"
             onClick={() => setSubTab('forms')}
-            className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all ${
+            className={`px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
               subTab === 'forms'
                 ? 'bg-white text-blue-700 shadow-2xs'
                 : 'text-slate-600 hover:text-slate-900'
@@ -247,7 +267,7 @@ export const RegulationWorkflowViewer: React.FC<RegulationWorkflowViewerProps> =
         </div>
 
         {/* 责任角色快速过滤 */}
-        {subTab !== 'forms' && (
+        {subTab !== 'forms' && subTab !== 'architecture' && (
           <div className="flex items-center gap-2 text-xs">
             <span className="text-slate-500 font-medium shrink-0 flex items-center gap-1">
               <Users className="w-3.5 h-3.5 text-slate-400" />
@@ -267,9 +287,35 @@ export const RegulationWorkflowViewer: React.FC<RegulationWorkflowViewerProps> =
         )}
       </div>
 
+      {/* ================= 模式 0: 三级管理组织架构交互全景 ================= */}
+      {subTab === 'architecture' && (
+        <ThreeTierManagementArchitectureDiagram
+          onNavigateToTab={onNavigateToTab}
+          showToast={showToast}
+          currentUser={currentUser}
+        />
+      )}
+
       {/* ================= 模式 1: 交互式纵向/横向流程树 ================= */}
       {subTab === 'stepper' && (
         <div className="space-y-4">
+          {isArchitectureAvailable && (
+            <div className="p-3 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl flex items-center justify-between text-xs text-blue-900 shadow-2xs">
+              <div className="flex items-center gap-2">
+                <Building2 className="w-4 h-4 text-blue-600 shrink-0" />
+                <span>
+                  本制度配套有<strong>《医学装备三级管理架构图》</strong>，支持点击<strong>“医疗设备科”</strong>或<strong>“使用部门”</strong>查看职责清单、负责工程师及年度质控项目。
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSubTab('architecture')}
+                className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold shrink-0 transition-colors shadow-2xs"
+              >
+                查看架构全景
+              </button>
+            </div>
+          )}
           <div className="relative pl-6 sm:pl-8 space-y-6 before:content-[''] before:absolute before:left-3 sm:before:left-4 before:top-4 before:bottom-4 before:w-0.5 before:bg-gradient-to-b before:from-blue-600 before:via-indigo-500 before:to-emerald-500">
             {displayedSteps.map((step) => {
               const isSelected = selectedStepNumber === step.stepNumber;

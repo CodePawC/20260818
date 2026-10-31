@@ -9,6 +9,7 @@ import { calculateEquipmentBudgetProfile } from '../utils/budgetExecutionUtils';
 import { HealthScoreDetailModal } from './HealthScoreDetailModal';
 import { EquipmentCardGrid } from './EquipmentCardGrid';
 import { EquipmentPhotoStream } from './EquipmentPhotoStream';
+import { EquipmentGroupedCardDeck } from './EquipmentGroupedCardDeck';
 import {
   Eye,
   Wrench,
@@ -45,7 +46,9 @@ import {
   Printer,
   Table2,
   LayoutGrid,
-  Images
+  Images,
+  Activity,
+  Layers
 } from 'lucide-react';
 import { computeLoanTimeProgress, LoanCountdownBadge } from './LoanTimeProgressBar';
 
@@ -89,6 +92,7 @@ interface EquipmentTableProps {
   onNavigateToInspection?: (item: MedicalEquipment) => void;
   onOpenOverdueFiling?: (item: MedicalEquipment) => void;
   onPrintQrLabel?: (item: MedicalEquipment) => void;
+  onOpenTroubleshootModal?: (item: MedicalEquipment) => void;
 }
 
 export const EquipmentTable: React.FC<EquipmentTableProps> = ({
@@ -129,6 +133,7 @@ export const EquipmentTable: React.FC<EquipmentTableProps> = ({
   onNavigateToInspection,
   onOpenOverdueFiling,
   onPrintQrLabel,
+  onOpenTroubleshootModal,
 }) => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: MedicalEquipment } | null>(null);
@@ -247,19 +252,28 @@ export const EquipmentTable: React.FC<EquipmentTableProps> = ({
 
   return (
     <div className="flex-1 flex flex-col min-h-0 relative bg-white overflow-hidden">
-      {/* 台账表格头功能栏：视图模式切换与状态摘要 */}
-      <div className="px-3.5 py-1.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-2 shrink-0 select-none text-xs">
+      {/* 台账表格头功能栏：按状态/科室分类视图切换与状态摘要 */}
+      <div className="px-3.5 py-2 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2.5 shrink-0 select-none text-xs">
+        {/* 左侧：当前视图模式标识与台账计数 */}
         <div className="flex items-center gap-2 min-w-0">
           <span className="font-bold text-slate-800 flex items-center gap-1.5">
-            {viewMode === 'card_grid' ? (
-              <LayoutGrid className="w-3.5 h-3.5 text-blue-600" />
+            {viewMode === 'group_by_status' ? (
+              <Activity className="w-4 h-4 text-emerald-600" />
+            ) : viewMode === 'group_by_department' ? (
+              <Building2 className="w-4 h-4 text-indigo-600" />
+            ) : viewMode === 'card_grid' ? (
+              <LayoutGrid className="w-4 h-4 text-blue-600" />
             ) : viewMode === 'photo_stream' ? (
-              <Images className="w-3.5 h-3.5 text-blue-600" />
+              <Images className="w-4 h-4 text-blue-600" />
             ) : (
-              <Table2 className="w-3.5 h-3.5 text-blue-600" />
+              <Table2 className="w-4 h-4 text-blue-600" />
             )}
-            <span>
-              {viewMode === 'card_grid'
+            <span className="text-sm font-bold text-slate-900">
+              {viewMode === 'group_by_status'
+                ? '状态分类聚合卡片组'
+                : viewMode === 'group_by_department'
+                ? '科室分类聚合卡片组'
+                : viewMode === 'card_grid'
                 ? '大卡片平铺视图'
                 : viewMode === 'photo_stream'
                 ? '设备照片流视图'
@@ -267,17 +281,147 @@ export const EquipmentTable: React.FC<EquipmentTableProps> = ({
             </span>
           </span>
           <span className="text-slate-300">|</span>
-          <span className="text-slate-500 font-mono text-2xs">
-            当前页 <strong className="text-slate-800 font-bold">{equipmentList.length}</strong> 台
+          <span className="text-slate-500 font-mono text-xs">
+            {viewMode === 'group_by_status' || viewMode === 'group_by_department' ? (
+              <>
+                聚合总计 <strong className="text-blue-700 font-bold">{(filteredEquipment || equipmentList).length}</strong> 台
+              </>
+            ) : (
+              <>
+                当前页 <strong className="text-slate-800 font-bold">{equipmentList.length}</strong> 台
+              </>
+            )}
             {selectedIds.length > 0 && (
-              <span className="ml-1 text-blue-600 font-bold">(已选 {selectedIds.length} 台)</span>
+              <span className="ml-1.5 text-blue-600 font-bold">(已选 {selectedIds.length} 台)</span>
             )}
           </span>
         </div>
+
+        {/* 右侧：按「设备状态」与「所属科室」自动分类的视图切换按钮组 */}
+        {onChangeViewMode && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs font-bold text-slate-400 hidden lg:inline-flex items-center gap-1 select-none mr-0.5">
+              <Layers className="w-3.5 h-3.5 text-slate-400" />
+              <span>视图切换:</span>
+            </span>
+
+            <div className="inline-flex items-center p-0.5 bg-slate-200/70 rounded-lg border border-slate-300/80 shadow-2xs">
+              {/* 1. 紧凑表格 */}
+              <button
+                type="button"
+                onClick={() => onChangeViewMode('compact_table')}
+                className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1 transition cursor-pointer ${
+                  viewMode === 'compact_table'
+                    ? 'bg-white text-blue-700 shadow-xs font-bold ring-1 ring-blue-300'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                }`}
+                title="切换为紧凑数据表格排版模式"
+              >
+                <Table2 className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">表格</span>
+              </button>
+
+              {/* 2. 按「设备状态」自动分类聚合按钮 */}
+              <button
+                type="button"
+                onClick={() => onChangeViewMode('group_by_status')}
+                className={`px-3 py-1 rounded-md text-xs font-bold flex items-center gap-1.5 transition cursor-pointer ${
+                  viewMode === 'group_by_status'
+                    ? 'bg-white text-emerald-800 shadow-xs font-bold ring-1 ring-emerald-400'
+                    : 'text-slate-700 hover:text-emerald-800 hover:bg-slate-100'
+                }`}
+                title="按「设备状态」（正常运行、维护保养中、故障待修、停用报废）动态聚合分类卡片组"
+              >
+                <Activity className="w-3.5 h-3.5 text-emerald-600" />
+                <span>按设备状态分类</span>
+                {viewMode === 'group_by_status' && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                )}
+              </button>
+
+              {/* 3. 按「所属科室」自动分类聚合按钮 */}
+              <button
+                type="button"
+                onClick={() => onChangeViewMode('group_by_department')}
+                className={`px-3 py-1 rounded-md text-xs font-bold flex items-center gap-1.5 transition cursor-pointer ${
+                  viewMode === 'group_by_department'
+                    ? 'bg-white text-indigo-800 shadow-xs font-bold ring-1 ring-indigo-400'
+                    : 'text-slate-700 hover:text-indigo-800 hover:bg-slate-100'
+                }`}
+                title="按「所属科室」自动分类聚合并分栏展示在册设备卡片组"
+              >
+                <Building2 className="w-3.5 h-3.5 text-indigo-600" />
+                <span>按所属科室分类</span>
+                {viewMode === 'group_by_department' && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span>
+                )}
+              </button>
+
+              {/* 4. 卡片平铺 */}
+              <button
+                type="button"
+                onClick={() => onChangeViewMode('card_grid')}
+                className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1 transition cursor-pointer ${
+                  viewMode === 'card_grid'
+                    ? 'bg-white text-blue-700 shadow-xs font-bold ring-1 ring-blue-300'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                }`}
+                title="切换为大卡片平铺网格视图"
+              >
+                <LayoutGrid className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">卡片</span>
+              </button>
+
+              {/* 5. 照片流 */}
+              <button
+                type="button"
+                onClick={() => onChangeViewMode('photo_stream')}
+                className={`px-2.5 py-1 rounded-md text-xs font-semibold flex items-center gap-1 transition cursor-pointer ${
+                  viewMode === 'photo_stream'
+                    ? 'bg-white text-blue-700 shadow-xs font-bold ring-1 ring-blue-300'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+                }`}
+                title="切换为实物照片流画廊视图"
+              >
+                <Images className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">图库</span>
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 视图内容区按模式动态渲染 */}
-      {viewMode === 'card_grid' ? (
+      {viewMode === 'group_by_status' || viewMode === 'group_by_department' ? (
+        <EquipmentGroupedCardDeck
+          equipmentList={equipmentList}
+          filteredEquipment={filteredEquipment}
+          groupBy={viewMode === 'group_by_department' ? 'department' : 'status'}
+          onChangeGroupBy={(newGroup) => {
+            if (onChangeViewMode) {
+              onChangeViewMode(newGroup === 'department' ? 'group_by_department' : 'group_by_status');
+            }
+          }}
+          selectedIds={selectedIds}
+          onToggleSelectRow={onToggleSelectRow}
+          onBackToTable={() => onChangeViewMode && onChangeViewMode('compact_table')}
+          onViewDetails={onViewDetails}
+          onAddRepairForDevice={onAddRepairForDevice}
+          onChangeStatusForDevice={onChangeStatusForDevice}
+          onEditDevice={onEditDevice}
+          onDeleteDevice={onDeleteDevice}
+          onAiDiagnoseDevice={onAiDiagnoseDevice}
+          onOpenAiDimensionModal={onOpenAiDimensionModal}
+          onViewDepartmentDetails={onViewDepartmentDetails}
+          onViewAgencyTransactions={onViewAgencyTransactions}
+          onBorrowEquipment={onBorrowEquipment}
+          onReturnEquipment={onReturnEquipment}
+          onNavigateToInspection={onNavigateToInspection}
+          onOpenOverdueFiling={onOpenOverdueFiling}
+          onPrintQrLabel={onPrintQrLabel}
+          onHealthScoreClick={(device) => setHealthModalDevice(device)}
+        />
+      ) : viewMode === 'card_grid' ? (
         <EquipmentCardGrid
           equipmentList={equipmentList}
           selectedIds={selectedIds}
@@ -813,6 +957,24 @@ export const EquipmentTable: React.FC<EquipmentTableProps> = ({
                             >
                               <Sparkles className="w-2.5 h-2.5 text-purple-600 group-hover/ai:scale-110 transition-transform" />
                               <span>AI研判</span>
+                            </button>
+                          )}
+                          {onOpenTroubleshootModal && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onOpenTroubleshootModal(item);
+                              }}
+                              className={`px-1.5 py-0.5 rounded text-[10.5px] font-bold transition flex items-center gap-0.5 cursor-pointer shadow-2xs ${
+                                item.status === '故障待修'
+                                  ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300'
+                                  : 'bg-cyan-50 hover:bg-cyan-100 text-cyan-700 border border-cyan-200'
+                              }`}
+                              title="启动基于 Gemini 3.8 Flash 医工大模型的故障树深度排查与维保建议"
+                            >
+                              <Bot className="w-2.5 h-2.5 text-cyan-600" />
+                              <span>{item.status === '故障待修' ? 'AI排障' : '智能诊断'}</span>
                             </button>
                           )}
                           {item.internalNo && (
@@ -1571,6 +1733,25 @@ export const EquipmentTable: React.FC<EquipmentTableProps> = ({
                   <span className="ml-auto w-2 h-2 rounded-full bg-cyan-500 animate-ping" />
                 )}
               </button>
+
+              {onOpenTroubleshootModal && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenTroubleshootModal(contextMenu.item);
+                    setContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-1.5 bg-gradient-to-r from-sky-50 to-cyan-50 hover:from-sky-100 hover:to-cyan-100 text-sky-900 font-bold flex items-center gap-2 transition cursor-pointer border-t border-sky-100"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-cyan-600 shrink-0" />
+                  <span>Gemini 医工深度排障推演</span>
+                  {contextMenu.item.status === '故障待修' && (
+                    <span className="ml-auto px-1.5 py-0.2 rounded-full bg-rose-500 text-white text-[10px] font-bold">
+                      急修推演
+                    </span>
+                  )}
+                </button>
+              )}
 
               <button
                 type="button"

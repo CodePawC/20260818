@@ -45,6 +45,7 @@ const COMMON_DEPARTMENTS = [
 ];
 
 const CATEGORIES: { value: RegulationCategory; label: string }[] = [
+  { value: '管理体制', label: '管理体制与三级架构' },
   { value: '质控安全', label: '质控安全与监督考核' },
   { value: '运行维保', label: '日常运行与预防性维护(PM)' },
   { value: '计量强检', label: '法定强检与计量校准' },

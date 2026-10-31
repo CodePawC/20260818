@@ -39,8 +39,6 @@ export const VendorReportPrintDialog: React.FC<VendorReportPrintDialogProps> = (
   isExportingPdf,
   pdfExportProgress,
 }) => {
-  if (!isOpen) return null;
-
   const getInitialScope = (): PrintScope => {
     switch (currentTab) {
       case 'DEPT_BREAKDOWN': return 'DEPT_BREAKDOWN';
@@ -107,6 +105,8 @@ export const VendorReportPrintDialog: React.FC<VendorReportPrintDialogProps> = (
       icon: <Sparkles className="w-4 h-4 text-amber-600" />
     }
   ];
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-60 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-150">

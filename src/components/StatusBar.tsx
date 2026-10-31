@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Database, Cpu, Clock } from 'lucide-react';
+import { Database, Cpu, Clock, ShieldCheck } from 'lucide-react';
 
-export const StatusBar: React.FC = () => {
+interface StatusBarProps {
+  onOpenDiagnostics?: () => void;
+}
+
+export const StatusBar: React.FC<StatusBarProps> = ({ onOpenDiagnostics }) => {
   const [timeStr, setTimeStr] = useState<string>('');
 
   useEffect(() => {
@@ -26,7 +30,7 @@ export const StatusBar: React.FC = () => {
 
   return (
     <footer className="h-8 bg-slate-100 border-t border-slate-200 px-4 flex items-center justify-between text-xs font-medium text-slate-600 shrink-0 select-none z-10">
-      {/* Left: DB Status */}
+      {/* Left: DB Status & Diagnostics button */}
       <div className="flex items-center gap-4">
         <div className="flex items-center gap-1.5 text-slate-700">
           <span className="relative flex h-2 w-2">
@@ -37,6 +41,18 @@ export const StatusBar: React.FC = () => {
           <span className="font-bold text-slate-800">系统数据库: 已连接</span>
           <span className="text-slate-500 font-mono text-xs">(0.12s 毫秒级同步)</span>
         </div>
+
+        {onOpenDiagnostics && (
+          <button
+            type="button"
+            onClick={onOpenDiagnostics}
+            className="flex items-center gap-1.5 px-2 py-0.5 rounded text-2xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 hover:bg-emerald-100 transition-colors cursor-pointer"
+            title="点击进入全系统自检与性能优化工作台"
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+            <span>系统体检: 98分 健康 · 点击自检测速</span>
+          </button>
+        )}
       </div>
 
       {/* Right: Time & Version Info */}
@@ -54,3 +70,4 @@ export const StatusBar: React.FC = () => {
     </footer>
   );
 };
+

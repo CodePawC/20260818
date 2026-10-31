@@ -32,7 +32,8 @@ import {
   ArrowRight,
   ArrowUpRight,
   AlertCircle,
-  BarChart3
+  BarChart3,
+  Compass
 } from 'lucide-react';
 import { ActiveTab, AuthUser } from '../../types';
 import { 
@@ -55,6 +56,7 @@ import {
 import { AppraisalDocumentView } from './AppraisalDocumentView';
 import { ProjectApplicationView } from './ProjectApplicationView';
 import { IndicatorDrillDownModal } from './IndicatorDrillDownModal';
+import { EvaluationMetricsRadarChart } from './EvaluationMetricsRadarChart';
 
 interface ProjectConcludingViewProps {
   currentUser?: AuthUser;
@@ -267,6 +269,19 @@ export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
             >
               <BarChart3 className="w-3.5 h-3.5 text-blue-600" />
               <span>11项指标穿透下钻 (表6-1B)</span>
+            </button>
+
+            {/* 11项指标多维对比雷达图 */}
+            <button
+              onClick={() => {
+                setActiveSubTab('report');
+                scrollToChapter('sec6-1');
+              }}
+              className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
+              title="直达第六章第一节 图6-1 11项指标多维对比雷达图"
+            >
+              <Compass className="w-3.5 h-3.5 text-indigo-600" />
+              <span>11项指标对比雷达图 (图6-1)</span>
             </button>
 
             {/* 10项自检达标清单 */}
@@ -1094,6 +1109,16 @@ export const ProjectConcludingView: React.FC<ProjectConcludingViewProps> = ({
                                     财务窗口规则：无结案单不收单 · 无Token不记账
                                   </div>
                                 </div>
+                              )}
+
+                              {/* 图 6-1：11项核心评价指标多维对比雷达图 */}
+                              {fig.type === 'radar' && (
+                                <EvaluationMetricsRadarChart
+                                  onSelectIndicator={(indicatorId) => {
+                                    setSelectedDrillDownIndicatorId(indicatorId);
+                                    setShowIndicatorDrillDownModal(true);
+                                  }}
+                                />
                               )}
 
                               <p className="text-xs text-slate-500 font-doc-fangsong-3 leading-relaxed">

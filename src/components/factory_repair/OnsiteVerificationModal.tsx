@@ -35,8 +35,6 @@ export const OnsiteVerificationModal: React.FC<OnsiteVerificationModalProps> = (
   currentUser,
   onDraftFactoryRepairImmediately
 }) => {
-  if (!isOpen) return null;
-
   // 设备科工程师核验表单数据
   const [verifiedBy, setVerifiedBy] = useState(currentUser?.name || '崔伟');
   const [verifierRole, setVerifierRole] = useState('医疗设备科科长 / 主管工程师');
@@ -45,9 +43,9 @@ export const OnsiteVerificationModal: React.FC<OnsiteVerificationModalProps> = (
     new Date().toLocaleString('zh-CN', { hour12: false }).replace(/\//g, '-').slice(0, 16)
   );
   const [snMatched, setSnMatched] = useState(true);
-  const [verifiedSn, setVerifiedSn] = useState(task.equipmentSn);
+  const [verifiedSn, setVerifiedSn] = useState(task?.equipmentSn || '');
   const [locationConfirmed, setLocationConfirmed] = useState(
-    task.equipmentLocation || '1号楼 综合楼 8F 麻醉手术科 OR-03手术室'
+    task?.equipmentLocation || '1号楼 综合楼 8F 麻醉手术科 OR-03手术室'
   );
 
   // 精密检测指标
@@ -101,6 +99,8 @@ export const OnsiteVerificationModal: React.FC<OnsiteVerificationModalProps> = (
     onConfirmVerification(task.id, verificationRecord, conclusionType === 'factory_repair');
     onClose();
   };
+
+  if (!isOpen || !task) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">

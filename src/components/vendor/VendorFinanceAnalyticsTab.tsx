@@ -225,6 +225,7 @@ export const VendorFinanceAnalyticsTab: React.FC<VendorFinanceAnalyticsTabProps>
                 <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} tickFormatter={(val) => `¥${(val / 1000)}k`} />
                 <Tooltip 
                   formatter={(val: number) => [`¥${val.toLocaleString()}`, '']}
+                  wrapperStyle={{ pointerEvents: 'none', zIndex: 100 }}
                   contentStyle={{ backgroundColor: '#0f172a', borderRadius: '8px', color: '#fff', fontSize: '11px', border: 'none' }}
                 />
                 <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />

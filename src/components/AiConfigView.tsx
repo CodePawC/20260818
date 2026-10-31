@@ -759,7 +759,7 @@ export const AiConfigView: React.FC = () => {
               {[
                 {
                   title: '《五莲县人民医院医疗设备管理制度汇编》',
-                  count: '18 项正式院级文件',
+                  count: '19 项正式院级制度与规程（含工单唯一编码与公文追溯制度）',
                   status: '已建立向量索引',
                   tag: '院级制度'
                 },

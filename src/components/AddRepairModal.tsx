@@ -41,6 +41,7 @@ import {
 import { isClinicalStaff, isHeadNurse } from '../utils/authUtils';
 import { ApprovalApplication } from '../types/approvalTypes';
 import { SmartEquipmentPicker } from './SmartEquipmentPicker';
+import { generateNextWorkOrderId } from '../utils/workOrderCodeGenerator';
 
 interface AddRepairModalProps {
   isOpen: boolean;
@@ -419,7 +420,12 @@ export const AddRepairModal: React.FC<AddRepairModalProps> = ({
       return;
     }
 
+    const prefix = repairType.includes('零') ? 'SPO' : repairType.includes('保养') ? 'PM' : 'REP';
+    const totalExisting = equipmentList.reduce((acc, eq) => acc + (eq.repairRecords?.length || 0), 0);
+    const standardCode = generateNextWorkOrderId(prefix as any, 2026, totalExisting + 1);
+
     onSubmitRepair({
+      workOrderId: standardCode,
       equipmentId: selectedEquipmentId,
       faultDate,
       repairType,

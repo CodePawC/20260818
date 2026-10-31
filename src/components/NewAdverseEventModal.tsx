@@ -39,8 +39,6 @@ export const NewAdverseEventModal: React.FC<NewAdverseEventModalProps> = ({
   defaultEquipment,
   onSubmit
 }) => {
-  if (!isOpen) return null;
-
   // Step wizard: 1. 器械与科室 2. 患者与临床过程 3. 故障表现与处置 4. 因果评价
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
 
@@ -216,6 +214,8 @@ export const NewAdverseEventModal: React.FC<NewAdverseEventModalProps> = ({
     onSubmit(newRecord);
     onClose();
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">

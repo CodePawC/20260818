@@ -392,6 +392,7 @@ export const VendorHomeAnalyticsView: React.FC<VendorHomeAnalyticsViewProps> = (
                     const label = name === 'initialQuote' ? '初始报价' : name === 'finalPrice' ? '审定成交价' : '让利金额';
                     return [`¥${Number(val).toLocaleString()}`, label];
                   }}
+                  wrapperStyle={{ pointerEvents: 'none', zIndex: 100 }}
                   contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.05)' }}
                 />
                 <Bar dataKey="initialQuote" fill="#93c5fd" radius={[4, 4, 0, 0]} maxBarSize={28} />
@@ -431,6 +432,7 @@ export const VendorHomeAnalyticsView: React.FC<VendorHomeAnalyticsViewProps> = (
                 </Pie>
                 <Tooltip 
                   formatter={(val: any) => [`¥${Number(val).toLocaleString()}`, '业务金额']}
+                  wrapperStyle={{ pointerEvents: 'none', zIndex: 100 }}
                   contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }}
                 />
               </PieChart>
@@ -486,6 +488,7 @@ export const VendorHomeAnalyticsView: React.FC<VendorHomeAnalyticsViewProps> = (
                     `${val}%`, 
                     name === 'responseRate' ? '紧急响应达标率' : '现场修复完工率'
                   ]}
+                  wrapperStyle={{ pointerEvents: 'none', zIndex: 100 }}
                   contentStyle={{ borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 12 }}
                 />
                 <Line type="monotone" dataKey="responseRate" stroke="#2563eb" strokeWidth={2.5} dot={{ r: 3 }} activeDot={{ r: 5 }} />

@@ -131,6 +131,62 @@ export const VIEW_MODE_QUICK_FILTERS: Record<EquipmentViewMode, ViewModeQuickFil
       activeColor: 'bg-sky-600 text-white ring-sky-400',
     },
   ],
+
+  // 状态聚合卡片视图
+  group_by_status: [
+    {
+      id: 'pending_repair',
+      label: '待维修',
+      icon: Wrench,
+      description: '故障待修或维护保养状态设备',
+      badgeColor: 'text-amber-700 bg-amber-50 border-amber-200',
+      activeColor: 'bg-amber-600 text-white ring-amber-400',
+    },
+    {
+      id: 'high_value',
+      label: '高价值',
+      icon: Coins,
+      description: '原值 ≥ 50 万元设备',
+      badgeColor: 'text-emerald-700 bg-emerald-50 border-emerald-200',
+      activeColor: 'bg-emerald-600 text-white ring-emerald-400',
+    },
+    {
+      id: 'low_health',
+      label: '健康预警',
+      icon: Activity,
+      description: '健康指数较低(<80分)的预警设备',
+      badgeColor: 'text-rose-700 bg-rose-50 border-rose-200',
+      activeColor: 'bg-rose-600 text-white ring-rose-400',
+    },
+  ],
+
+  // 科室聚合卡片视图
+  group_by_department: [
+    {
+      id: 'pending_repair',
+      label: '待维修',
+      icon: Wrench,
+      description: '故障待修或维护保养状态设备',
+      badgeColor: 'text-amber-700 bg-amber-50 border-amber-200',
+      activeColor: 'bg-amber-600 text-white ring-amber-400',
+    },
+    {
+      id: 'in_loan',
+      label: '借调流转中',
+      icon: Building,
+      description: '跨科借出借用设备',
+      badgeColor: 'text-sky-700 bg-sky-50 border-sky-200',
+      activeColor: 'bg-sky-600 text-white ring-sky-400',
+    },
+    {
+      id: 'calibration_due',
+      label: '计量待检',
+      icon: ShieldCheck,
+      description: '强检到期或临期设备',
+      badgeColor: 'text-purple-700 bg-purple-50 border-purple-200',
+      activeColor: 'bg-purple-600 text-white ring-purple-400',
+    },
+  ],
 };
 
 interface EquipmentQuickFilterProps {

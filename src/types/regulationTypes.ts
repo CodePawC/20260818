@@ -1,6 +1,7 @@
 import { ActiveTab } from '../types';
 
 export type RegulationCategory = 
+  | '管理体制'
   | '法规依据' 
   | '采购准入' 
   | '运行维保' 
@@ -121,6 +122,6 @@ export interface RegulationFilterState {
   status: string; // 'all' or RegulationStatus
   department: string; // 'all' or specific department
   mustReadAccreditationOnly: boolean; // 仅看等级评审核心制度
-  sortBy: 'effectiveDate' | 'readCount' | 'code' | 'title';
+  sortBy: 'lifecycle' | 'effectiveDate' | 'readCount' | 'code' | 'title';
   sortOrder: 'asc' | 'desc';
 }

@@ -1,5 +1,5 @@
-import React, { useState, useMemo } from 'react';
-import { MedicalEquipment, DepartmentMaster, StaffPersonMaster, LocationRoomMaster, AuthUser, EquipmentStatus } from '../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { MedicalEquipment, DepartmentMaster, StaffPersonMaster, LocationRoomMaster, AuthUser, EquipmentStatus, ActiveTab } from '../types';
 import { getDepartmentMasterInfo, DEFAULT_DEPARTMENTS, DEFAULT_STAFF, DEFAULT_ROOMS } from '../utils/masterData';
 import { getEquipmentValidityInfo } from '../utils/validityUtils';
 import { getEquipmentCalibrationInfo } from '../utils/calibrationUtils';
@@ -31,13 +31,32 @@ import {
   ExternalLink,
   HeartPulse,
   Activity,
-  FileText
+  FileText,
+  Target,
+  BadgeCheck,
+  UserCheck,
+  Check,
+  Printer
 } from 'lucide-react';
+import {
+  ManagementTierNode,
+  ResponsibleEngineer,
+  ClinicalPairingRecord,
+  QualityProjectItem,
+  EQUIPMENT_ENGINEERS,
+  CLINICAL_PAIRING_LIST,
+  QUALITY_PROJECTS_LIST,
+  EQUIPMENT_DEPT_DUTIES,
+  CLINICAL_DEPT_DUTIES,
+  EXECUTIVE_DUTIES
+} from '../data/threeTierManagementData';
 
-interface DepartmentDetailModalProps {
+export interface DepartmentDetailModalProps {
   isOpen: boolean;
-  departmentName: string | null;
-  allEquipment: MedicalEquipment[];
+  departmentName?: string | null;
+  departmentType?: ManagementTierNode;
+  initialTab?: 'duties' | 'engineers' | 'projects' | 'equipment' | 'location' | 'staff' | 'compliance';
+  allEquipment?: MedicalEquipment[];
   currentUser?: AuthUser | null;
   customDepartments?: DepartmentMaster[];
   customStaff?: StaffPersonMaster[];
@@ -47,12 +66,16 @@ interface DepartmentDetailModalProps {
   onViewEquipmentDetail?: (eq: MedicalEquipment) => void;
   onAddRepairForEquipment?: (eq: MedicalEquipment) => void;
   onAddEquipmentForDepartment?: (deptName: string) => void;
+  onNavigateToTab?: (tab: ActiveTab) => void;
+  showToast?: (message: string) => void;
 }
 
 export const DepartmentDetailModal: React.FC<DepartmentDetailModalProps> = ({
   isOpen,
   departmentName,
-  allEquipment,
+  departmentType,
+  initialTab,
+  allEquipment = [],
   currentUser,
   customDepartments,
   customStaff,
@@ -61,16 +84,57 @@ export const DepartmentDetailModal: React.FC<DepartmentDetailModalProps> = ({
   onFilterByDepartment,
   onViewEquipmentDetail,
   onAddRepairForEquipment,
-  onAddEquipmentForDepartment
+  onAddEquipmentForDepartment,
+  onNavigateToTab,
+  showToast
 }) => {
-  const [activeTab, setActiveTab] = useState<'equipment' | 'location' | 'staff' | 'compliance'>('equipment');
+  // 解析当前对应的三级管理架构层级
+  const effectiveTier: ManagementTierNode = useMemo(() => {
+    if (departmentType) return departmentType;
+    if (!departmentName) return 'equipment_dept';
+    const norm = departmentName.toLowerCase();
+    if (norm.includes('医疗设备科') || norm.includes('医学工程') || norm.includes('设备科')) return 'equipment_dept';
+    if (norm.includes('主管') || norm.includes('院领导') || norm.includes('决策')) return 'executive_leadership';
+    return 'clinical_dept';
+  }, [departmentType, departmentName]);
+
+  const effectiveDeptName = useMemo(() => {
+    if (departmentName && departmentName.trim()) return departmentName.trim();
+    if (effectiveTier === 'equipment_dept') return '医疗设备科 (医学工程保障中心)';
+    if (effectiveTier === 'executive_leadership') return '主管领导 (决策管理层)';
+    return '医学装备使用部门 (全院临床医技科室)';
+  }, [departmentName, effectiveTier]);
+
+  const isArchitectureTier = Boolean(
+    departmentType || 
+    (departmentName && (
+      departmentName.includes('医疗设备科') || 
+      departmentName.includes('医学工程') || 
+      departmentName.includes('使用部门') || 
+      departmentName.includes('三级管理')
+    ))
+  );
+
+  const [activeTab, setActiveTab] = useState<'duties' | 'engineers' | 'projects' | 'equipment' | 'location' | 'staff' | 'compliance'>(
+    initialTab || (isArchitectureTier ? 'duties' : 'equipment')
+  );
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    } else if (isArchitectureTier) {
+      setActiveTab('duties');
+    }
+  }, [initialTab, isArchitectureTier, departmentName, departmentType]);
+
   const [keyword, setKeyword] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [searchDuties, setSearchDuties] = useState('');
 
   // 1. 匹配科室主数据
   const deptInfo = useMemo(() => {
-    return getDepartmentMasterInfo(departmentName || '', customDepartments);
-  }, [departmentName, customDepartments]);
+    return getDepartmentMasterInfo(effectiveDeptName, customDepartments);
+  }, [effectiveDeptName, customDepartments]);
 
   const matchedDept = deptInfo.matchedDept;
 
@@ -213,7 +277,63 @@ export const DepartmentDetailModal: React.FC<DepartmentDetailModalProps> = ({
     });
   }, [deptEquipment, keyword, statusFilter]);
 
-  // 7. 导出本科室设备为 CSV
+  // 7. 三级管理职责清单与重点质控、工程师数据
+  const dutiesList = useMemo(() => {
+    if (effectiveTier === 'equipment_dept') return EQUIPMENT_DEPT_DUTIES;
+    if (effectiveTier === 'clinical_dept') return CLINICAL_DEPT_DUTIES;
+    return EXECUTIVE_DUTIES;
+  }, [effectiveTier]);
+
+  const filteredDuties = useMemo(() => {
+    const q = searchDuties.trim().toLowerCase();
+    if (!q) return dutiesList;
+    return dutiesList.filter(d => 
+      d.title.toLowerCase().includes(q) || 
+      d.desc.toLowerCase().includes(q) ||
+      (d.form && d.form.toLowerCase().includes(q)) ||
+      (d.point && d.point.toLowerCase().includes(q))
+    );
+  }, [dutiesList, searchDuties]);
+
+  const tierProjects = useMemo(() => {
+    return QUALITY_PROJECTS_LIST.filter(p => p.tier === effectiveTier);
+  }, [effectiveTier]);
+
+  const filteredProjects = useMemo(() => {
+    const q = searchDuties.trim().toLowerCase();
+    if (!q) return tierProjects;
+    return tierProjects.filter(p =>
+      p.title.toLowerCase().includes(q) ||
+      p.leadPerson.toLowerCase().includes(q) ||
+      p.targetMetric.toLowerCase().includes(q) ||
+      p.standardClause.toLowerCase().includes(q)
+    );
+  }, [tierProjects, searchDuties]);
+
+  const filteredEngineers = useMemo(() => {
+    const q = searchDuties.trim().toLowerCase();
+    if (!q) return EQUIPMENT_ENGINEERS;
+    return EQUIPMENT_ENGINEERS.filter(eng =>
+      eng.name.toLowerCase().includes(q) ||
+      eng.role.toLowerCase().includes(q) ||
+      eng.phone.includes(q) ||
+      eng.specialtyDomain.toLowerCase().includes(q) ||
+      eng.pairedDepartments.some(d => d.toLowerCase().includes(q))
+    );
+  }, [searchDuties]);
+
+  const filteredClinicalPairings = useMemo(() => {
+    const q = searchDuties.trim().toLowerCase();
+    if (!q) return CLINICAL_PAIRING_LIST;
+    return CLINICAL_PAIRING_LIST.filter(cp =>
+      cp.departmentName.toLowerCase().includes(q) ||
+      cp.safetyOfficerName.toLowerCase().includes(q) ||
+      cp.pairedEngineerName.toLowerCase().includes(q) ||
+      cp.pairedEngineerSpecialty.toLowerCase().includes(q)
+    );
+  }, [searchDuties]);
+
+  // 8. 导出本科室设备为 CSV
   const handleExportDeptCsv = () => {
     if (deptEquipment.length === 0) return;
     const headers = ['设备ID', '设备名称', '规格型号', '出厂SN', '生产厂家', '运行状态', '购置金额', '投用时间', '使用科室', '存放楼宇', '楼层', '科室电话', '责任工程师'];
@@ -243,7 +363,7 @@ export const DepartmentDetailModal: React.FC<DepartmentDetailModalProps> = ({
     document.body.removeChild(link);
   };
 
-  if (!isOpen || !departmentName) return null;
+  if (!isOpen || (!departmentName && !departmentType)) return null;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4">
@@ -258,23 +378,20 @@ export const DepartmentDetailModal: React.FC<DepartmentDetailModalProps> = ({
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs px-2 py-0.5 rounded bg-blue-500/20 text-blue-200 border border-blue-400/30 font-medium">
-                  {deptInfo.matchedDept?.hospitalName || '五莲县人民医院 (总院)'}
+                  {effectiveTier === 'equipment_dept'
+                    ? '第二级 · 归口管理层'
+                    : effectiveTier === 'clinical_dept'
+                    ? '第三级 · 临床执行层'
+                    : '第一级 · 决策管理层'}
                 </span>
-                {deptInfo.category && (
-                  <span className="text-xs px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-200 border border-emerald-400/30 font-medium">
-                    {deptInfo.category}
-                  </span>
-                )}
-                {deptInfo.disciplineCategory && (
-                  <span className="text-xs px-2 py-0.5 rounded bg-purple-500/20 text-purple-200 border border-purple-400/30 font-medium">
-                    {deptInfo.disciplineCategory}
-                  </span>
-                )}
+                <span className="text-xs px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-200 border border-emerald-400/30 font-medium">
+                  三级综合医院评审标准规范
+                </span>
               </div>
               <h2 className="text-xl font-bold text-white mt-1 flex items-center gap-2">
-                <span>{deptInfo.department}</span>
+                <span>{effectiveDeptName}</span>
                 <span className="text-xs font-mono font-normal text-slate-400">
-                  [{deptInfo.matchedDept?.code || 'DEP-ORG'}]
+                  [{deptInfo.matchedDept?.code || (effectiveTier === 'equipment_dept' ? 'DEP-MEDENG' : 'DEP-CLINICAL')}]
                 </span>
               </h2>
             </div>
@@ -434,13 +551,61 @@ export const DepartmentDetailModal: React.FC<DepartmentDetailModalProps> = ({
         </div>
 
         {/* Tabs Bar */}
-        <div className="px-6 border-b border-slate-200 bg-white flex gap-6 text-sm font-semibold shrink-0">
+        <div className="px-6 border-b border-slate-200 bg-white flex gap-4 sm:gap-6 text-sm font-semibold shrink-0 overflow-x-auto max-w-full">
+          <button
+            type="button"
+            onClick={() => setActiveTab('duties')}
+            className={`py-3 border-b-2 transition flex items-center gap-1.5 cursor-pointer shrink-0 ${
+              activeTab === 'duties'
+                ? 'border-blue-600 text-blue-600 font-bold'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            <span>管理职责清单</span>
+            <span className="px-1.5 py-0.2 rounded-full text-xs bg-blue-50 text-blue-700 font-mono font-bold">
+              {dutiesList.length}项
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('engineers')}
+            className={`py-3 border-b-2 transition flex items-center gap-1.5 cursor-pointer shrink-0 ${
+              activeTab === 'engineers'
+                ? 'border-blue-600 text-blue-600 font-bold'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <UserCheck className="w-4 h-4" />
+            <span>负责工程师与安全员</span>
+            <span className="px-1.5 py-0.2 rounded-full text-xs bg-slate-100 text-slate-700 font-mono">
+              {effectiveTier === 'equipment_dept' ? `${EQUIPMENT_ENGINEERS.length}人` : '对口保驾'}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('projects')}
+            className={`py-3 border-b-2 transition flex items-center gap-1.5 cursor-pointer shrink-0 ${
+              activeTab === 'projects'
+                ? 'border-blue-600 text-blue-600 font-bold'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <Target className="w-4 h-4" />
+            <span>年度重点质控项目</span>
+            <span className="px-1.5 py-0.2 rounded-full text-xs bg-emerald-50 text-emerald-700 font-mono font-bold">
+              {tierProjects.length}项
+            </span>
+          </button>
+
           <button
             type="button"
             onClick={() => setActiveTab('equipment')}
-            className={`py-3 border-b-2 transition flex items-center gap-1.5 cursor-pointer ${
+            className={`py-3 border-b-2 transition flex items-center gap-1.5 cursor-pointer shrink-0 ${
               activeTab === 'equipment'
-                ? 'border-blue-600 text-blue-600'
+                ? 'border-blue-600 text-blue-600 font-bold'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
@@ -454,30 +619,30 @@ export const DepartmentDetailModal: React.FC<DepartmentDetailModalProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('location')}
-            className={`py-3 border-b-2 transition flex items-center gap-1.5 cursor-pointer ${
+            className={`py-3 border-b-2 transition flex items-center gap-1.5 cursor-pointer shrink-0 ${
               activeTab === 'location'
-                ? 'border-blue-600 text-blue-600'
+                ? 'border-blue-600 text-blue-600 font-bold'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
             <MapPin className="w-4 h-4" />
-            <span>空间网格与物理位置</span>
+            <span>空间位置</span>
             <span className="px-1.5 py-0.2 rounded-full text-xs bg-slate-100 text-slate-700 font-mono">
-              {deptRooms.length} 房室
+              {deptRooms.length}
             </span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('staff')}
-            className={`py-3 border-b-2 transition flex items-center gap-1.5 cursor-pointer ${
+            className={`py-3 border-b-2 transition flex items-center gap-1.5 cursor-pointer shrink-0 ${
               activeTab === 'staff'
-                ? 'border-blue-600 text-blue-600'
+                ? 'border-blue-600 text-blue-600 font-bold'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
             <User className="w-4 h-4" />
-            <span>责任人员与医工对接</span>
+            <span>科室人员</span>
             <span className="px-1.5 py-0.2 rounded-full text-xs bg-slate-100 text-slate-700 font-mono">
               {deptStaff.length}
             </span>
@@ -486,14 +651,14 @@ export const DepartmentDetailModal: React.FC<DepartmentDetailModalProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('compliance')}
-            className={`py-3 border-b-2 transition flex items-center gap-1.5 cursor-pointer ${
+            className={`py-3 border-b-2 transition flex items-center gap-1.5 cursor-pointer shrink-0 ${
               activeTab === 'compliance'
-                ? 'border-blue-600 text-blue-600'
+                ? 'border-blue-600 text-blue-600 font-bold'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
             <ShieldCheck className="w-4 h-4" />
-            <span>计量强检与风险评估</span>
+            <span>合规强检评估</span>
             {stats.agingRiskCount > 0 && (
               <span className="px-1.5 py-0.2 rounded-full text-xs bg-amber-100 text-amber-800 font-bold font-mono">
                 {stats.agingRiskCount} 预警
@@ -504,7 +669,349 @@ export const DepartmentDetailModal: React.FC<DepartmentDetailModalProps> = ({
 
         {/* Tab Content Body */}
         <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50">
-          
+
+          {/* TAB 0-A: 管理职责清单 */}
+          {activeTab === 'duties' && (
+            <div className="space-y-4">
+              <div className="p-3.5 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-2xs">
+                <div className="flex items-start gap-2.5">
+                  <ShieldCheck className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-bold text-blue-950">
+                      {effectiveTier === 'equipment_dept' && '《医学装备三级管理制度》第三章 · 医疗设备科归口管理职责 (法定标准10大项)'}
+                      {effectiveTier === 'clinical_dept' && '《医学装备三级管理制度》第四章 · 使用部门日常管理职责 (临床落地7大守则)'}
+                      {effectiveTier === 'executive_leadership' && '《医学装备三级管理制度》第二章 · 主管领导管理职责 (4条)'}
+                    </h4>
+                    <p className="text-blue-700 text-[11px] mt-0.5">
+                      遵循“统一领导、归口管理、分级负责、权责一致”原则，严格对照三级综合医院评审标准细则核验执行。
+                    </p>
+                  </div>
+                </div>
+
+                <div className="relative min-w-[220px]">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={searchDuties}
+                    onChange={(e) => setSearchDuties(e.target.value)}
+                    placeholder="检索职责条款或配套表单..."
+                    className="w-full pl-8 pr-2.5 py-1 text-xs bg-white border border-blue-300 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                {filteredDuties.map((duty) => (
+                  <div
+                    key={duty.num}
+                    className="bg-white rounded-xl border border-slate-200 p-4 shadow-2xs hover:border-blue-400 hover:shadow-xs transition space-y-2"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-7 h-7 rounded-lg bg-blue-100 text-blue-800 text-xs font-mono font-bold flex items-center justify-center shrink-0">
+                          {duty.num}
+                        </span>
+                        <h4 className="font-bold text-slate-900 text-sm">
+                          {duty.title}
+                        </h4>
+                      </div>
+                      <span className="text-[11px] font-mono text-slate-400 bg-slate-100 px-2 py-0.5 rounded shrink-0">
+                        {duty.clause || `第${duty.num}条`}
+                      </span>
+                    </div>
+
+                    <p className="text-xs text-slate-600 leading-relaxed pl-9">
+                      {duty.desc}
+                    </p>
+
+                    <div className="pl-9 pt-1 flex flex-wrap items-center gap-3 text-[11px]">
+                      {duty.form && (
+                        <div className="flex items-center gap-1.5 text-slate-500">
+                          <span className="font-semibold text-blue-700">配套制式留痕表单：</span>
+                          <span className="font-mono bg-blue-50 text-blue-800 px-2 py-0.5 rounded border border-blue-200">
+                            {duty.form}
+                          </span>
+                        </div>
+                      )}
+                      {duty.point && (
+                        <div className="flex items-center gap-1.5 text-slate-500">
+                          <span className="font-semibold text-emerald-700">现场质控防范点：</span>
+                          <span className="bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded border border-emerald-200">
+                            {duty.point}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 0-B: 负责工程师与安全员 */}
+          {activeTab === 'engineers' && (
+            <div className="space-y-4">
+              <div className="p-3.5 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-2xs">
+                <div className="flex items-start gap-2.5">
+                  <UserCheck className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-bold text-blue-950">
+                      {effectiveTier === 'equipment_dept'
+                        ? '医疗设备科专职负责工程师团队 (8位专业工程师台账)'
+                        : '临床医技科室专兼职设备安全员与医工对口保驾责任工程师配对表'}
+                    </h4>
+                    <p className="text-blue-700 text-[11px] mt-0.5">
+                      实行“24小时应急值守、专机专管、包科保驾”责任制，确保随时响应临床一线抢救与维保需求。
+                    </p>
+                  </div>
+                </div>
+
+                <div className="relative min-w-[220px]">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={searchDuties}
+                    onChange={(e) => setSearchDuties(e.target.value)}
+                    placeholder="检索工程师姓名、电话或专业..."
+                    className="w-full pl-8 pr-2.5 py-1 text-xs bg-white border border-blue-300 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              {effectiveTier === 'equipment_dept' ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {filteredEngineers.map((eng) => (
+                    <div
+                      key={eng.id}
+                      className="bg-white rounded-xl border border-slate-200 p-4 shadow-2xs hover:border-blue-400 hover:shadow-xs transition flex flex-col justify-between space-y-3"
+                    >
+                      <div>
+                        <div className="flex items-start justify-between gap-3 pb-2.5 border-b border-slate-100">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white font-bold text-sm flex items-center justify-center shrink-0 shadow-2xs">
+                              {eng.name.slice(0, 1)}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <h4 className="font-bold text-slate-900 text-sm">{eng.name}</h4>
+                                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                                  {eng.employeeNo}
+                                </span>
+                                <span className={`text-[10px] font-bold px-1.5 py-0.2 rounded ${
+                                  eng.onCallStatus === '24H应急值守'
+                                    ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                                    : eng.onCallStatus === '驻点巡检'
+                                    ? 'bg-cyan-100 text-cyan-800 border border-cyan-200'
+                                    : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                }`}>
+                                  {eng.onCallStatus}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-blue-700 font-medium mt-0.5">{eng.role}</p>
+                            </div>
+                          </div>
+
+                          <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200 shrink-0">
+                            应急响应 {eng.emergencyTier}
+                          </span>
+                        </div>
+
+                        <div className="mt-3 space-y-2 text-xs text-slate-600">
+                          <div>
+                            <span className="text-slate-400">专长领域：</span>
+                            <span className="font-medium text-slate-800">{eng.specialtyDomain}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400">日常工位：</span>
+                            <span>{eng.workplace}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-400">对口包科：</span>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {eng.pairedDepartments.map((dept, i) => (
+                                <span key={i} className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px] border border-slate-200">
+                                  {dept}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs">
+                        <a
+                          href={`tel:${eng.phone}`}
+                          className="font-mono font-bold text-blue-700 hover:text-blue-900 flex items-center gap-1"
+                        >
+                          <Phone className="w-3.5 h-3.5 text-blue-600" />
+                          <span>{eng.phone}</span>
+                        </a>
+                        <span className="text-[11px] text-slate-400">
+                          分管质控: <strong className="text-slate-700 font-mono">{eng.activeProjectsCount}</strong> 项
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {filteredClinicalPairings.map((pairing) => (
+                    <div
+                      key={pairing.departmentId}
+                      className="bg-white rounded-xl border border-slate-200 p-4 shadow-2xs hover:border-emerald-400 hover:shadow-xs transition flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                    >
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="font-bold text-slate-900 text-sm">{pairing.departmentName}</h4>
+                          <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                            {pairing.location}
+                          </span>
+                          <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            {pairing.status}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-4 text-xs text-slate-600">
+                          <div>
+                            <span className="text-slate-400">科室设备安全员：</span>
+                            <span className="font-bold text-slate-800">{pairing.safetyOfficerName}</span>
+                            <span className="text-slate-500 text-[11px] ml-1">({pairing.safetyOfficerTitle})</span>
+                            <a href={`tel:${pairing.safetyOfficerPhone}`} className="text-blue-700 font-mono ml-1.5 hover:underline">
+                              ☎ {pairing.safetyOfficerPhone}
+                            </a>
+                          </div>
+                          <div>
+                            <span className="text-slate-400">对口保驾工程师：</span>
+                            <span className="font-bold text-blue-900">{pairing.pairedEngineerName}</span>
+                            <a href={`tel:${pairing.pairedEngineerPhone}`} className="text-blue-700 font-mono ml-1.5 hover:underline">
+                              ☎ {pairing.pairedEngineerPhone}
+                            </a>
+                          </div>
+                        </div>
+                        <p className="text-[11px] text-slate-500">
+                          重点保驾器械：{pairing.pairedEngineerSpecialty}
+                        </p>
+                      </div>
+
+                      <div className="text-right sm:text-right shrink-0 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-100">
+                        <div className="text-xs font-mono text-slate-700">
+                          在账 <strong>{pairing.totalEquipmentCount}</strong> 台 · 生命支持 <strong>{pairing.lifeSupportCount}</strong> 台
+                        </div>
+                        <div className="text-[11px] text-slate-400 mt-0.5">
+                          最近质控巡检: {pairing.lastQcInspectionDate}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB 0-C: 年度重点质控项目 */}
+          {activeTab === 'projects' && (
+            <div className="space-y-4">
+              <div className="p-3.5 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-2xs">
+                <div className="flex items-start gap-2.5">
+                  <Target className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-bold text-blue-950">
+                      2026 年度重点医疗装备质控改进项目 (当前部门执行中)
+                    </h4>
+                    <p className="text-blue-700 text-[11px] mt-0.5">
+                      以三级综合医院评审指标为导向，实施全程量化考核与闭环追踪机制。
+                    </p>
+                  </div>
+                </div>
+
+                <div className="relative min-w-[220px]">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={searchDuties}
+                    onChange={(e) => setSearchDuties(e.target.value)}
+                    placeholder="按项目名称或条款检索..."
+                    className="w-full pl-8 pr-2.5 py-1 text-xs bg-white border border-blue-300 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                {filteredProjects.map((project) => (
+                  <div
+                    key={project.id}
+                    className="bg-white rounded-xl border border-slate-200 p-5 shadow-2xs hover:border-blue-400 hover:shadow-xs transition space-y-3"
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-100">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-200">
+                          {project.code}
+                        </span>
+                        <h4 className="font-bold text-slate-900 text-sm">
+                          {project.title}
+                        </h4>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] font-mono text-slate-500">
+                          {project.cycle}
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                          {project.status === 'completed' ? '已达成' : project.status === 'on_track' ? '达标推进中' : '重点攻关中'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      {project.description}
+                    </p>
+
+                    {/* 进度条 */}
+                    <div className="space-y-1.5 pt-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-500 font-medium">当前年度推进完成度</span>
+                        <span className="font-mono font-bold text-blue-700">{project.currentProgress}%</span>
+                      </div>
+                      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-blue-600 to-emerald-500 rounded-full transition-all duration-500"
+                          style={{ width: `${project.currentProgress}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-slate-100 text-xs">
+                      <div>
+                        <span className="text-slate-400">质控目标指标：</span>
+                        <span className="font-medium text-slate-800">{project.targetMetric}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-400">牵头负责专员：</span>
+                        <span className="font-bold text-blue-900">{project.leadPerson}</span>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <span className="text-slate-400">评审核查条款：</span>
+                        <span className="font-mono text-slate-700 bg-slate-50 px-1.5 py-0.5 rounded border border-slate-200 text-[11px]">
+                          {project.standardClause}
+                        </span>
+                      </div>
+                    </div>
+
+                    {project.keyActionPoints && project.keyActionPoints.length > 0 && (
+                      <div className="p-2.5 bg-slate-50 rounded-lg border border-slate-200/80 text-[11px] text-slate-600 space-y-1">
+                        <div className="font-bold text-slate-700">核心落地措施要点：</div>
+                        <ul className="list-disc pl-4 space-y-0.5 text-slate-600">
+                          {project.keyActionPoints.map((pt, i) => (
+                            <li key={i}>{pt}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* TAB 1: 在账设备清单 */}
           {activeTab === 'equipment' && (
             <div className="space-y-4">

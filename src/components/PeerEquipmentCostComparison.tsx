@@ -822,7 +822,10 @@ export const PeerEquipmentCostComparison: React.FC<PeerEquipmentCostComparisonPr
                     return `￥${val}`;
                   }}
                 />
-                <Tooltip content={<CustomRankingTooltip />} />
+                <Tooltip 
+                  content={<CustomRankingTooltip />} 
+                  wrapperStyle={{ pointerEvents: 'none', zIndex: 100 }} 
+                />
 
                 {/* 全院同类平均值线 */}
                 <ReferenceLine

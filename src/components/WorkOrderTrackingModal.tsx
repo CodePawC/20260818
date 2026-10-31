@@ -48,19 +48,9 @@ export const WorkOrderTrackingModal: React.FC<WorkOrderTrackingModalProps> = ({
   onClinicalAcceptance,
   onPrint
 }) => {
-  if (!isOpen || !workOrder) return null;
-
-  const flowStage = getWorkOrderFlowStage(workOrder.status);
-  const isPendingDispatch = workOrder.status === 'pending_dispatch';
-  const isInRepair = ['dispatched', 'accepted', 'arrived_inspecting', 'waiting_parts'].includes(workOrder.status);
-  const isPendingAccept = workOrder.status === 'repaired_pending_acceptance';
-  const isClosed = workOrder.status === 'closed';
-
-  const isP1 = workOrder.priority === 'P1_CRITICAL';
-  const isP2 = workOrder.priority === 'P2_URGENT';
-
   // 匹配关联的外协维保协同单数据
   const matchedVendorOrder = React.useMemo(() => {
+    if (!workOrder) return null;
     try {
       const orders = getVendorCollaborationOrders();
       return orders.find(o =>
@@ -72,6 +62,17 @@ export const WorkOrderTrackingModal: React.FC<WorkOrderTrackingModalProps> = ({
       return null;
     }
   }, [workOrder]);
+
+  if (!isOpen || !workOrder) return null;
+
+  const flowStage = getWorkOrderFlowStage(workOrder.status);
+  const isPendingDispatch = workOrder.status === 'pending_dispatch';
+  const isInRepair = ['dispatched', 'accepted', 'arrived_inspecting', 'waiting_parts'].includes(workOrder.status);
+  const isPendingAccept = workOrder.status === 'repaired_pending_acceptance';
+  const isClosed = workOrder.status === 'closed';
+
+  const isP1 = workOrder.priority === 'P1_CRITICAL';
+  const isP2 = workOrder.priority === 'P2_URGENT';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 overflow-y-auto">

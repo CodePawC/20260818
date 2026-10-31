@@ -52,9 +52,11 @@ import {
   BarChart3,
   SlidersHorizontal,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Compass
 } from 'lucide-react';
 import { AiAnalysisReportPdfModal } from './AiAnalysisReportPdfModal';
+import { EquipmentRadarChart } from './EquipmentRadarChart';
 
 interface AiDimensionAnalysisModalProps {
   isOpen: boolean;
@@ -1239,6 +1241,28 @@ ${batchResult.prioritizedDevices.map((d, i) => `${i + 1}. [${d.equipmentId}] ${d
                         <span className="px-2 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200 font-bold font-mono">
                           合规分: {analysisResult.radarScores.complianceScore}
                         </span>
+                        <span className="px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-bold font-mono">
+                          新旧分: {analysisResult.radarScores.modernityScore}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Visual 5-Dimension Radar Web */}
+                    <div className="p-3.5 bg-gradient-to-r from-slate-50 via-blue-50/20 to-indigo-50/20 rounded-xl border border-slate-200/90 flex flex-col md:flex-row items-center justify-between gap-4">
+                      <div className="space-y-1 max-w-sm">
+                        <div className="flex items-center gap-1.5 font-bold text-slate-800 text-xs">
+                          <Compass className="w-3.5 h-3.5 text-blue-600" />
+                          <span>AI 机群六维量化雷达分析沙盘（单机健康拟合）</span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 leading-relaxed">
+                          综合考量运行安全、故障可靠性、使用效益、法定义务检测合格与设备服役新旧5大核心维度，支持一键导出带水印防伪PDF诊断书。
+                        </p>
+                      </div>
+                      <div className="shrink-0 flex justify-center">
+                        <EquipmentRadarChart
+                          scores={analysisResult.radarScores}
+                          size="sm"
+                        />
                       </div>
                     </div>
 

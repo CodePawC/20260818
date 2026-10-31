@@ -93,8 +93,8 @@ export const RepairClosedLoopView: React.FC<RepairClosedLoopViewProps> = ({
   const [selectedDeptFilter, setSelectedDeptFilter] = useState<string>('all');
   const [selectedUrgencyFilter, setSelectedUrgencyFilter] = useState<string>('all');
   const [selectedStageFilter, setSelectedStageFilter] = useState<string>('all');
-  const [showFlowchart, setShowFlowchart] = useState<boolean>(true);
-  const [showCaoliaoOverview, setShowCaoliaoOverview] = useState<boolean>(true);
+  const [showFlowchart, setShowFlowchart] = useState<boolean>(false);
+  const [showCaoliaoOverview, setShowCaoliaoOverview] = useState<boolean>(false);
 
   // Pagination & Sorting & Density & Columns & Selection (Referencing Equipment Ledger Table)
   const [currentPage, setCurrentPage] = useState<number>(1);
