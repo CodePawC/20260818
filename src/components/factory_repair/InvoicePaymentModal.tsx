@@ -11,9 +11,11 @@ import {
   CreditCard, 
   Lock,
   ArrowRight,
-  ExternalLink
+  ExternalLink,
+  Printer
 } from 'lucide-react';
 import { ReturnFactoryRepairOrder, InvoiceAndPaymentTrack, WorkflowRole } from '../../types/factoryRepairTypes';
+import { ExpensePreApprovalModal } from '../payment/ExpensePreApprovalModal';
 
 interface InvoicePaymentModalProps {
   isOpen: boolean;
@@ -41,6 +43,7 @@ export const InvoicePaymentModal: React.FC<InvoicePaymentModalProps> = ({
   const [amount, setAmount] = useState(invoiceData?.amount || 14200);
   const [taxRate, setTaxRate] = useState(invoiceData?.taxRate || 13);
   const [invoiceType, setInvoiceType] = useState(invoiceData?.invoiceType || '增值税专用发票');
+  const [isPreApprovalModalOpen, setIsPreApprovalModalOpen] = useState(false);
 
   if (!isOpen) return null;
 
@@ -127,28 +130,58 @@ export const InvoicePaymentModal: React.FC<InvoicePaymentModalProps> = ({
             </div>
 
             {invoiceData ? (
-              <div className="grid grid-cols-4 gap-3 bg-white p-3 rounded-lg border border-slate-200">
-                <div>
-                  <span className="text-slate-400 block text-[10px]">发票类型</span>
-                  <span className="font-bold text-slate-800">{invoiceData.invoiceType}</span>
+              <>
+                <div className="grid grid-cols-4 gap-3 bg-white p-3 rounded-lg border border-slate-200">
+                  <div>
+                    <span className="text-slate-400 block text-[10px]">发票类型</span>
+                    <span className="font-bold text-slate-800">{invoiceData.invoiceType}</span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[10px]">发票代码 / 号码</span>
+                    <span className="font-mono font-bold text-indigo-700">
+                      {invoiceData.invoiceCode} / {invoiceData.invoiceNumber}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[10px]">价税合计金额</span>
+                    <span className="font-mono font-bold text-rose-700 text-sm">
+                      ¥{invoiceData.amount.toLocaleString()}.00
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-slate-400 block text-[10px]">上传与验真时间</span>
+                    <span className="font-mono text-slate-600 text-[11px]">{invoiceData.uploadedAt}</span>
+                  </div>
                 </div>
-                <div>
-                  <span className="text-slate-400 block text-[10px]">发票代码 / 号码</span>
-                  <span className="font-mono font-bold text-indigo-700">
-                    {invoiceData.invoiceCode} / {invoiceData.invoiceNumber}
-                  </span>
+
+                {/* 收到发票后生成费用预批单专项入口 */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-red-50/80 border border-red-200 mt-2 shadow-2xs">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-red-600 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-xs">
+                      <Receipt className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="font-bold text-red-950 text-xs flex items-center gap-2">
+                        <span>发票已收验：依规生成《五莲县人民医院 费用预批单》</span>
+                        <span className="text-3xs font-mono px-1.5 py-0.2 rounded bg-red-200 text-red-900 font-bold">
+                          附存根一式两联
+                        </span>
+                      </div>
+                      <div className="text-[11px] text-red-800 mt-0.5">
+                        支持标准 A4 双联裁切纸质打印（正本+存根）与全流程电子会签（经办人、科室负责人、分管领导、主要负责人、院长办公会）
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsPreApprovalModalOpen(true)}
+                    className="px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg text-xs transition shadow-xs flex items-center gap-1.5 cursor-pointer shrink-0"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>生成费用预批单 (纸质/电子版)</span>
+                  </button>
                 </div>
-                <div>
-                  <span className="text-slate-400 block text-[10px]">价税合计金额</span>
-                  <span className="font-mono font-bold text-rose-700 text-sm">
-                    ¥{invoiceData.amount.toLocaleString()}.00
-                  </span>
-                </div>
-                <div>
-                  <span className="text-slate-400 block text-[10px]">上传与验真时间</span>
-                  <span className="font-mono text-slate-600 text-[11px]">{invoiceData.uploadedAt}</span>
-                </div>
-              </div>
+              </>
             ) : isSettled ? (
               <form onSubmit={handleUploadSubmit} className="space-y-3 bg-white p-4 rounded-lg border border-slate-200">
                 <div className="grid grid-cols-3 gap-3">
@@ -286,6 +319,15 @@ export const InvoicePaymentModal: React.FC<InvoicePaymentModalProps> = ({
           <div className="flex items-center gap-3">
             <button
               type="button"
+              onClick={() => setIsPreApprovalModalOpen(true)}
+              className="px-3.5 py-2 bg-red-50 hover:bg-red-100 text-red-700 border border-red-300 font-bold text-xs rounded-lg transition flex items-center gap-1.5 cursor-pointer shadow-2xs"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span>生成费用预批单</span>
+            </button>
+
+            <button
+              type="button"
               onClick={onClose}
               className="px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-200 rounded-lg transition"
             >
@@ -294,6 +336,36 @@ export const InvoicePaymentModal: React.FC<InvoicePaymentModalProps> = ({
           </div>
         </div>
       </div>
+
+      {/* 费用预批单及存根（纸质与电子版双联） */}
+      <ExpensePreApprovalModal
+        isOpen={isPreApprovalModalOpen}
+        onClose={() => setIsPreApprovalModalOpen(false)}
+        initialData={{
+          id: '629', // 输尿管镜返厂大修项目台账固定对应 ID: 629
+          docNo: '629',
+          hospitalName: '五莲县人民医院',
+          department: '医疗设备科',
+          items: [
+            {
+              name: '医用电子内窥镜（输尿管镜）返厂物镜与光束精密置换',
+              model: order.initialFault?.equipmentModel || 'URF-V / 330mm',
+              supplier: order.repairContract?.contractPartyB || '上海成运医疗器械技术服务有限公司',
+              quantity: 1,
+              price: invoiceData?.amount || 14200,
+              remarks: `已收发票 ${invoiceData?.invoiceNumber || '9928172635'} 完工合格`
+            }
+          ],
+          totalAmount: invoiceData?.amount || 14200,
+          invoiceInfo: invoiceData ? {
+            code: invoiceData.invoiceCode,
+            number: invoiceData.invoiceNumber,
+            type: invoiceData.invoiceType,
+            amount: invoiceData.amount,
+            date: invoiceData.issuedDate
+          } : undefined
+        }}
+      />
     </div>
   );
 };

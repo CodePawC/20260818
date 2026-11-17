@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { MedicalEquipment, MetrologyCatalogueItem, ThirdPartyInspectionReport, AcceptanceSignoffDetail } from '../types';
+import { MedicalEquipment, MetrologyCatalogueItem, ThirdPartyInspectionReport, AcceptanceSignoffDetail, AuthUser } from '../types';
+import { canEditEquipment, canChangeEquipmentStatus, canInitiateRepair, canAccessTab } from '../utils/authUtils';
 import { ThirdPartyReportPreviewModal } from './ThirdPartyReportPreviewModal';
 import {
   X,
@@ -105,12 +106,12 @@ interface EquipmentDetailModalProps {
   onOpenOfficialReport?: (item: MedicalEquipment, reason?: string) => void;
   onNavigateToScrap?: (item: MedicalEquipment) => void;
   onOpenTroubleshootModal?: (item: MedicalEquipment) => void;
-  currentUser?: {
+  currentUser?: AuthUser | {
     name?: string;
     role?: string;
     department?: string;
     phone?: string;
-  };
+  } | null;
 }
 
 export const EquipmentDetailModal: React.FC<EquipmentDetailModalProps> = ({
@@ -141,6 +142,13 @@ export const EquipmentDetailModal: React.FC<EquipmentDetailModalProps> = ({
   onOpenTroubleshootModal,
   currentUser,
 }) => {
+  const rbacUser = currentUser as AuthUser | null | undefined;
+  const allowEdit = currentUser ? canEditEquipment(rbacUser) : true;
+  const allowStatus = currentUser ? canChangeEquipmentStatus(rbacUser) : true;
+  const allowRepair = currentUser ? canInitiateRepair(rbacUser) : true;
+  const canViewScrap = currentUser ? canAccessTab(rbacUser, 'scrap_workflow') : true;
+  const allowApprovals = currentUser ? canAccessTab(rbacUser, 'approvals') : true;
+
   const [activeTab, setActiveTab] = useState<'basic' | 'timeline' | 'roi' | 'repairs' | 'cost_analysis' | 'forecast' | 'logs' | 'loans' | 'acceptance'>(initialTab || 'basic');
 
   useEffect(() => {
@@ -373,7 +381,7 @@ export const EquipmentDetailModal: React.FC<EquipmentDetailModalProps> = ({
                       <span>经整修与72h稳定性合格准用 (备案号: {validityInfo.dualBadge.filingNo})</span>
                     </button>
                   </div>
-                ) : validityInfo.riskLevel === 'high' ? (
+                ) : validityInfo.riskLevel === 'high' && allowStatus ? (
                   <button
                     type="button"
                     onClick={() => onOpenOverdueFiling?.(equipment)}
@@ -483,7 +491,7 @@ export const EquipmentDetailModal: React.FC<EquipmentDetailModalProps> = ({
               </button>
             )}
 
-            {equipment.status === '故障待修' && (
+            {equipment.status === '故障待修' && allowStatus && (
               <button
                 type="button"
                 onClick={() => {
@@ -498,13 +506,15 @@ export const EquipmentDetailModal: React.FC<EquipmentDetailModalProps> = ({
               </button>
             )}
 
-            <button
-              onClick={() => onOpenRepairForDevice(equipment)}
-              className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer"
-            >
-              <Wrench className="w-4 h-4" />
-              <span>登记报修</span>
-            </button>
+            {allowRepair && (
+              <button
+                onClick={() => onOpenRepairForDevice(equipment)}
+                className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+              >
+                <Wrench className="w-4 h-4" />
+                <span>登记报修</span>
+              </button>
+            )}
 
             {onOpenTroubleshootModal && (
               <button
@@ -572,7 +582,7 @@ export const EquipmentDetailModal: React.FC<EquipmentDetailModalProps> = ({
                 <ShieldCheck className="w-4 h-4 text-emerald-200" />
                 <span>准用备案档案</span>
               </button>
-            ) : validityInfo.riskLevel === 'high' ? (
+            ) : validityInfo.riskLevel === 'high' && allowStatus ? (
               <button
                 type="button"
                 onClick={() => onOpenOverdueFiling?.(equipment)}
@@ -618,7 +628,7 @@ export const EquipmentDetailModal: React.FC<EquipmentDetailModalProps> = ({
               </button>
             )}
 
-            {onNavigateToScrap && (
+            {onNavigateToScrap && canViewScrap && (allowEdit || allowStatus) && (
               <button
                 type="button"
                 onClick={() => {
@@ -1194,7 +1204,7 @@ export const EquipmentDetailModal: React.FC<EquipmentDetailModalProps> = ({
                       依据原厂出厂标准核定
                     </span>
                     <div className="flex items-center gap-3">
-                      {validityInfo.riskLevel === 'high' && !equipment.overdueFiling && onOpenOverdueFiling && (
+                      {validityInfo.riskLevel === 'high' && !equipment.overdueFiling && onOpenOverdueFiling && allowStatus && (
                         <button
                           type="button"
                           onClick={() => onOpenOverdueFiling(equipment)}
@@ -1204,7 +1214,7 @@ export const EquipmentDetailModal: React.FC<EquipmentDetailModalProps> = ({
                           <span>办理超期准用备案</span>
                         </button>
                       )}
-                      {validityInfo.riskLevel === 'high' && (
+                      {validityInfo.riskLevel === 'high' && allowStatus && canViewScrap && (
                         <button
                           type="button"
                           onClick={() => {
@@ -2049,13 +2059,15 @@ export const EquipmentDetailModal: React.FC<EquipmentDetailModalProps> = ({
                   )}
                 </div>
 
-                <button
-                  onClick={() => onOpenRepairForDevice(equipment)}
-                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-2xs cursor-pointer"
-                >
-                  <Wrench className="w-3.5 h-3.5" />
-                  <span>登记新维修工单</span>
-                </button>
+                {allowRepair && (
+                  <button
+                    onClick={() => onOpenRepairForDevice(equipment)}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 shadow-2xs cursor-pointer"
+                  >
+                    <Wrench className="w-3.5 h-3.5" />
+                    <span>登记新维修工单</span>
+                  </button>
+                )}
               </div>
 
               {/* 外协协同进度、阶段性反馈与临床复核验收专区 */}
@@ -2073,7 +2085,7 @@ export const EquipmentDetailModal: React.FC<EquipmentDetailModalProps> = ({
                   <VendorCollaborationRepairTracker
                     equipment={equipment}
                     workOrders={deviceWorkOrders}
-                    onUpdateEquipment={onSaveEquipment}
+                    onUpdateEquipment={allowEdit ? onSaveEquipment : undefined}
                     currentUser={currentUser}
                   />
                 </div>
@@ -2085,13 +2097,15 @@ export const EquipmentDetailModal: React.FC<EquipmentDetailModalProps> = ({
                   <ShieldCheck className="w-10 h-10 text-emerald-400 mx-auto mb-2 opacity-80" />
                   <p className="font-semibold text-slate-700 text-sm">该设备暂无历史维修或派工记录</p>
                   <p className="text-slate-400 text-xs mt-1">设备运行状况良好，定期预防性维护执行正常。</p>
-                  <button
-                    onClick={() => onOpenRepairForDevice(equipment)}
-                    className="mt-3 px-3.5 py-1.5 bg-slate-100 hover:bg-blue-50 text-blue-600 rounded-lg text-xs font-bold border border-blue-200 transition cursor-pointer inline-flex items-center gap-1"
-                  >
-                    <Wrench className="w-3.5 h-3.5" />
-                    <span>若设备发生异常，点击发起故障报修</span>
-                  </button>
+                  {allowRepair && (
+                    <button
+                      onClick={() => onOpenRepairForDevice(equipment)}
+                      className="mt-3 px-3.5 py-1.5 bg-slate-100 hover:bg-blue-50 text-blue-600 rounded-lg text-xs font-bold border border-blue-200 transition cursor-pointer inline-flex items-center gap-1"
+                    >
+                      <Wrench className="w-3.5 h-3.5" />
+                      <span>若设备发生异常，点击发起故障报修</span>
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -3297,14 +3311,16 @@ export const EquipmentDetailModal: React.FC<EquipmentDetailModalProps> = ({
         {/* ===================== 底部操作与流程审批触发栏 (Footer) ===================== */}
         <div className="px-6 py-3.5 border-t border-slate-200 bg-slate-50 flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => onOpenStatusChange(equipment)}
-              className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg text-xs font-semibold shadow-2xs transition cursor-pointer"
-            >
-              变更设备状态
-            </button>
+            {allowStatus && (
+              <button
+                onClick={() => onOpenStatusChange(equipment)}
+                className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg text-xs font-semibold shadow-2xs transition cursor-pointer"
+              >
+                变更设备状态
+              </button>
+            )}
 
-            {onNavigateToApprovals && (
+            {onNavigateToApprovals && allowApprovals && (allowEdit || allowStatus) && (
               <>
                 <button
                   type="button"
@@ -3328,29 +3344,31 @@ export const EquipmentDetailModal: React.FC<EquipmentDetailModalProps> = ({
                   <span>换件审批</span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    onClose();
-                    onNavigateToApprovals({
-                      type: 'scrap_disposal',
-                      equipmentId: equipment.id,
-                      equipmentName: equipment.name,
-                      equipmentModel: equipment.model,
-                      equipmentLocation: equipment.location,
-                      equipmentPurchasePrice: equipment.purchasePrice,
-                      equipmentPurchaseDate: equipment.purchaseDate,
-                      equipmentCumulativeMaintenanceCost: (equipment.repairRecords || []).reduce((s, r) => s + (r.cost || 0), 0),
-                      applicantDepartment: equipment.department,
-                      title: `【${equipment.department}】${equipment.name} 报废技术鉴定申请`
-                    });
-                  }}
-                  className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-900 border border-rose-300 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1"
-                  title="为该设备发起技术报废鉴定审批"
-                >
-                  <Trash2 className="w-3.5 h-3.5 text-rose-700" />
-                  <span>报废审批</span>
-                </button>
+                {canViewScrap && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onNavigateToApprovals({
+                        type: 'scrap_disposal',
+                        equipmentId: equipment.id,
+                        equipmentName: equipment.name,
+                        equipmentModel: equipment.model,
+                        equipmentLocation: equipment.location,
+                        equipmentPurchasePrice: equipment.purchasePrice,
+                        equipmentPurchaseDate: equipment.purchaseDate,
+                        equipmentCumulativeMaintenanceCost: (equipment.repairRecords || []).reduce((s, r) => s + (r.cost || 0), 0),
+                        applicantDepartment: equipment.department,
+                        title: `【${equipment.department}】${equipment.name} 报废技术鉴定申请`
+                      });
+                    }}
+                    className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-900 border border-rose-300 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1"
+                    title="为该设备发起技术报废鉴定审批"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-rose-700" />
+                    <span>报废审批</span>
+                  </button>
+                )}
               </>
             )}
           </div>

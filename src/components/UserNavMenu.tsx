@@ -28,7 +28,8 @@ import {
 } from 'lucide-react';
 import { AuthUser, StaffPersonMaster } from '../types';
 import { getRoleBadgeStyle, inferStakeholderCluster, STAKEHOLDER_CLUSTERS } from '../utils/staffRolesData';
-import { SUPER_ADMIN_USER, createAuthUserFromStaff } from '../utils/authUtils';
+import { SUPER_ADMIN_USER, createAuthUserFromStaff, PRESET_ROLE_PERSONAS, QuickRolePreset } from '../utils/authUtils';
+import { resolveRoleArchetype, ROLE_ARCHETYPE_LABELS } from '../utils/rbacPolicy';
 
 interface UserNavMenuProps {
   currentUser: AuthUser;
@@ -73,7 +74,36 @@ export const UserNavMenu: React.FC<UserNavMenuProps> = ({
     setSearchQuery('');
   };
 
-  // 获取当前用户的干系人集群信息
+  const handleSelectPreset = (preset: QuickRolePreset) => {
+    if (preset.archetype === 'admin') {
+      onSwitchUser(SUPER_ADMIN_USER);
+    } else {
+      const matched = masterStaff.find(s => s.employeeNo === preset.employeeNo || s.name === preset.name);
+      if (matched) {
+        onSwitchUser(createAuthUserFromStaff(matched));
+      } else {
+        onSwitchUser(createAuthUserFromStaff({
+          id: preset.id,
+          employeeNo: preset.employeeNo,
+          name: preset.name,
+          role: preset.role as any,
+          departmentId: preset.archetype === 'engineering_supervisor' || preset.archetype === 'engineer' ? '303' : '101',
+          departmentName: preset.departmentName,
+          organization: preset.organization,
+          stakeholderCategory: preset.stakeholderCategory,
+          phone: '7991000',
+          isPrimaryContact: false,
+          status: 'active'
+        }));
+      }
+    }
+    setIsOpen(false);
+    setSearchQuery('');
+  };
+
+  // 获取当前用户的干系人集群与7+1岗位原型信息
+  const currentArchetype = resolveRoleArchetype(currentUser);
+  const currentArchetypeLabel = ROLE_ARCHETYPE_LABELS[currentArchetype];
   const currentCluster = currentUser.isAdmin 
     ? '系统管理中心' 
     : (STAKEHOLDER_CLUSTERS.find(c => c.id === inferStakeholderCluster(currentUser.role, currentUser.departmentName, currentUser.organization))?.name || '业务干系人');
@@ -212,7 +242,7 @@ export const UserNavMenu: React.FC<UserNavMenuProps> = ({
           <div className="px-4 py-2 bg-slate-50 border-b border-slate-200/80 flex items-center justify-between gap-2 text-[11px] shrink-0 w-full min-w-0">
             <div className="flex items-center gap-1.5 font-medium text-slate-700 truncate min-w-0">
               <ShieldCheck className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
-              <span className="truncate">当前已授予功能特权</span>
+              <span className="truncate">当前权限视角：<strong className="text-slate-900">{currentArchetypeLabel}</strong></span>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
               <span className="font-mono text-indigo-700 font-bold bg-indigo-50/80 px-2 py-0.5 rounded border border-indigo-200 text-[10.5px]">
@@ -223,13 +253,44 @@ export const UserNavMenu: React.FC<UserNavMenuProps> = ({
 
           {/* 3. 快速切换角色与干系人视角 */}
           <div className="p-3.5 space-y-2.5 flex-1 min-h-0 overflow-hidden flex flex-col bg-white w-full">
+            {/* 7+1 典型岗位一键直切 */}
+            <div className="shrink-0 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] font-bold text-slate-700">典型岗位快速切换 (7+1 权限验证)</span>
+                <span className="text-[10px] text-slate-400">即点即切</span>
+              </div>
+              <div className="grid grid-cols-4 gap-1.5">
+                {PRESET_ROLE_PERSONAS.map((preset) => {
+                  const isActivePreset = currentArchetype === preset.archetype;
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => handleSelectPreset(preset)}
+                      title={`${preset.name} (${preset.role}) · ${preset.description}`}
+                      className={`px-2 py-1.5 rounded-lg border text-left transition cursor-pointer ${
+                        isActivePreset
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                          : 'bg-slate-50 hover:bg-indigo-50 text-slate-700 border-slate-200 hover:border-indigo-300'
+                      }`}
+                    >
+                      <div className="text-[11px] font-bold truncate">{preset.badge}</div>
+                      <div className={`text-[10px] truncate ${isActivePreset ? 'text-indigo-100' : 'text-slate-500'}`}>
+                        {preset.name}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             {/* 栏目标题与提示 */}
-            <div className="flex items-center justify-between gap-2 shrink-0 w-full min-w-0">
+            <div className="flex items-center justify-between gap-2 shrink-0 w-full min-w-0 pt-1 border-t border-slate-100">
               <div className="flex items-center gap-1.5 min-w-0 truncate">
                 <Users className="w-4 h-4 text-indigo-600 shrink-0" />
-                <span className="text-xs font-bold text-slate-900 tracking-tight truncate">快速切换干系人视角</span>
+                <span className="text-xs font-bold text-slate-900 tracking-tight truncate">全部在册干系人切换</span>
               </div>
-              <span className="text-[10.5px] text-slate-400 font-medium shrink-0">即点即切 无缝协同</span>
+              <span className="text-[10.5px] text-slate-400 font-medium shrink-0">共 {masterStaff.length + 1} 人</span>
             </div>
 
             {/* 搜索框 */}

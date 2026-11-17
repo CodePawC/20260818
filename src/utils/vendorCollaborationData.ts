@@ -1182,3 +1182,36 @@ export function syncVendorCollaborationToPartner(order: VendorCollaborationOrder
   partners[index] = partner;
   savePartnersList(partners);
 }
+
+/**
+ * 统一匹配外协协同单与外协服务商登录账号
+ * 解决合作单位字典 ID（如 MFG-001、MFG-002、MFG-004）与供应商门户账号 ID（partner-002 等）及厂商别名不一致的问题
+ */
+const VENDOR_ID_ALIASES: Record<string, string[]> = {
+  'partner-001': ['partner-001', 'ge', '通用电气'],
+  'partner-002': ['partner-002', 'mfg-001', 'mindray', '迈瑞'],
+  'partner-003': ['partner-003', 'mfg-002', '联影', 'uih', '西门子'],
+  'partner-004': ['partner-004', 'mfg-004', 'neusoft', '东软'],
+  'iso-001': ['iso-001', 'sinopharm', '国药']
+};
+
+export function matchesVendorAccount(
+  order: Pick<VendorCollaborationOrder, 'vendorId' | 'vendorName'>,
+  vendor: Pick<VendorUserAccount, 'vendorId' | 'vendorName'> | null | undefined
+): boolean {
+  if (!order || !vendor) return false;
+  const oId = (order.vendorId || '').trim().toLowerCase();
+  const vId = (vendor.vendorId || '').trim().toLowerCase();
+  if (oId && vId && oId === vId) return true;
+
+  const aliases = VENDOR_ID_ALIASES[vId] || [vId];
+  const oName = (order.vendorName || '').trim().toLowerCase();
+  const vName = (vendor.vendorName || '').trim().toLowerCase();
+
+  if (oId && aliases.includes(oId)) return true;
+  if (oName && vName && (oName.includes(vName.slice(0, 4)) || vName.includes(oName.slice(0, 4)))) {
+    return true;
+  }
+  return aliases.some(alias => alias.length >= 2 && oName.includes(alias));
+}
+

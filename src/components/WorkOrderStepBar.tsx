@@ -1,12 +1,12 @@
 import React from 'react';
 import { WorkOrderStatus } from '../types/dispatchTypes';
-import { Check, Clock, ChevronRight, AlertCircle, Wrench, UserCheck, ShieldCheck, CheckCircle2 } from 'lucide-react';
+import { Check, MessageSquare } from 'lucide-react';
 
-export type FlowStage = 'pending_dispatch' | 'in_repair' | 'pending_acceptance' | 'completed';
+export type FlowStage = 'pending_dispatch' | 'pre_dispatched' | 'in_repair' | 'pending_acceptance' | 'completed';
 
 export interface StageInfo {
   stage: FlowStage;
-  stepIndex: number; // 0: 待分配, 1: 维修中, 2: 待验收, 3: 已完成
+  stepIndex: number; // 0: 待分配, 1: 预派工, 2: 维修中, 3: 待验收, 4: 已完成
   stageLabel: string;
   subStatusLabel: string;
   colorClass: string;
@@ -18,10 +18,11 @@ export const WORK_ORDER_FLOW_STEPS: {
   shortDesc: string;
   stepNumber: number;
 }[] = [
-  { stage: 'pending_dispatch', label: '待分配', shortDesc: '调度指派', stepNumber: 1 },
-  { stage: 'in_repair', label: '维修中', shortDesc: '排查作业', stepNumber: 2 },
-  { stage: 'pending_acceptance', label: '待验收', shortDesc: '临床试机', stepNumber: 3 },
-  { stage: 'completed', label: '已完成', shortDesc: '闭环归档', stepNumber: 4 }
+  { stage: 'pending_dispatch', label: '待分配', shortDesc: '登记受理', stepNumber: 1 },
+  { stage: 'pre_dispatched', label: '预派工', shortDesc: '拟定/讨论确认', stepNumber: 2 },
+  { stage: 'in_repair', label: '维修中', shortDesc: '正式派工/排查', stepNumber: 3 },
+  { stage: 'pending_acceptance', label: '待验收', shortDesc: '临床试机', stepNumber: 4 },
+  { stage: 'completed', label: '已完成', shortDesc: '闭环归档', stepNumber: 5 }
 ];
 
 export function getWorkOrderFlowStage(status: WorkOrderStatus): StageInfo {
@@ -31,21 +32,29 @@ export function getWorkOrderFlowStage(status: WorkOrderStatus): StageInfo {
         stage: 'pending_dispatch',
         stepIndex: 0,
         stageLabel: '待分配',
-        subStatusLabel: '调度待指派',
+        subStatusLabel: '调度待拟定',
         colorClass: 'rose'
+      };
+    case 'pre_dispatched':
+      return {
+        stage: 'pre_dispatched',
+        stepIndex: 1,
+        stageLabel: '预派工',
+        subStatusLabel: '已拟定工程师·内部讨论确认中',
+        colorClass: 'violet'
       };
     case 'dispatched':
       return {
         stage: 'in_repair',
-        stepIndex: 1,
+        stepIndex: 2,
         stageLabel: '维修中',
-        subStatusLabel: '已派待接单',
+        subStatusLabel: '已正式派工·待接单',
         colorClass: 'indigo'
       };
     case 'accepted':
       return {
         stage: 'in_repair',
-        stepIndex: 1,
+        stepIndex: 2,
         stageLabel: '维修中',
         subStatusLabel: '工程师在途',
         colorClass: 'blue'
@@ -53,7 +62,7 @@ export function getWorkOrderFlowStage(status: WorkOrderStatus): StageInfo {
     case 'arrived_inspecting':
       return {
         stage: 'in_repair',
-        stepIndex: 1,
+        stepIndex: 2,
         stageLabel: '维修中',
         subStatusLabel: '现场排查中',
         colorClass: 'amber'
@@ -61,7 +70,7 @@ export function getWorkOrderFlowStage(status: WorkOrderStatus): StageInfo {
     case 'waiting_parts':
       return {
         stage: 'in_repair',
-        stepIndex: 1,
+        stepIndex: 2,
         stageLabel: '维修中',
         subStatusLabel: '挂起待配件',
         colorClass: 'purple'
@@ -69,7 +78,7 @@ export function getWorkOrderFlowStage(status: WorkOrderStatus): StageInfo {
     case 'repaired_pending_acceptance':
       return {
         stage: 'pending_acceptance',
-        stepIndex: 2,
+        stepIndex: 3,
         stageLabel: '待验收',
         subStatusLabel: '完工待科室验收',
         colorClass: 'cyan'
@@ -77,7 +86,7 @@ export function getWorkOrderFlowStage(status: WorkOrderStatus): StageInfo {
     case 'closed':
       return {
         stage: 'completed',
-        stepIndex: 3,
+        stepIndex: 4,
         stageLabel: '已完成',
         subStatusLabel: '临床验收已闭环',
         colorClass: 'emerald'
@@ -97,6 +106,9 @@ interface WorkOrderStepBarProps {
   status: WorkOrderStatus;
   size?: 'sm' | 'md' | 'lg';
   showSubStatus?: boolean;
+  proposedEngineerName?: string;
+  assignedEngineerName?: string;
+  discussionCount?: number;
   onStepClick?: (stage: FlowStage) => void;
   className?: string;
 }
@@ -105,31 +117,36 @@ export const WorkOrderStepBar: React.FC<WorkOrderStepBarProps> = ({
   status,
   size = 'sm',
   showSubStatus = true,
+  proposedEngineerName,
+  assignedEngineerName,
+  discussionCount = 0,
   onStepClick,
   className = ''
 }) => {
   const currentInfo = getWorkOrderFlowStage(status);
   const currentStep = currentInfo.stepIndex;
+  const progressPercent = Math.round((currentStep / (WORK_ORDER_FLOW_STEPS.length - 1)) * 100);
 
   if (size === 'sm') {
     return (
       <div className={`w-full ${className}`}>
-        {/* Simple 4-Step Bar: 待分配 -> 维修中 -> 待验收 -> 已完成 */}
-        <div className="flex items-center justify-between gap-1 w-full text-2xs select-none">
+        {/* 5-Step Progress Track: 待分配 -> 预派工 -> 维修中 -> 待验收 -> 已完成 */}
+        <div className="flex items-center justify-between gap-0.5 w-full text-[11px] select-none">
           {WORK_ORDER_FLOW_STEPS.map((step, idx) => {
             const isCompleted = currentStep > idx;
             const isCurrent = currentStep === idx;
-            const isFuture = currentStep < idx;
 
             return (
               <React.Fragment key={step.stage}>
                 <div
                   onClick={() => onStepClick && onStepClick(step.stage)}
-                  className={`flex items-center gap-1 py-1 px-1.5 rounded transition-all ${
+                  className={`flex items-center gap-1 py-0.5 px-1 rounded transition-all ${
                     onStepClick ? 'cursor-pointer hover:bg-slate-100' : ''
                   } ${
                     isCurrent
-                      ? 'bg-indigo-50 text-indigo-700 font-bold border border-indigo-200/80 shadow-2xs'
+                      ? status === 'pre_dispatched'
+                        ? 'bg-violet-50 text-violet-800 font-bold border border-violet-200'
+                        : 'bg-indigo-50 text-indigo-700 font-bold border border-indigo-200/80'
                       : isCompleted
                       ? 'text-emerald-700 font-medium'
                       : 'text-slate-400 font-normal'
@@ -137,11 +154,13 @@ export const WorkOrderStepBar: React.FC<WorkOrderStepBarProps> = ({
                   title={`${step.label} (${step.shortDesc})`}
                 >
                   <span
-                    className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-mono shrink-0 transition-transform ${
+                    className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[9px] font-mono shrink-0 ${
                       isCompleted
                         ? 'bg-emerald-600 text-white'
                         : isCurrent
-                        ? 'bg-indigo-600 text-white shadow-xs animate-pulse'
+                        ? status === 'pre_dispatched'
+                          ? 'bg-violet-600 text-white'
+                          : 'bg-indigo-600 text-white'
                         : 'bg-slate-200 text-slate-500'
                     }`}
                   >
@@ -152,11 +171,13 @@ export const WorkOrderStepBar: React.FC<WorkOrderStepBarProps> = ({
 
                 {idx < WORK_ORDER_FLOW_STEPS.length - 1 && (
                   <div
-                    className={`flex-1 h-[2px] min-w-[10px] max-w-[28px] transition-colors rounded-full ${
+                    className={`flex-1 h-[2px] min-w-[6px] transition-colors rounded-full ${
                       currentStep > idx
                         ? 'bg-emerald-500'
                         : currentStep === idx
-                        ? 'bg-gradient-to-r from-indigo-500 to-slate-200'
+                        ? status === 'pre_dispatched'
+                          ? 'bg-gradient-to-r from-violet-500 to-slate-200'
+                          : 'bg-gradient-to-r from-indigo-500 to-slate-200'
                         : 'bg-slate-200'
                     }`}
                   />
@@ -166,29 +187,59 @@ export const WorkOrderStepBar: React.FC<WorkOrderStepBarProps> = ({
           })}
         </div>
 
-        {/* Optional sub-status badge on current step */}
+        {/* Continuous Progress Indicator Bar */}
+        <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden mt-1.5">
+          <div
+            className={`h-full transition-all duration-300 rounded-full ${
+              status === 'pre_dispatched'
+                ? 'bg-violet-600'
+                : status === 'closed'
+                ? 'bg-emerald-600'
+                : 'bg-indigo-600'
+            }`}
+            style={{ width: `${Math.max(progressPercent, 8)}%` }}
+          />
+        </div>
+
+        {/* Optional sub-status line */}
         {showSubStatus && (
-          <div className="flex items-center justify-between mt-1 text-[11px] px-0.5">
-            <span className="text-slate-400">当前流转状态:</span>
-            <span
-              className={`font-semibold px-1.5 py-0.2 rounded text-[10px] border ${
-                currentInfo.colorClass === 'rose'
-                  ? 'bg-rose-50 text-rose-700 border-rose-200'
-                  : currentInfo.colorClass === 'indigo'
-                  ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                  : currentInfo.colorClass === 'blue'
-                  ? 'bg-blue-50 text-blue-700 border-blue-200'
-                  : currentInfo.colorClass === 'amber'
-                  ? 'bg-amber-50 text-amber-700 border-amber-200'
-                  : currentInfo.colorClass === 'purple'
-                  ? 'bg-purple-50 text-purple-700 border-purple-200'
-                  : currentInfo.colorClass === 'cyan'
-                  ? 'bg-cyan-50 text-cyan-700 border-cyan-200'
-                  : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-              }`}
-            >
-              ● {currentInfo.subStatusLabel}
+          <div className="flex items-center justify-between mt-1 text-[10.5px] px-0.5 gap-1">
+            <span className="text-slate-400 truncate">
+              {status === 'pre_dispatched' && proposedEngineerName
+                ? `拟定工程师: ${proposedEngineerName}`
+                : assignedEngineerName
+                ? `负责工程师: ${assignedEngineerName}`
+                : '当前流转进度:'}
             </span>
+            <div className="flex items-center gap-1.5 shrink-0">
+              {discussionCount > 0 && (
+                <span className="inline-flex items-center gap-0.5 text-violet-700 font-medium">
+                  <MessageSquare className="w-2.5 h-2.5" />
+                  {discussionCount}条讨论
+                </span>
+              )}
+              <span
+                className={`font-semibold px-1.5 py-0.2 rounded text-[10px] border ${
+                  currentInfo.colorClass === 'rose'
+                    ? 'bg-rose-50 text-rose-700 border-rose-200'
+                    : currentInfo.colorClass === 'violet'
+                    ? 'bg-violet-50 text-violet-800 border-violet-200'
+                    : currentInfo.colorClass === 'indigo'
+                    ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                    : currentInfo.colorClass === 'blue'
+                    ? 'bg-blue-50 text-blue-700 border-blue-200'
+                    : currentInfo.colorClass === 'amber'
+                    ? 'bg-amber-50 text-amber-700 border-amber-200'
+                    : currentInfo.colorClass === 'purple'
+                    ? 'bg-purple-50 text-purple-700 border-purple-200'
+                    : currentInfo.colorClass === 'cyan'
+                    ? 'bg-cyan-50 text-cyan-700 border-cyan-200'
+                    : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                }`}
+              >
+                ● {currentInfo.subStatusLabel}
+              </span>
+            </div>
           </div>
         )}
       </div>
@@ -197,12 +248,33 @@ export const WorkOrderStepBar: React.FC<WorkOrderStepBarProps> = ({
 
   // Medium and Large size for headers, tracking banners and modals
   return (
-    <div className={`w-full bg-slate-50/90 rounded-xl p-3 border border-slate-200/80 ${className}`}>
+    <div className={`w-full bg-slate-50/90 rounded-lg p-3 border border-slate-200/90 ${className}`}>
+      <div className="flex items-center justify-between mb-2 text-[11px]">
+        <div className="flex items-center gap-2">
+          <span className="font-bold text-slate-700">工单流转进度条</span>
+          <span
+            className={`px-1.5 py-0.2 rounded font-semibold border text-[10px] ${
+              status === 'pre_dispatched'
+                ? 'bg-violet-50 text-violet-800 border-violet-200'
+                : status === 'pending_dispatch'
+                ? 'bg-rose-50 text-rose-700 border-rose-200'
+                : status === 'closed'
+                ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+            }`}
+          >
+            {currentInfo.stageLabel} · {currentInfo.subStatusLabel}
+          </span>
+        </div>
+        <span className="font-mono text-slate-500 font-semibold">
+          阶段 {currentStep + 1} / {WORK_ORDER_FLOW_STEPS.length} ({progressPercent}%)
+        </span>
+      </div>
+
       <div className="flex items-center justify-between relative">
         {WORK_ORDER_FLOW_STEPS.map((step, idx) => {
           const isCompleted = currentStep > idx;
           const isCurrent = currentStep === idx;
-          const isFuture = currentStep < idx;
 
           return (
             <React.Fragment key={step.stage}>
@@ -217,7 +289,9 @@ export const WorkOrderStepBar: React.FC<WorkOrderStepBarProps> = ({
                     isCompleted
                       ? 'bg-emerald-600 text-white shadow-xs'
                       : isCurrent
-                      ? 'bg-indigo-600 text-white ring-4 ring-indigo-100 shadow-sm'
+                      ? status === 'pre_dispatched'
+                        ? 'bg-violet-600 text-white ring-4 ring-violet-100 shadow-sm'
+                        : 'bg-indigo-600 text-white ring-4 ring-indigo-100 shadow-sm'
                       : 'bg-white border-2 border-slate-300 text-slate-400'
                   }`}
                 >
@@ -228,7 +302,9 @@ export const WorkOrderStepBar: React.FC<WorkOrderStepBarProps> = ({
                   <div
                     className={`text-xs font-bold transition-colors ${
                       isCurrent
-                        ? 'text-indigo-900'
+                        ? status === 'pre_dispatched'
+                          ? 'text-violet-900'
+                          : 'text-indigo-900'
                         : isCompleted
                         ? 'text-slate-800'
                         : 'text-slate-400'
@@ -239,25 +315,33 @@ export const WorkOrderStepBar: React.FC<WorkOrderStepBarProps> = ({
                   <div
                     className={`text-[10px] mt-0.5 whitespace-nowrap ${
                       isCurrent
-                        ? 'text-indigo-600 font-semibold'
+                        ? status === 'pre_dispatched'
+                          ? 'text-violet-700 font-semibold'
+                          : 'text-indigo-600 font-semibold'
                         : isCompleted
                         ? 'text-emerald-600'
                         : 'text-slate-400'
                     }`}
                   >
-                    {isCurrent ? currentInfo.subStatusLabel : step.shortDesc}
+                    {isCurrent
+                      ? status === 'pre_dispatched' && proposedEngineerName
+                        ? `拟定: ${proposedEngineerName}`
+                        : currentInfo.subStatusLabel
+                      : step.shortDesc}
                   </div>
                 </div>
               </div>
 
               {idx < WORK_ORDER_FLOW_STEPS.length - 1 && (
-                <div className="flex-1 px-2 mb-6">
+                <div className="flex-1 px-1.5 mb-6">
                   <div
-                    className={`h-1 rounded-full transition-all duration-300 ${
+                    className={`h-1.5 rounded-full transition-all duration-300 ${
                       currentStep > idx
                         ? 'bg-emerald-500'
                         : currentStep === idx
-                        ? 'bg-gradient-to-r from-indigo-500 via-indigo-300 to-slate-200'
+                        ? status === 'pre_dispatched'
+                          ? 'bg-gradient-to-r from-violet-500 via-violet-300 to-slate-200'
+                          : 'bg-gradient-to-r from-indigo-500 via-indigo-300 to-slate-200'
                         : 'bg-slate-200'
                     }`}
                   />

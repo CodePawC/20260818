@@ -1,10 +1,18 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   EngineeringWorkOrder,
   WorkOrderStatus,
   FaultCategory,
-  WorkOrderPart
+  WorkOrderPart,
+  OutsourceServiceMode
 } from '../types/dispatchTypes';
+import {
+  getAvailableOutsourcedVendors,
+  recommendVendorForOrder,
+  OUTSOURCE_SERVICE_MODE_LABELS,
+  buildVendorOrderFromWorkOrder,
+  upsertVendorCollaborationOrder
+} from '../utils/dispatchData';
 import {
   X,
   Wrench,
@@ -22,7 +30,11 @@ import {
   PlayCircle,
   Package,
   RotateCcw,
-  Sparkles
+  Sparkles,
+  FolderKanban,
+  Scale,
+  Coins,
+  ChevronRight
 } from 'lucide-react';
 import { IssueSparePartModal } from './IssueSparePartModal';
 import { SparePartItem } from '../types/sparePartsTypes';
@@ -32,6 +44,11 @@ import {
   issueSparePartForWorkOrder,
   returnSparePartForWorkOrder
 } from '../utils/sparePartsData';
+import {
+  resolveProcurementMode,
+  PROCUREMENT_MODE_META,
+  buildDynamicProjectIdFromWorkOrder
+} from '../utils/complianceAuditEngine';
 
 interface FieldOperationModalProps {
   isOpen: boolean;
@@ -50,29 +67,26 @@ export const FieldOperationModal: React.FC<FieldOperationModalProps> = ({
   onUpdateWorkOrder,
   onNavigateToAcceptance
 }) => {
-  if (!isOpen || !workOrder) return null;
-
-  // Local state for field work recording
   const [faultCategory, setFaultCategory] = useState<FaultCategory>(
-    workOrder.faultCategory || 'optical_sensor'
+    workOrder?.faultCategory || 'optical_sensor'
   );
   const [faultAnalysis, setFaultAnalysis] = useState<string>(
-    workOrder.faultAnalysis || ''
+    workOrder?.faultAnalysis || ''
   );
   const [repairAction, setRepairAction] = useState<string>(
-    workOrder.repairAction || ''
+    workOrder?.repairAction || ''
   );
   const [parts, setParts] = useState<WorkOrderPart[]>(
-    workOrder.partsReplaced || []
+    workOrder?.partsReplaced || []
   );
   const [externalPartner, setExternalPartner] = useState<string>(
-    workOrder.externalPartner || ''
+    workOrder?.externalPartner || ''
   );
   const [electricalSafetyPassed, setElectricalSafetyPassed] = useState<boolean>(
-    workOrder.electricalSafetyPassed ?? true
+    workOrder?.electricalSafetyPassed ?? true
   );
   const [performancePassed, setPerformancePassed] = useState<boolean>(
-    workOrder.performanceCalibrationPassed ?? true
+    workOrder?.performanceCalibrationPassed ?? true
   );
 
   // Warehouse Linkage State
@@ -88,6 +102,74 @@ export const FieldOperationModal: React.FC<FieldOperationModalProps> = ({
   const [newPartPrice, setNewPartPrice] = useState(0);
   const [newPartSource, setNewPartSource] = useState<WorkOrderPart['source']>('原厂紧急调配');
   const [showAddPart, setShowAddPart] = useState(false);
+
+  // Outsource Escalation State
+  const availableVendors = useMemo(() => getAvailableOutsourcedVendors(), [isOpen]);
+  const recommendedVendor = useMemo(
+    () => recommendVendorForOrder(workOrder, availableVendors),
+    [workOrder?.id, availableVendors]
+  );
+  const [showOutsourcePanel, setShowOutsourcePanel] = useState<boolean>(false);
+  const [selectedVendorId, setSelectedVendorId] = useState<string>('');
+  const [vendorContact, setVendorContact] = useState<string>('');
+  const [vendorPhone, setVendorPhone] = useState<string>('');
+  const [vendorContractNo, setVendorContractNo] = useState<string>('');
+  const [outsourceServiceMode, setOutsourceServiceMode] = useState<OutsourceServiceMode>('single_paid_quote');
+  const [outsourceReason, setOutsourceReason] = useState<string>('现场拆机检测判定需原厂专有备件或认证工程师进场支持');
+  const [estimatedOutsourceCost, setEstimatedOutsourceCost] = useState<string>('');
+  const [hasCost, setHasCost] = useState<boolean>(Boolean(workOrder?.hasCost));
+  const [estimatedCostInput, setEstimatedCostInput] = useState<string>(
+    workOrder?.estimatedCost ? String(workOrder.estimatedCost) : ''
+  );
+  const [isEscalating, setIsEscalating] = useState<boolean>(false);
+  const [inlineNotice, setInlineNotice] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  useEffect(() => {
+    if (isOpen && workOrder) {
+      setFaultCategory(workOrder.faultCategory || 'optical_sensor');
+      setFaultAnalysis(workOrder.faultAnalysis || '');
+      setRepairAction(workOrder.repairAction || '');
+      setParts(workOrder.partsReplaced || []);
+      setExternalPartner(workOrder.externalPartner || '');
+      setElectricalSafetyPassed(workOrder.electricalSafetyPassed ?? true);
+      setPerformancePassed(workOrder.performanceCalibrationPassed ?? true);
+      setShowOutsourcePanel(false);
+      setInlineNotice(null);
+
+      const matched =
+        availableVendors.find(v => v.id === workOrder.externalVendorId || (workOrder.externalPartner && v.name.includes(workOrder.externalPartner.slice(0, 4)))) ||
+        recommendVendorForOrder(workOrder, availableVendors) ||
+        availableVendors[0];
+      if (matched) {
+        setSelectedVendorId(matched.id);
+        if (!workOrder.externalPartner) setExternalPartner(matched.name);
+        setVendorContact(workOrder.externalVendorContact || matched.contactPerson);
+        setVendorPhone(workOrder.externalVendorPhone || matched.contactPhone || matched.hotline || '');
+        setVendorContractNo(workOrder.externalContractNo || matched.contractNo || '');
+      }
+      setOutsourceServiceMode(workOrder.outsourceServiceMode || 'single_paid_quote');
+      if (workOrder.outsourceReason) setOutsourceReason(workOrder.outsourceReason);
+      setEstimatedOutsourceCost(workOrder.estimatedOutsourceCost ? String(workOrder.estimatedOutsourceCost) : '');
+      const partsSum = (workOrder.partsReplaced || []).reduce((s, p) => s + Number(p.totalPrice || 0), 0);
+      const initAmt = Math.max(Number(workOrder.estimatedCost || 0), Number(workOrder.totalRepairCost || 0), Number(workOrder.estimatedOutsourceCost || 0), partsSum);
+      setHasCost(Boolean(workOrder.hasCost || initAmt > 0));
+      setEstimatedCostInput(initAmt > 0 ? String(initAmt) : '');
+    }
+  }, [isOpen, workOrder?.id]);
+
+  // 自动识别配件产生费用时联动开启有费用标记
+  useEffect(() => {
+    const partsSum = parts.reduce((sum, p) => sum + Number(p.totalPrice || 0), 0);
+    if (partsSum > 0) {
+      setHasCost(true);
+      setEstimatedCostInput(prev => {
+        const cur = Number(prev || 0);
+        return cur >= partsSum ? prev : String(partsSum);
+      });
+    }
+  }, [parts]);
+
+  if (!isOpen || !workOrder) return null;
 
   // 1. 从医工备品备件库领料出库并实时扣减库存
   const handleConfirmIssueFromWarehouse = (part: SparePartItem, quantity: number) => {
@@ -128,7 +210,7 @@ export const FieldOperationModal: React.FC<FieldOperationModalProps> = ({
       setParts(prev => [...prev, newPart]);
       setShowIssueModal(false);
     } else {
-      alert(res.message);
+      setInlineNotice({ text: res.message || '备件出库失败，请检查库存数量', type: 'error' });
     }
   };
 
@@ -161,11 +243,19 @@ export const FieldOperationModal: React.FC<FieldOperationModalProps> = ({
     setParts(prev => prev.filter((_, i) => i !== index));
   };
 
+  const effectiveFieldCost = Math.max(
+    Number(estimatedCostInput || 0),
+    parts.reduce((s, p) => s + p.totalPrice, 0)
+  );
+  const fieldHasCost = hasCost || effectiveFieldCost > 0;
+  const fieldComplianceMode = resolveProcurementMode(fieldHasCost, effectiveFieldCost);
+
   // 3. 缺货挂起待件
   const handleMarkWaitingPartsFromModal = (reason: string) => {
     const note = `【备件缺货调配】${reason}`;
     const newAnalysis = faultAnalysis ? `${faultAnalysis}\n${note}` : note;
     setFaultAnalysis(newAnalysis);
+    const totalCost = Math.max(effectiveFieldCost, parts.reduce((s, p) => s + p.totalPrice, 0));
 
     const updated: EngineeringWorkOrder = {
       ...workOrder,
@@ -174,7 +264,11 @@ export const FieldOperationModal: React.FC<FieldOperationModalProps> = ({
       faultCategory,
       repairAction,
       partsReplaced: parts,
-      totalRepairCost: (workOrder.laborHours || 1) * 120 + parts.reduce((s, p) => s + p.totalPrice, 0)
+      hasCost: fieldHasCost,
+      estimatedCost: fieldHasCost ? totalCost : 0,
+      costTriggerStage: fieldHasCost ? (workOrder.costTriggerStage || 'field_operation') : undefined,
+      requiredComplianceMode: fieldComplianceMode,
+      totalRepairCost: totalCost
     };
     onUpdateWorkOrder(updated);
     setShowIssueModal(false);
@@ -253,6 +347,7 @@ export const FieldOperationModal: React.FC<FieldOperationModalProps> = ({
 
   // 3. 挂起等待备件
   const handleSetWaitingParts = () => {
+    const computedCost = Math.max(effectiveFieldCost, totalPartsCost);
     const updated: EngineeringWorkOrder = {
       ...workOrder,
       status: 'waiting_parts',
@@ -260,7 +355,11 @@ export const FieldOperationModal: React.FC<FieldOperationModalProps> = ({
       faultAnalysis: faultAnalysis || '正在申请关键备品备件或等待原厂技术专家支援。',
       repairAction,
       partsReplaced: parts,
-      totalRepairCost: totalPartsCost
+      hasCost: fieldHasCost || computedCost > 0,
+      estimatedCost: fieldHasCost ? computedCost : 0,
+      costTriggerStage: fieldHasCost ? (workOrder.costTriggerStage || 'field_operation') : undefined,
+      requiredComplianceMode: resolveProcurementMode(fieldHasCost || computedCost > 0, computedCost),
+      totalRepairCost: computedCost
     };
     onUpdateWorkOrder(updated);
   };
@@ -282,6 +381,8 @@ export const FieldOperationModal: React.FC<FieldOperationModalProps> = ({
     const finishDate = new Date(finishTime.replace(' ', 'T'));
     const downtimeHours = Number((Math.max(0.1, (finishDate.getTime() - reportDate.getTime()) / (3600 * 1000))).toFixed(2));
     const isRepairMet = downtimeHours <= workOrder.slaRepairLimitHours;
+    const finalCost = Math.max(effectiveFieldCost, totalPartsCost);
+    const finalHasCost = fieldHasCost || finalCost > 0;
 
     const updated: EngineeringWorkOrder = {
       ...workOrder,
@@ -295,7 +396,11 @@ export const FieldOperationModal: React.FC<FieldOperationModalProps> = ({
       performanceCalibrationPassed: performancePassed,
       repairFinishedTime: finishTime,
       laborHours: Math.min(downtimeHours, 2.5),
-      totalRepairCost: totalPartsCost,
+      hasCost: finalHasCost,
+      estimatedCost: finalHasCost ? finalCost : 0,
+      costTriggerStage: finalHasCost ? (workOrder.costTriggerStage || 'field_operation') : undefined,
+      requiredComplianceMode: resolveProcurementMode(finalHasCost, finalCost),
+      totalRepairCost: finalCost,
       totalDowntimeHours: downtimeHours,
       isSlaRepairMet: isRepairMet,
       isFirstTimeFix: true
@@ -805,19 +910,341 @@ export const FieldOperationModal: React.FC<FieldOperationModalProps> = ({
                 </div>
               </div>
 
-              {/* External Partner (Optional) */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  协同原厂 / 第三方维保机构 (若有)
-                </label>
-                <input
-                  type="text"
-                  disabled={isClosed}
-                  value={externalPartner}
-                  onChange={(e) => setExternalPartner(e.target.value)}
-                  placeholder="如：GE医疗售后工程部、迈瑞原厂技术支持专线、国药器械等"
-                  className="w-full text-xs p-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-hidden disabled:bg-slate-50"
-                />
+              {/* 现场收费判定与项目台账联动合规条 */}
+              <div className="p-3 rounded-lg border border-slate-200 bg-slate-50/70 space-y-2.5 text-xs">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                    <Coins className="w-4 h-4 text-amber-600" />
+                    <span>现场收费判定与《设备项目台账》合规立项</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={isClosed}
+                      onClick={() => setHasCost(false)}
+                      className={`px-2.5 py-1 rounded-md border text-[11px] font-semibold transition cursor-pointer ${
+                        !fieldHasCost
+                          ? 'bg-emerald-600 text-white border-emerald-600'
+                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      无费用（保内/院内纯人工）
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isClosed}
+                      onClick={() => setHasCost(true)}
+                      className={`px-2.5 py-1 rounded-md border text-[11px] font-semibold transition cursor-pointer ${
+                        fieldHasCost
+                          ? 'bg-amber-600 text-white border-amber-600'
+                          : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      有费用产生（现场转收费立项）
+                    </button>
+                  </div>
+                </div>
+
+                {fieldHasCost && (
+                  <div className="bg-white border border-slate-200 rounded-md p-2.5 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <label className="text-[11px] font-semibold text-slate-600">预估/发生总额 (元):</label>
+                        <input
+                          type="number"
+                          min={0}
+                          disabled={isClosed}
+                          value={estimatedCostInput}
+                          onChange={(e) => setEstimatedCostInput(e.target.value)}
+                          placeholder={totalPartsCost > 0 ? String(totalPartsCost) : '如 4800'}
+                          className="w-28 text-xs p-1 border border-slate-300 rounded font-mono font-bold text-slate-900 tabular-nums"
+                        />
+                        {totalPartsCost > 0 && (
+                          <span className="text-[11px] text-slate-500 font-mono">
+                            (含领料配件 ¥{totalPartsCost.toLocaleString()})
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[11px] font-semibold text-amber-800 flex items-center gap-1">
+                        <Scale className="w-3.5 h-3.5 text-amber-600" />
+                        <span>适用规程：{PROCUREMENT_MODE_META[fieldComplianceMode].label}</span>
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between flex-wrap gap-2 text-[11px] text-slate-600 pt-1.5 border-t border-slate-100">
+                      <span>
+                        {workOrder.linkedProjectId
+                          ? `已同步立项编号：#${workOrder.linkedProjectId}（缺申请单/比价议价招标/纪要禁止归档）`
+                          : `保存或提报完工后将自动生成台账立项 #${buildDynamicProjectIdFromWorkOrder(workOrder.id)}`}
+                      </span>
+                      {workOrder.linkedProjectId && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onClose();
+                            window.dispatchEvent(
+                              new CustomEvent('medtech:focus-project-ledger', {
+                                detail: { projectId: workOrder.linkedProjectId }
+                              })
+                            );
+                          }}
+                          className="inline-flex items-center gap-1 text-blue-700 hover:text-blue-900 font-bold cursor-pointer"
+                        >
+                          <FolderKanban className="w-3.5 h-3.5" />
+                          <span>前往台账补办审批与会议纪要</span>
+                          <ChevronRight className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Outsourced Collaboration Escalation Panel */}
+              <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3 space-y-2.5 text-xs">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="font-bold text-amber-900 flex items-center gap-1.5">
+                    <Building2 className="w-4 h-4 text-amber-700" />
+                    <span>院内自修转外协协同派工</span>
+                    {(workOrder.dispatchChannel === 'outsourced' || workOrder.linkedVendorOrderId) && (
+                      <span className="px-2 py-0.5 rounded bg-amber-600 text-white text-[10px] font-bold">
+                        已外协：{workOrder.externalVendorShortName || workOrder.externalPartner}
+                        {workOrder.linkedVendorOrderId ? ` · ${workOrder.linkedVendorOrderId}` : ''}
+                      </span>
+                    )}
+                  </div>
+                  {!isClosed && (
+                    <button
+                      type="button"
+                      onClick={() => setShowOutsourcePanel(prev => !prev)}
+                      className="px-2.5 py-1 bg-white hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-lg text-[11px] font-bold cursor-pointer transition"
+                    >
+                      {showOutsourcePanel ? '收起转外协表单' : workOrder.dispatchChannel === 'outsourced' ? '变更/重发外协服务商' : '现场排查无解 · 一键转外协派工'}
+                    </button>
+                  )}
+                </div>
+
+                {inlineNotice && (
+                  <div className={`px-2.5 py-1.5 rounded-lg text-2xs font-semibold border ${
+                    inlineNotice.type === 'error'
+                      ? 'bg-rose-50 text-rose-700 border-rose-200'
+                      : 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                  }`}>
+                    {inlineNotice.text}
+                  </div>
+                )}
+
+                {showOutsourcePanel && !isClosed && (
+                  <div className="bg-white border border-amber-200/80 rounded-lg p-3 space-y-2.5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-0.5">
+                          选择签约外协原厂 / 第三方机构
+                        </label>
+                        <select
+                          value={selectedVendorId}
+                          onChange={(e) => {
+                            const found = availableVendors.find(v => v.id === e.target.value);
+                            setSelectedVendorId(e.target.value);
+                            if (found) {
+                              setExternalPartner(found.name);
+                              setVendorContact(found.contactPerson);
+                              setVendorPhone(found.contactPhone || found.hotline || '');
+                              setVendorContractNo(found.contractNo || '');
+                            }
+                          }}
+                          className="w-full text-xs p-1.5 bg-slate-50 border border-slate-200 rounded-md font-semibold"
+                        >
+                          {availableVendors.map(v => (
+                            <option key={v.id} value={v.id}>
+                              [{v.typeLabel}] {v.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-700 mb-0.5">
+                          外协维保模式
+                        </label>
+                        <select
+                          value={outsourceServiceMode}
+                          onChange={(e) => setOutsourceServiceMode(e.target.value as OutsourceServiceMode)}
+                          className="w-full text-xs p-1.5 bg-slate-50 border border-slate-200 rounded-md font-semibold"
+                        >
+                          {(Object.keys(OUTSOURCE_SERVICE_MODE_LABELS) as OutsourceServiceMode[]).map(modeKey => (
+                            <option key={modeKey} value={modeKey}>
+                              {OUTSOURCE_SERVICE_MODE_LABELS[modeKey].label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div>
+                        <label className="block text-[11px] text-slate-500 mb-0.5">厂商联系人</label>
+                        <input
+                          type="text"
+                          value={vendorContact}
+                          onChange={e => setVendorContact(e.target.value)}
+                          className="w-full text-xs p-1.5 border border-slate-200 rounded-md"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-slate-500 mb-0.5">售后专线/手机</label>
+                        <input
+                          type="text"
+                          value={vendorPhone}
+                          onChange={e => setVendorPhone(e.target.value)}
+                          className="w-full text-xs p-1.5 border border-slate-200 rounded-md font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-slate-500 mb-0.5">
+                          {OUTSOURCE_SERVICE_MODE_LABELS[outsourceServiceMode].requiresQuote ? '预估报价 (元)' : '协议编号'}
+                        </label>
+                        {OUTSOURCE_SERVICE_MODE_LABELS[outsourceServiceMode].requiresQuote ? (
+                          <input
+                            type="number"
+                            min={0}
+                            value={estimatedOutsourceCost}
+                            onChange={e => setEstimatedOutsourceCost(e.target.value)}
+                            placeholder="如 12000"
+                            className="w-full text-xs p-1.5 border border-slate-200 rounded-md font-mono"
+                          />
+                        ) : (
+                          <input
+                            type="text"
+                            value={vendorContractNo}
+                            onChange={e => setVendorContractNo(e.target.value)}
+                            className="w-full text-xs p-1.5 border border-slate-200 rounded-md font-mono"
+                          />
+                        )}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] text-slate-500 mb-0.5">现场拆机研判与转外协原因说明</label>
+                      <input
+                        type="text"
+                        value={outsourceReason}
+                        onChange={e => setOutsourceReason(e.target.value)}
+                        className="w-full text-xs p-1.5 border border-slate-200 rounded-md"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="text-[11px] text-slate-500">
+                        提交后工单自动挂起待外协进场，并同步推送至【外协协同中心】
+                      </span>
+                      <button
+                        type="button"
+                        disabled={isEscalating || !externalPartner.trim()}
+                        onClick={async () => {
+                          if (!externalPartner.trim()) return;
+                          setIsEscalating(true);
+                          try {
+                            const matched = availableVendors.find(v => v.id === selectedVendorId);
+                            const outEstCost = Number(estimatedOutsourceCost || 0) || Number(estimatedCostInput || 0) || totalPartsCost;
+                            const outHasCost =
+                              fieldHasCost ||
+                              outEstCost > 0 ||
+                              OUTSOURCE_SERVICE_MODE_LABELS[outsourceServiceMode].requiresQuote;
+                            const payload = {
+                              operatorName: currentUserName,
+                              externalVendorId: matched?.id || 'ISO-001',
+                              externalPartner: externalPartner.trim(),
+                              externalVendorShortName: matched?.shortName || externalPartner.trim(),
+                              externalVendorType: matched?.type || 'manufacturer',
+                              externalVendorContact: vendorContact.trim(),
+                              externalVendorPhone: vendorPhone.trim(),
+                              externalContractNo: vendorContractNo.trim(),
+                              outsourceServiceMode,
+                              outsourceReason: outsourceReason.trim(),
+                              estimatedOutsourceCost: Number(estimatedOutsourceCost || 0) || undefined,
+                              hasCost: outHasCost,
+                              estimatedCost: outEstCost,
+                              costTriggerStage: 'field_operation',
+                              requiresVendorQuote: OUTSOURCE_SERVICE_MODE_LABELS[outsourceServiceMode].requiresQuote,
+                              syncToVendorPortal: true
+                            };
+                            const resp = await fetch(`/api/work-orders/${encodeURIComponent(workOrder.id)}/escalate-outsource`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify(payload)
+                            });
+                            const json = await resp.json();
+                            if (json.vendorCollabOrder) {
+                              upsertVendorCollaborationOrder(json.vendorCollabOrder);
+                            }
+                            if (json.linkedProject || json.data?.linkedProjectId) {
+                              window.dispatchEvent(
+                                new CustomEvent('medtech:project-ledger-updated', {
+                                  detail: { project: json.linkedProject, projectId: json.data?.linkedProjectId }
+                                })
+                              );
+                            }
+                            const updatedOrder: EngineeringWorkOrder =
+                              json.success && json.data
+                                ? json.data
+                                : {
+                                    ...workOrder,
+                                    status: 'waiting_parts',
+                                    dispatchChannel: 'outsourced',
+                                    externalVendorId: payload.externalVendorId,
+                                    externalPartner: payload.externalPartner,
+                                    externalVendorShortName: payload.externalVendorShortName,
+                                    externalVendorType: payload.externalVendorType,
+                                    externalVendorContact: payload.externalVendorContact,
+                                    externalVendorPhone: payload.externalVendorPhone,
+                                    externalContractNo: payload.externalContractNo,
+                                    outsourceServiceMode: payload.outsourceServiceMode,
+                                    outsourceReason: payload.outsourceReason,
+                                    estimatedOutsourceCost: payload.estimatedOutsourceCost,
+                                    hasCost: outHasCost,
+                                    estimatedCost: outEstCost,
+                                    requiresVendorQuote: payload.requiresVendorQuote,
+                                    linkedVendorOrderId: `EXT-${workOrder.id.replace(/[^A-Za-z0-9]/g, '').slice(-10)}`,
+                                    linkedProjectId: outHasCost ? buildDynamicProjectIdFromWorkOrder(workOrder.id) : workOrder.linkedProjectId
+                                  };
+                            if (!json.vendorCollabOrder) {
+                              upsertVendorCollaborationOrder(buildVendorOrderFromWorkOrder(updatedOrder, currentUserName));
+                            }
+                            onUpdateWorkOrder(updatedOrder);
+                            setShowOutsourcePanel(false);
+                            setInlineNotice({
+                              text: `已成功转外协至【${updatedOrder.externalPartner}】，协同单号：${updatedOrder.linkedVendorOrderId || '已同步'}${
+                                updatedOrder.linkedProjectId ? ` · 已联动《设备项目台账》#${updatedOrder.linkedProjectId}` : ''
+                              }`,
+                              type: 'success'
+                            });
+                          } catch (err) {
+                            console.error('Escalate outsource failed:', err);
+                            setInlineNotice({ text: '转外协派工请求失败，请检查网络重试', type: 'error' });
+                          } finally {
+                            setIsEscalating(false);
+                          }
+                        }}
+                        className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer transition"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>{isEscalating ? '正在转派...' : '确认转外协 · 同步协同单'}</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {!showOutsourcePanel && (
+                  <div className="flex items-center justify-between text-[11px] text-amber-800">
+                    <span>
+                      {workOrder.externalPartner
+                        ? `当前指定服务商：${workOrder.externalPartner}${workOrder.externalVendorPhone ? ` (${workOrder.externalVendorPhone})` : ''}`
+                        : recommendedVendor
+                        ? `智能匹配推荐服务商：${recommendedVendor.name} (${recommendedVendor.contractNo})`
+                        : '若现场拆机确认需原厂/第三方介入，点击右上角即可发起转外协并联动报价议价。'}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           )}

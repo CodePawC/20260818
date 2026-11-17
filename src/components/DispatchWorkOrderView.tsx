@@ -1,21 +1,34 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { MedicalEquipment, AuthUser } from '../types';
+import { MedicalEquipment, AuthUser, RepairRecord } from '../types';
 import {
   EngineeringWorkOrder,
   BiomedicalEngineerProfile,
   PriorityLevel,
   WorkOrderStatus,
   BiomedicalGroup,
-  MttrKpiStats
+  MttrKpiStats,
+  OutsourcedDispatchMeta
 } from '../types/dispatchTypes';
 import {
   DEFAULT_BIOMEDICAL_ENGINEERS,
   loadStoredWorkOrders,
   saveStoredWorkOrders,
   calculateMttrKpiStats,
-  INITIAL_WORK_ORDERS
+  INITIAL_WORK_ORDERS,
+  parseWorkOrderComparableTime,
+  sortWorkOrdersNewestFirst,
+  buildVendorOrderFromWorkOrder,
+  upsertVendorCollaborationOrder,
+  OUTSOURCE_SERVICE_MODE_LABELS
 } from '../utils/dispatchData';
 import { DispatchAssignModal } from './DispatchAssignModal';
+import {
+  canDispatchWorkOrder,
+  canParticipateDispatchDiscussion,
+  canExecuteFieldRepair,
+  canClinicalAcceptWorkOrder,
+  canManageSpareParts
+} from '../utils/authUtils';
 import { FieldOperationModal } from './FieldOperationModal';
 import { ClinicalAcceptanceModal } from './ClinicalAcceptanceModal';
 import { WorkOrderPrintModal } from './WorkOrderPrintModal';
@@ -46,6 +59,7 @@ import {
   RefreshCw,
   FileText,
   Building,
+  Building2,
   TrendingDown,
   TrendingUp,
   MapPin,
@@ -56,6 +70,7 @@ import {
   Flame,
   Tag,
   SlidersHorizontal,
+  MessageSquare,
   QrCode
 } from 'lucide-react';
 import { SparePartsWarehouseView } from './SparePartsWarehouseView';
@@ -65,12 +80,16 @@ interface DispatchWorkOrderViewProps {
   equipmentList: MedicalEquipment[];
   currentUser?: AuthUser;
   onEquipmentUpdated?: (updatedEquipment: MedicalEquipment) => void;
+  initialFocusedOrderId?: string;
+  onNavigateToVendorCollab?: (vendorOrderId?: string) => void;
 }
 
 export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
   equipmentList,
   currentUser,
-  onEquipmentUpdated
+  onEquipmentUpdated,
+  initialFocusedOrderId,
+  onNavigateToVendorCollab
 }) => {
   // Master state
   const [workOrders, setWorkOrders] = useState<EngineeringWorkOrder[]>(() => {
@@ -89,29 +108,20 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
     try {
       const res = await fetch('/api/work-orders');
       const json = await res.json();
-      if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+      if (json.success && Array.isArray(json.data)) {
+        const sortedServer = sortWorkOrdersNewestFirst(json.data);
         setWorkOrders(prev => {
-          const map = new Map<string, EngineeringWorkOrder>();
-          prev.forEach(o => map.set(o.id, o));
-          let hasNew = false;
-          json.data.forEach((o: EngineeringWorkOrder) => {
-            if (!map.has(o.id)) {
-              map.set(o.id, o);
-              hasNew = true;
-            } else {
-              map.set(o.id, { ...map.get(o.id)!, ...o });
-            }
-          });
-          const merged = Array.from(map.values()).sort((a, b) => (b.reportTime || '').localeCompare(a.reportTime || ''));
+          const prevIds = new Set(prev.map(o => o.id));
+          const hasNew = sortedServer.some(o => !prevIds.has(o.id));
           if (hasNew && !silent) {
-            showToast('已从服务器同步最新工单（含草料 Webhook 回调转建任务）！');
+            showToast('已从服务器同步最新工单！');
           }
-          saveStoredWorkOrders(merged);
-          return merged;
+          saveStoredWorkOrders(sortedServer);
+          return sortedServer;
         });
       }
     } catch (e) {
-      // ignore
+      // ignore offline fallback
     }
   };
 
@@ -119,15 +129,19 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
     fetchServerWorkOrders(true);
     const interval = setInterval(() => {
       fetchServerWorkOrders(true);
-    }, 12000);
+    }, 10000);
 
     const handleSync = () => {
       fetchServerWorkOrders(true);
     };
     window.addEventListener('work_orders_updated', handleSync);
+    window.addEventListener('caoliao_repair_received', handleSync);
+    window.addEventListener('medical_equipment_updated', handleSync);
     return () => {
       clearInterval(interval);
       window.removeEventListener('work_orders_updated', handleSync);
+      window.removeEventListener('caoliao_repair_received', handleSync);
+      window.removeEventListener('medical_equipment_updated', handleSync);
     };
   }, []);
 
@@ -138,27 +152,12 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
     try {
       const res = await fetch('/api/caoliao/pull-and-sync-dispatch', { method: 'POST' });
       const json = await res.json();
-      if (json.success && Array.isArray(json.candidateWorkOrders)) {
-        const currentOrders = loadStoredWorkOrders();
-        const existingIds = new Set(currentOrders.map(o => o.id));
-        let addedCount = 0;
-        const newOrders = [...currentOrders];
-
-        json.candidateWorkOrders.forEach((candidate: EngineeringWorkOrder) => {
-          if (!existingIds.has(candidate.id)) {
-            newOrders.unshift(candidate);
-            existingIds.add(candidate.id);
-            addedCount++;
-          }
-        });
-
-        if (addedCount > 0) {
-          setWorkOrders(newOrders);
-          saveStoredWorkOrders(newOrders);
-          showToast(`已成功从草料二维码单向拉取 ${addedCount} 条全新现场报修并转建院内派工单！`);
-        } else {
-          showToast(`草料报修数据已是最新，暂无新未派工单。`);
-        }
+      if (json.success) {
+        await fetchServerWorkOrders(true);
+        window.dispatchEvent(new CustomEvent('work_orders_updated'));
+        window.dispatchEvent(new CustomEvent('medical_equipment_updated'));
+        window.dispatchEvent(new CustomEvent('caoliao_repair_received'));
+        showToast(json.message || `已同步最新草料报修并入库院内派工调度池（共 ${(json.candidateWorkOrders || []).length} 笔）！`);
       } else {
         showToast(json.error || '拉取草料报修失败');
       }
@@ -194,6 +193,13 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
   // Sub-navigation tab: 'pool' | 'analytics' | 'team' | 'warehouse'
   const [viewSubTab, setViewSubTab] = useState<'pool' | 'analytics' | 'team' | 'warehouse'>('pool');
 
+  // RBAC permissions
+  const allowDispatch = canDispatchWorkOrder(currentUser);
+  const allowDiscuss = canParticipateDispatchDiscussion(currentUser);
+  const allowFieldRepair = canExecuteFieldRepair(currentUser);
+  const allowClinicalAccept = canClinicalAcceptWorkOrder(currentUser);
+  const allowSpareParts = canManageSpareParts(currentUser);
+
   // Filters (Zero Dropdown Design: Direct visual toggles & segmented chips)
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [priorityFilter, setPriorityFilter] = useState<string>('all');
@@ -208,11 +214,26 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
 
   // Modal states
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [createModalInitialRecord, setCreateModalInitialRecord] = useState<RepairRecord | null>(null);
+  const [createModalInitialEquipment, setCreateModalInitialEquipment] = useState<MedicalEquipment | null>(null);
   const [assigningOrder, setAssigningOrder] = useState<EngineeringWorkOrder | null>(null);
   const [operatingOrder, setOperatingOrder] = useState<EngineeringWorkOrder | null>(null);
   const [acceptingOrder, setAcceptingOrder] = useState<EngineeringWorkOrder | null>(null);
   const [printingOrder, setPrintingOrder] = useState<EngineeringWorkOrder | null>(null);
   const [trackingOrder, setTrackingOrder] = useState<EngineeringWorkOrder | null>(null);
+
+  // 当外部携带特定工单跳转进入时，自动检索定位并触发派工弹窗（仅针对未自动打开过的单号）
+  const autoOpenedIdRef = React.useRef<string | null>(null);
+  useEffect(() => {
+    if (initialFocusedOrderId && autoOpenedIdRef.current !== initialFocusedOrderId) {
+      setSearchQuery(initialFocusedOrderId);
+      const target = workOrders.find(o => o.id === initialFocusedOrderId || o.caoliaoRecordNo === initialFocusedOrderId);
+      if (target && (target.status === 'pending_dispatch' || target.status === 'pre_dispatched')) {
+        autoOpenedIdRef.current = initialFocusedOrderId;
+        setAssigningOrder(target);
+      }
+    }
+  }, [initialFocusedOrderId, workOrders]);
 
   // Toast notice
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -258,6 +279,7 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
     return {
       all: workOrders.length,
       pending_dispatch: workOrders.filter(o => o.status === 'pending_dispatch').length,
+      pre_dispatched: workOrders.filter(o => o.status === 'pre_dispatched').length,
       in_progress: workOrders.filter(o => ['dispatched', 'accepted', 'arrived_inspecting', 'waiting_parts'].includes(o.status)).length,
       pending_acceptance: workOrders.filter(o => o.status === 'repaired_pending_acceptance').length,
       closed: workOrders.filter(o => o.status === 'closed').length,
@@ -268,8 +290,9 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
     return {
       p1_emergency: workOrders.filter(o => o.priority === 'P1_CRITICAL' && o.status !== 'closed').length,
       sla_warning: workOrders.filter(o => o.status !== 'closed' && ((o.totalDowntimeHours || 0) >= (o.slaRepairLimitHours * 0.75) || !o.isSlaResponseMet)).length,
-      unassigned: workOrders.filter(o => o.status === 'pending_dispatch' || !o.assignedEngineerId).length,
+      unassigned: workOrders.filter(o => o.status === 'pending_dispatch' || o.status === 'pre_dispatched' || (!o.assignedEngineerId && !o.proposedEngineerId)).length,
       waiting_parts: workOrders.filter(o => o.status === 'waiting_parts').length,
+      outsourced: workOrders.filter(o => o.dispatchChannel === 'outsourced' || Boolean(o.externalPartner)).length,
       caoliao: workOrders.filter(o => o.source === 'caoliao' || o.id.startsWith('WO-CL-')).length,
     };
   }, [workOrders]);
@@ -301,6 +324,7 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
     return workOrders.filter(order => {
       // Status filter
       if (statusFilter === 'pending_dispatch' && order.status !== 'pending_dispatch') return false;
+      if (statusFilter === 'pre_dispatched' && order.status !== 'pre_dispatched') return false;
       if (statusFilter === 'in_progress' && !['dispatched', 'accepted', 'arrived_inspecting', 'waiting_parts'].includes(order.status)) return false;
       if (statusFilter === 'pending_acceptance' && order.status !== 'repaired_pending_acceptance') return false;
       if (statusFilter === 'closed' && order.status !== 'closed') return false;
@@ -317,8 +341,9 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
         const isWarning = (order.status !== 'closed' && (order.totalDowntimeHours || 0) >= (order.slaRepairLimitHours * 0.75)) || !order.isSlaResponseMet;
         if (!isWarning) return false;
       }
-      if (quickPreset === 'unassigned' && (order.status !== 'pending_dispatch' && order.assignedEngineerId)) return false;
+      if (quickPreset === 'unassigned' && (order.status !== 'pending_dispatch' && order.status !== 'pre_dispatched' && order.assignedEngineerId)) return false;
       if (quickPreset === 'waiting_parts' && order.status !== 'waiting_parts') return false;
+      if (quickPreset === 'outsourced' && !(order.dispatchChannel === 'outsourced' || Boolean(order.externalPartner))) return false;
       if (quickPreset === 'caoliao' && !(order.source === 'caoliao' || order.id.startsWith('WO-CL-'))) return false;
 
       // Search query
@@ -326,11 +351,17 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
         const q = searchQuery.toLowerCase();
         const match =
           order.id.toLowerCase().includes(q) ||
+          (order.caoliaoRecordNo && order.caoliaoRecordNo.toLowerCase().includes(q)) ||
+          (order.caoliaoCodeId && order.caoliaoCodeId.toLowerCase().includes(q)) ||
+          (order.equipmentModel && order.equipmentModel.toLowerCase().includes(q)) ||
+          (order.reporterName && order.reporterName.toLowerCase().includes(q)) ||
           order.equipmentName.toLowerCase().includes(q) ||
           order.equipmentSn.toLowerCase().includes(q) ||
           (order.internalNo && order.internalNo.toLowerCase().includes(q)) ||
           order.department.toLowerCase().includes(q) ||
           (order.assignedEngineerName && order.assignedEngineerName.toLowerCase().includes(q)) ||
+          (order.externalPartner && order.externalPartner.toLowerCase().includes(q)) ||
+          (order.linkedVendorOrderId && order.linkedVendorOrderId.toLowerCase().includes(q)) ||
           order.faultDescription.toLowerCase().includes(q);
         if (!match) return false;
       }
@@ -363,8 +394,17 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
         return sortOrder === 'desc' ? ratioB - ratioA : ratioA - ratioB;
       }
       // default: reportTime
-      const diff = new Date(b.reportTime).getTime() - new Date(a.reportTime).getTime();
-      return sortOrder === 'desc' ? diff : -diff;
+      const timeA = parseWorkOrderComparableTime(a.reportTime);
+      const timeB = parseWorkOrderComparableTime(b.reportTime);
+      if (timeA !== timeB) {
+        return sortOrder === 'desc' ? timeB - timeA : timeA - timeB;
+      }
+      const numA = parseInt(String(a.caoliaoRecordNo || '').replace(/\D/g, ''), 10) || 0;
+      const numB = parseInt(String(b.caoliaoRecordNo || '').replace(/\D/g, ''), 10) || 0;
+      if (numA !== numB) {
+        return sortOrder === 'desc' ? numB - numA : numA - numB;
+      }
+      return sortOrder === 'desc' ? String(b.id).localeCompare(String(a.id)) : String(a.id).localeCompare(String(b.id));
     });
     return list;
   }, [filteredOrders, sortField, sortOrder]);
@@ -377,39 +417,350 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
   }, [sortedOrders, currentPage, pageSize, viewMode]);
 
   // Order Handlers
-  const handleConfirmDispatch = (orderId: string, engineer: BiomedicalEngineerProfile, notes: string) => {
+  const handlePreDispatch = async (
+    orderId: string,
+    engineer: BiomedicalEngineerProfile,
+    notes: string,
+    discussionMessage?: string,
+    dispatchMeta?: OutsourcedDispatchMeta
+  ): Promise<EngineeringWorkOrder | void> => {
+    const d = new Date();
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const nowStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const targetOrder = workOrders.find(o => o.id === orderId);
+    const dispatcher = currentUser?.name || '医工调度中心';
+    const noteText =
+      discussionMessage?.trim() ||
+      (dispatchMeta?.dispatchChannel === 'outsourced'
+        ? `拟定转【外协协同：${dispatchMeta.externalPartner}】，院内监护工程师：【${engineer.name}】，暂存预派工方案。`
+        : `拟定由【${engineer.name}】负责此单，暂存预派工并开展内部讨论确认。`);
+
+    let updatedOrder: EngineeringWorkOrder | undefined;
+    try {
+      const resp = await fetch(`/api/work-orders/${encodeURIComponent(orderId)}/pre-dispatch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          engineerId: engineer.id,
+          engineerName: engineer.name,
+          engineerPhone: engineer.phone,
+          preDispatcherName: dispatcher,
+          authorRole: currentUser?.role || '医工调度员',
+          notes,
+          discussionMessage: noteText,
+          ...(dispatchMeta || {}),
+          equipmentId: targetOrder?.equipmentId,
+          equipmentName: targetOrder?.equipmentName,
+          equipmentModel: targetOrder?.equipmentModel,
+          equipmentSn: targetOrder?.equipmentSn,
+          internalNo: targetOrder?.internalNo,
+          category: targetOrder?.category,
+          department: targetOrder?.department,
+          location: targetOrder?.location,
+          reporterName: targetOrder?.reporterName,
+          reporterPhone: targetOrder?.reporterPhone,
+          reportTime: targetOrder?.reportTime,
+          priority: targetOrder?.priority,
+          faultDescription: targetOrder?.faultDescription,
+          biomedicalGroup: targetOrder?.biomedicalGroup,
+          caoliaoRecordNo: targetOrder?.caoliaoRecordNo,
+          photoUrl: targetOrder?.photoUrl
+        })
+      });
+      const json = await resp.json();
+      if (json.success && (json.data || json.order)) {
+        updatedOrder = json.data || json.order;
+      }
+    } catch (err) {
+      console.warn('[PreDispatch] Server sync warning:', err);
+    }
+
+    setWorkOrders(prev => {
+      const next = prev.map(o => {
+        if (o.id !== orderId) return o;
+        if (updatedOrder) return { ...o, ...updatedOrder };
+        const noteEntry = {
+          id: `DISC-${Date.now()}`,
+          authorName: dispatcher,
+          authorRole: currentUser?.role || '医工调度员',
+          content: noteText,
+          timestamp: nowStr,
+          proposedEngineerName: engineer.name,
+          actionType: 'pre_dispatch' as const
+        };
+        const built: EngineeringWorkOrder = {
+          ...o,
+          status: 'pre_dispatched',
+          proposedEngineerId: engineer.id,
+          proposedEngineerName: engineer.name,
+          proposedEngineerPhone: engineer.phone,
+          preDispatcherName: dispatcher,
+          preDispatchTime: nowStr,
+          preDispatchNotes: notes,
+          ...(dispatchMeta || {}),
+          internalDiscussions: [...(o.internalDiscussions || []), noteEntry]
+        };
+        updatedOrder = built;
+        return built;
+      });
+      saveStoredWorkOrders(next);
+      return next;
+    });
+
+    window.dispatchEvent(new CustomEvent('work_orders_updated'));
+    showToast(
+      dispatchMeta?.dispatchChannel === 'outsourced'
+        ? `已暂存【外协预派工：${dispatchMeta.externalPartner}】，院内监护：${engineer.name}`
+        : `已暂存预派工！拟定工程师【${engineer.name}】，可在弹窗内继续内部讨论确认后正式派工`
+    );
+    return updatedOrder;
+  };
+
+  const handleAddDiscussion = async (
+    orderId: string,
+    content: string,
+    proposedEngineerName?: string
+  ): Promise<EngineeringWorkOrder | void> => {
+    const d = new Date();
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const nowStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const targetOrder = workOrders.find(o => o.id === orderId);
+    const authorName = currentUser?.name || '医工调度中心';
+    const authorRole = currentUser?.role || '医工调度员';
+
+    let updatedOrder: EngineeringWorkOrder | undefined;
+    try {
+      if (targetOrder?.status === 'pending_dispatch') {
+        const eng = liveEngineers.find(e => e.name === proposedEngineerName) || liveEngineers[0];
+        const resp = await fetch(`/api/work-orders/${encodeURIComponent(orderId)}/pre-dispatch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            engineerId: eng?.id,
+            engineerName: proposedEngineerName || eng?.name,
+            engineerPhone: eng?.phone,
+            preDispatcherName: authorName,
+            authorRole,
+            notes: targetOrder.preDispatchNotes || '',
+            discussionMessage: content,
+            equipmentId: targetOrder.equipmentId,
+            equipmentName: targetOrder.equipmentName,
+            department: targetOrder.department,
+            faultDescription: targetOrder.faultDescription,
+            caoliaoRecordNo: targetOrder.caoliaoRecordNo
+          })
+        });
+        const json = await resp.json();
+        if (json.success && (json.data || json.order)) updatedOrder = json.data || json.order;
+      } else {
+        const resp = await fetch(`/api/work-orders/${encodeURIComponent(orderId)}/discussion`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            authorName,
+            authorRole,
+            content,
+            proposedEngineerName
+          })
+        });
+        const json = await resp.json();
+        if (json.success && (json.data || json.order)) updatedOrder = json.data || json.order;
+      }
+    } catch (err) {
+      console.warn('[Discussion] Server sync warning:', err);
+    }
+
+    setWorkOrders(prev => {
+      const next = prev.map(o => {
+        if (o.id !== orderId) return o;
+        if (updatedOrder) return { ...o, ...updatedOrder };
+        const noteEntry = {
+          id: `DISC-${Date.now()}`,
+          authorName,
+          authorRole,
+          content,
+          timestamp: nowStr,
+          proposedEngineerName: proposedEngineerName || o.proposedEngineerName,
+          actionType: (o.status === 'pending_dispatch' ? 'pre_dispatch' : 'discussion') as 'pre_dispatch' | 'discussion'
+        };
+        const built: EngineeringWorkOrder = {
+          ...o,
+          status: o.status === 'pending_dispatch' ? 'pre_dispatched' : o.status,
+          proposedEngineerName: o.proposedEngineerName || proposedEngineerName,
+          internalDiscussions: [...(o.internalDiscussions || []), noteEntry]
+        };
+        updatedOrder = built;
+        return built;
+      });
+      saveStoredWorkOrders(next);
+      return next;
+    });
+
+    window.dispatchEvent(new CustomEvent('work_orders_updated'));
+    showToast('内部讨论确认意见已记录');
+    return updatedOrder;
+  };
+
+  const handleConfirmDispatch = async (
+    orderId: string,
+    engineer: BiomedicalEngineerProfile,
+    notes: string,
+    dispatchMeta?: OutsourcedDispatchMeta
+  ): Promise<EngineeringWorkOrder | void> => {
     const d = new Date();
     const pad = (n: number) => n.toString().padStart(2, '0');
     const nowStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
-    setWorkOrders(prev =>
-      prev.map(o => {
+    const targetOrder = workOrders.find(o => o.id === orderId);
+    const dispatcher = currentUser?.name || '医工调度中心';
+    const isOutsourced = dispatchMeta?.dispatchChannel === 'outsourced';
+    const expectedVendorOrderId = isOutsourced
+      ? targetOrder?.linkedVendorOrderId || `EXT-${orderId.replace(/[^A-Za-z0-9]/g, '').slice(-10)}`
+      : undefined;
+
+    let serverUpdatedOrder: EngineeringWorkOrder | undefined;
+    try {
+      const resp = await fetch(`/api/work-orders/${encodeURIComponent(orderId)}/dispatch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          engineerId: engineer.id,
+          engineerName: engineer.name,
+          engineerPhone: engineer.phone,
+          dispatcherName: dispatcher,
+          notes,
+          ...(dispatchMeta || {}),
+          equipmentId: targetOrder?.equipmentId,
+          equipmentName: targetOrder?.equipmentName,
+          equipmentModel: targetOrder?.equipmentModel,
+          equipmentSn: targetOrder?.equipmentSn,
+          internalNo: targetOrder?.internalNo,
+          category: targetOrder?.category,
+          department: targetOrder?.department,
+          location: targetOrder?.location,
+          reporterName: targetOrder?.reporterName,
+          reporterPhone: targetOrder?.reporterPhone,
+          priority: targetOrder?.priority,
+          faultDescription: targetOrder?.faultDescription,
+          biomedicalGroup: targetOrder?.biomedicalGroup,
+          caoliaoRecordNo: targetOrder?.caoliaoRecordNo,
+          photoUrl: targetOrder?.photoUrl
+        })
+      });
+      const json = await resp.json();
+      if (json.success && (json.data || json.order)) {
+        serverUpdatedOrder = json.data || json.order;
+      }
+      if (json.vendorCollabOrder) {
+        upsertVendorCollaborationOrder(json.vendorCollabOrder);
+      }
+      if (json.linkedProject || json.data?.linkedProjectId) {
+        window.dispatchEvent(
+          new CustomEvent('medtech:project-ledger-updated', {
+            detail: { project: json.linkedProject, projectId: json.data?.linkedProjectId }
+          })
+        );
+      }
+      window.dispatchEvent(new CustomEvent('work_orders_updated'));
+    } catch (err) {
+      console.warn('[Dispatch] Server sync warning:', err);
+    }
+
+    let finalOrder: EngineeringWorkOrder | undefined = serverUpdatedOrder;
+    setWorkOrders(prev => {
+      const next = prev.map(o => {
         if (o.id === orderId) {
-          return {
+          if (serverUpdatedOrder) {
+            return { ...o, ...serverUpdatedOrder };
+          }
+          const confirmNote = {
+            id: `DISC-${Date.now()}`,
+            authorName: dispatcher,
+            authorRole: currentUser?.role || '医工调度员',
+            content: isOutsourced
+              ? `正式下发外协派工单至【${dispatchMeta?.externalPartner}】，院内监护工程师：【${engineer.name}】。${notes ? `指令：${notes}` : ''}`
+              : `内部确认完成，正式下发派工给【${engineer.name}】。${notes ? `指令：${notes}` : ''}`,
+            timestamp: nowStr,
+            proposedEngineerName: engineer.name,
+            actionType: 'confirm_dispatch' as const
+          };
+          const built: EngineeringWorkOrder = {
             ...o,
-            status: 'dispatched',
-            dispatcherName: currentUser?.name || '医工调度中心',
+            status: 'dispatched' as const,
+            dispatcherName: dispatcher,
             dispatchTime: nowStr,
             dispatchNotes: notes,
             assignedEngineerId: engineer.id,
             assignedEngineerName: engineer.name,
-            assignedEngineerPhone: engineer.phone
+            assignedEngineerPhone: engineer.phone,
+            ...(dispatchMeta || {}),
+            vendorDispatchTime: isOutsourced ? nowStr : o.vendorDispatchTime,
+            vendorStatus: isOutsourced
+              ? dispatchMeta?.requiresVendorQuote
+                ? 'pending_quote'
+                : 'dispatched_to_vendor'
+              : o.vendorStatus,
+            linkedVendorOrderId: isOutsourced ? expectedVendorOrderId : o.linkedVendorOrderId,
+            internalDiscussions: [...(o.internalDiscussions || []), confirmNote]
           };
+          finalOrder = built;
+          return built;
         }
         return o;
-      })
+      });
+      saveStoredWorkOrders(next);
+      return next;
+    });
+
+    if (isOutsourced && finalOrder && dispatchMeta?.syncToVendorPortal !== false) {
+      const vendorOrder = buildVendorOrderFromWorkOrder(finalOrder, dispatcher);
+      upsertVendorCollaborationOrder(vendorOrder);
+    }
+
+    const projNotice = finalOrder?.linkedProjectId
+      ? ` · 已同步《设备项目台账》(#${finalOrder.linkedProjectId})`
+      : '';
+    showToast(
+      isOutsourced
+        ? `外协协同派工成功！已同步至【${dispatchMeta?.externalPartner}】与外协协同中心，院内监护：${engineer.name}${projNotice}`
+        : `正式派工成功！已指派工程师【${engineer.name}】，系统已启动 ${engineer.name} 的到场响应计时${projNotice}`
     );
-    setAssigningOrder(null);
-    showToast(`派工成功！已指派工程师【${engineer.name}】，系统已启动 ${engineer.name} 的到场响应计时`);
+    return finalOrder;
   };
 
-  const handleUpdateWorkOrder = (updated: EngineeringWorkOrder) => {
+  const handleUpdateWorkOrder = async (updated: EngineeringWorkOrder) => {
     setWorkOrders(prev => prev.map(o => (o.id === updated.id ? updated : o)));
     setOperatingOrder(updated);
+    try {
+      const resp = await fetch(`/api/work-orders/${encodeURIComponent(updated.id)}/field-update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updated)
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (json.success && json.data) {
+        setWorkOrders(prev => prev.map(o => (o.id === updated.id ? json.data : o)));
+        setOperatingOrder(json.data);
+      }
+      if (json.linkedProject || json.data?.linkedProjectId) {
+        window.dispatchEvent(
+          new CustomEvent('medtech:project-ledger-updated', {
+            detail: { project: json.linkedProject, projectId: json.data?.linkedProjectId }
+          })
+        );
+      }
+      window.dispatchEvent(new CustomEvent('work_orders_updated'));
+      if (json.linkedProject?.id) {
+        showToast(`工单【${updated.id}】已同步建项入《设备项目台账》(#${json.linkedProject.id})`);
+        return;
+      }
+    } catch (err) {
+      console.warn('[FieldUpdate] Server sync warning:', err);
+    }
     showToast(`工单【${updated.id}】现场作业状态已更新`);
   };
 
-  const handleConfirmAcceptance = (
+  const handleConfirmAcceptance = async (
     orderId: string,
     ratingData: {
       ratingScore: number;
@@ -444,6 +795,18 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
       })
     );
 
+    try {
+      await fetch(`/api/work-orders/${encodeURIComponent(orderId)}/clinical-accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(ratingData)
+      });
+      window.dispatchEvent(new CustomEvent('work_orders_updated'));
+      window.dispatchEvent(new CustomEvent('medical_equipment_updated'));
+    } catch (err) {
+      console.warn('[ClinicalAccept] Server sync warning:', err);
+    }
+
     // Sync back to equipment's status & repair records
     if (targetOrder && onEquipmentUpdated) {
       const eq = equipmentList.find(e => e.id === targetOrder?.equipmentId || e.sn === targetOrder?.equipmentSn);
@@ -472,8 +835,21 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
     showToast(`临床验收合格！工单【${orderId}】已完成闭环归档，对应设备状态已恢复【正常运行】！`);
   };
 
-  const handleCreateWorkOrder = (newOrder: EngineeringWorkOrder) => {
-    setWorkOrders(prev => [newOrder, ...prev]);
+  const handleCreateWorkOrder = async (newOrder: EngineeringWorkOrder) => {
+    setWorkOrders(prev => {
+      const next = sortWorkOrdersNewestFirst([newOrder, ...prev]);
+      saveStoredWorkOrders(next);
+      fetch('/api/work-orders/batch-save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workOrders: next })
+      })
+        .then(() => {
+          window.dispatchEvent(new CustomEvent('work_orders_updated'));
+        })
+        .catch(() => {});
+      return next;
+    });
 
     // Update equipment status to '故障待修'
     if (onEquipmentUpdated) {
@@ -562,17 +938,19 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
               </span>
             </button>
 
-            <button
-              onClick={() => setViewSubTab('warehouse')}
-              className={`px-3 py-1 rounded-md font-bold transition flex items-center gap-1.5 cursor-pointer ${
-                viewSubTab === 'warehouse'
-                  ? 'bg-white text-teal-700 shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Package className="w-3.5 h-3.5 text-teal-600" />
-              <span>备件库</span>
-            </button>
+            {allowSpareParts && (
+              <button
+                onClick={() => setViewSubTab('warehouse')}
+                className={`px-3 py-1 rounded-md font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                  viewSubTab === 'warehouse'
+                    ? 'bg-white text-teal-700 shadow-2xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Package className="w-3.5 h-3.5 text-teal-600" />
+                <span>备件库</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -604,11 +982,28 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
                 ? 'bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100'
                 : 'bg-slate-50 border-slate-200 text-slate-600'
             }`}
-            title="筛选待指派工单"
+            title="筛选待拟定指派工单"
           >
             <AlertTriangle className={`w-3 h-3 ${kpiStats.pendingDispatchCount > 0 ? 'text-rose-600 animate-pulse' : 'text-slate-400'}`} />
             <span className="font-medium">待派工:</span>
             <span className="font-bold font-mono">{kpiStats.pendingDispatchCount}单</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setStatusFilter(prev => prev === 'pre_dispatched' ? 'all' : 'pre_dispatched');
+              setViewSubTab('pool');
+            }}
+            className={`px-2.5 py-1 rounded-lg border flex items-center gap-1.5 transition cursor-pointer ${
+              (kpiStats.preDispatchedCount || 0) > 0
+                ? 'bg-violet-50 border-violet-200 text-violet-800 hover:bg-violet-100'
+                : 'bg-slate-50 border-slate-200 text-slate-600'
+            }`}
+            title="筛选预派工/内部讨论确认中工单"
+          >
+            <MessageSquare className={`w-3 h-3 ${(kpiStats.preDispatchedCount || 0) > 0 ? 'text-violet-600' : 'text-slate-400'}`} />
+            <span className="font-medium">预派工:</span>
+            <span className="font-bold font-mono">{kpiStats.preDispatchedCount || 0}单</span>
           </button>
 
           <button
@@ -623,24 +1018,32 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
         </div>
 
         {/* Right: Actions */}
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={handlePullFromCaoliao}
-            disabled={isSyncingCaoliao}
-            className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 text-xs font-bold rounded-lg transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-            title="草料单向安全架构：从草料只读从库拉取现场报修，转建院内派工单"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isSyncingCaoliao ? 'animate-spin text-emerald-600' : 'text-emerald-600'}`} />
-            <span>{isSyncingCaoliao ? '拉取中...' : '同步草料报修'}</span>
-          </button>
-          <button
-            onClick={() => setIsCreateModalOpen(true)}
-            className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-xs transition flex items-center gap-1 cursor-pointer"
-          >
-            <PlusCircle className="w-3.5 h-3.5" />
-            <span>+ 应急报修派工</span>
-          </button>
-        </div>
+        {allowDispatch && (
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={handlePullFromCaoliao}
+              disabled={isSyncingCaoliao}
+              className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 text-xs font-bold rounded-lg transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              title="草料单向安全架构：从草料只读从库拉取现场报修，转建院内派工单"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncingCaoliao ? 'animate-spin text-emerald-600' : 'text-emerald-600'}`} />
+              <span>{isSyncingCaoliao ? '拉取中...' : '同步草料报修'}</span>
+            </button>
+            
+            <button
+              onClick={() => {
+                setCreateModalInitialRecord(null);
+                setCreateModalInitialEquipment(null);
+                setIsCreateModalOpen(true);
+              }}
+              className="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+              title="从全院现有设备报修单或草料扫码记录一键导入并生成派工工单"
+            >
+              <PlusCircle className="w-3.5 h-3.5" />
+              <span>+ 报修单转派工</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* View Sub-Tab 1: Work Order Pool (Horizontal Command Layout) */}
@@ -695,6 +1098,7 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
                   {[
                     { id: 'p1_emergency', label: '🚨 P1特急', count: presetCounts.p1_emergency },
                     { id: 'sla_warning', label: '⏱️ SLA预警', count: presetCounts.sla_warning },
+                    { id: 'outsourced', label: '🏭 外协协同', count: presetCounts.outsourced },
                     { id: 'caoliao', label: '📱 草料扫码', count: presetCounts.caoliao },
                     { id: 'unassigned', label: '👤 待指派', count: presetCounts.unassigned },
                     { id: 'waiting_parts', label: '📦 待配件', count: presetCounts.waiting_parts },
@@ -832,13 +1236,14 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
             {/* Sub-toolbar: Status Stages on Left, View Mode & Sorting on Right */}
             <div className="px-3 py-1.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 bg-slate-50/60 shrink-0">
               {/* Left: Status Stage Pills */}
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 flex-wrap">
                 {[
                   { id: 'all', label: '全部工单', count: workOrders.length },
                   { id: 'pending_dispatch', label: '1. 待派工', count: statusCounts.pending_dispatch, isPending: true },
-                  { id: 'in_progress', label: '2. 维修中', count: statusCounts.in_progress },
-                  { id: 'pending_acceptance', label: '3. 待验收', count: statusCounts.pending_acceptance },
-                  { id: 'closed', label: '4. 已闭环', count: statusCounts.closed },
+                  { id: 'pre_dispatched', label: '2. 预派工/拟定', count: statusCounts.pre_dispatched, isPre: true },
+                  { id: 'in_progress', label: '3. 维修中', count: statusCounts.in_progress },
+                  { id: 'pending_acceptance', label: '4. 待验收', count: statusCounts.pending_acceptance },
+                  { id: 'closed', label: '5. 已闭环', count: statusCounts.closed },
                 ].map((st) => {
                   const isActive = statusFilter === st.id;
                   return (
@@ -847,9 +1252,13 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
                       onClick={() => setStatusFilter(st.id)}
                       className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer border ${
                         isActive
-                          ? 'bg-slate-900 text-white border-slate-900 shadow-2xs'
+                          ? st.isPre
+                            ? 'bg-violet-700 text-white border-violet-700 shadow-2xs'
+                            : 'bg-slate-900 text-white border-slate-900 shadow-2xs'
                           : st.isPending && st.count > 0
                           ? 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+                          : st.isPre && st.count > 0
+                          ? 'bg-violet-50 text-violet-800 border-violet-200 hover:bg-violet-100'
                           : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
                       }`}
                     >
@@ -859,6 +1268,8 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
                           ? 'bg-white/20 text-white'
                           : st.isPending && st.count > 0
                           ? 'bg-rose-100 text-rose-800'
+                          : st.isPre && st.count > 0
+                          ? 'bg-violet-100 text-violet-800'
                           : 'bg-slate-100 text-slate-600'
                       }`}>
                         {st.count}
@@ -955,6 +1366,10 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
                 onClinicalAcceptance={(order) => setAcceptingOrder(order)}
                 onViewTracking={(order) => setTrackingOrder(order)}
                 onPrint={(order) => setPrintingOrder(order)}
+                canDispatch={allowDispatch}
+                canDiscuss={allowDiscuss}
+                canFieldOp={allowFieldRepair}
+                canAccept={allowClinicalAccept}
               />
             </div>
           )}
@@ -982,6 +1397,7 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
                   const isP1 = order.priority === 'P1_CRITICAL';
                   const isP2 = order.priority === 'P2_URGENT';
                   const isPendingDispatch = order.status === 'pending_dispatch';
+                  const isPreDispatched = order.status === 'pre_dispatched';
                   const isPendingAccept = order.status === 'repaired_pending_acceptance';
                   const isClosed = order.status === 'closed';
 
@@ -991,6 +1407,8 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
                       className={`bg-white rounded-xl border transition-all duration-200 shadow-2xs hover:shadow-md flex flex-col justify-between overflow-hidden ${
                         isPendingDispatch
                           ? 'border-rose-300 ring-1 ring-rose-300/50'
+                          : isPreDispatched
+                          ? 'border-violet-300 ring-1 ring-violet-300/60'
                           : isPendingAccept
                           ? 'border-cyan-300 ring-1 ring-cyan-300/50'
                           : 'border-slate-200'
@@ -998,6 +1416,7 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
                     >
                       {/* Card Top Banner */}
                       <div className={`p-3 border-b flex items-center justify-between ${
+                        isPreDispatched ? 'bg-violet-50/70 border-violet-100' :
                         isP1 ? 'bg-rose-50/70 border-rose-100' :
                         isP2 ? 'bg-amber-50/70 border-amber-100' :
                         'bg-slate-50 border-slate-100'
@@ -1021,11 +1440,18 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
                               <span>草料扫码</span>
                             </span>
                           )}
+                          {(order.dispatchChannel === 'outsourced' || order.externalPartner) && (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-2xs font-bold bg-amber-50 text-amber-800 border border-amber-200" title={`外协服务商: ${order.externalPartner}`}>
+                              <Building2 className="w-2.5 h-2.5" />
+                              <span>外协协同</span>
+                            </span>
+                          )}
                         </div>
 
                         {/* Status badge */}
                         <span className={`px-2 py-0.5 rounded-full text-2xs font-bold border ${
                           order.status === 'pending_dispatch' ? 'bg-rose-100 text-rose-800 border-rose-200' :
+                          order.status === 'pre_dispatched' ? 'bg-violet-100 text-violet-800 border-violet-200' :
                           order.status === 'dispatched' ? 'bg-indigo-100 text-indigo-800 border-indigo-200' :
                           order.status === 'accepted' ? 'bg-blue-100 text-blue-800 border-blue-200' :
                           order.status === 'arrived_inspecting' ? 'bg-amber-100 text-amber-800 border-amber-200' :
@@ -1034,6 +1460,7 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
                           'bg-emerald-100 text-emerald-800 border-emerald-200'
                         }`}>
                           {order.status === 'pending_dispatch' && '● 待派工'}
+                          {order.status === 'pre_dispatched' && `● 预派工 · 拟定 ${order.proposedEngineerName || ''}`}
                           {order.status === 'dispatched' && '● 已派待响应'}
                           {order.status === 'accepted' && '● 已接单在途'}
                           {order.status === 'arrived_inspecting' && '● 现场排查中'}
@@ -1098,18 +1525,55 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
                         {/* Engineer & SLA Tracker */}
                         <div className="bg-indigo-50/50 rounded-lg p-2 border border-indigo-100/70 space-y-1 text-2xs">
                           <div className="flex items-center justify-between">
-                            <span className="text-slate-500">负责工程师：</span>
+                            <span className="text-slate-500">
+                              {order.dispatchChannel === 'outsourced'
+                                ? '院内监护医工：'
+                                : isPreDispatched
+                                ? '拟定工程师：'
+                                : '负责工程师：'}
+                            </span>
                             <span className="font-bold text-indigo-900">
                               {order.assignedEngineerName ? (
                                 <span className="flex items-center gap-1">
                                   <span>{order.assignedEngineerName}</span>
                                   <span className="text-slate-400 font-normal">({order.biomedicalGroup.slice(0, 4)})</span>
                                 </span>
+                              ) : isPreDispatched && order.proposedEngineerName ? (
+                                <span className="flex items-center gap-1 text-violet-800">
+                                  <span>{order.proposedEngineerName}</span>
+                                  <span className="text-violet-500 font-normal">({order.internalDiscussions?.length || 0}条讨论确认中)</span>
+                                </span>
                               ) : (
-                                <span className="text-rose-600 font-bold">调度室尚未指派</span>
+                                <span className="text-rose-600 font-bold">调度室尚未拟定</span>
                               )}
                             </span>
                           </div>
+
+                          {(order.dispatchChannel === 'outsourced' || order.externalPartner) && (
+                            <div className="flex items-center justify-between gap-2 bg-amber-50/90 px-1.5 py-1 rounded border border-amber-200/80 text-amber-900">
+                              <span className="font-semibold truncate flex items-center gap-1">
+                                <Building2 className="w-3 h-3 text-amber-700 shrink-0" />
+                                <span className="truncate">{order.externalVendorShortName || order.externalPartner}</span>
+                              </span>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {order.outsourceServiceMode && (
+                                  <span className="text-[10px] px-1 rounded bg-white text-amber-800 border border-amber-200">
+                                    {OUTSOURCE_SERVICE_MODE_LABELS[order.outsourceServiceMode]?.shortLabel}
+                                  </span>
+                                )}
+                                {order.linkedVendorOrderId && onNavigateToVendorCollab && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onNavigateToVendorCollab(order.linkedVendorOrderId)}
+                                    className="font-mono text-[10px] text-indigo-700 hover:underline font-bold cursor-pointer"
+                                    title="点击跳转外协协同中心"
+                                  >
+                                    {order.linkedVendorOrderId}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )}
 
                           <div className="flex items-center justify-between">
                             <span className="text-slate-500">停机修复耗时：</span>
@@ -1127,12 +1591,15 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
                           )}
                         </div>
 
-                        {/* 4-Step Stepper Bar: 待分配 -> 维修中 -> 待验收 -> 已完成 */}
+                        {/* 5-Step Stepper Bar: 待分配 -> 预派工 -> 维修中 -> 待验收 -> 已完成 */}
                         <div className="pt-2 border-t border-slate-100">
                           <WorkOrderStepBar
                             status={order.status}
                             size="sm"
                             showSubStatus={true}
+                            proposedEngineerName={order.proposedEngineerName}
+                            assignedEngineerName={order.assignedEngineerName}
+                            discussionCount={order.internalDiscussions?.length || 0}
                             onStepClick={() => setTrackingOrder(order)}
                           />
                         </div>
@@ -1159,17 +1626,27 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
                         </div>
 
                         <div className="flex items-center gap-1.5">
-                          {isPendingDispatch && (
+                          {isPendingDispatch && (allowDispatch || allowDiscuss) && (
                             <button
                               onClick={() => setAssigningOrder(order)}
                               className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-2xs font-bold transition flex items-center gap-1 shadow-xs cursor-pointer"
                             >
-                              <UserCheck className="w-3.5 h-3.5" />
-                              <span>指派工程师</span>
+                              {allowDispatch ? <UserCheck className="w-3.5 h-3.5" /> : <MessageSquare className="w-3.5 h-3.5" />}
+                              <span>{allowDispatch ? '预派/指派' : '技术讨论'}</span>
                             </button>
                           )}
 
-                          {['dispatched', 'accepted', 'arrived_inspecting', 'waiting_parts'].includes(order.status) && (
+                          {isPreDispatched && (allowDispatch || allowDiscuss) && (
+                            <button
+                              onClick={() => setAssigningOrder(order)}
+                              className="px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg text-2xs font-bold transition flex items-center gap-1 shadow-xs cursor-pointer"
+                            >
+                              <MessageSquare className="w-3.5 h-3.5" />
+                              <span>{allowDispatch ? '讨论/确认派工' : '技术讨论'}</span>
+                            </button>
+                          )}
+
+                          {['dispatched', 'accepted', 'arrived_inspecting', 'waiting_parts'].includes(order.status) && allowFieldRepair && (
                             <button
                               onClick={() => setOperatingOrder(order)}
                               className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-2xs font-bold transition flex items-center gap-1 shadow-xs cursor-pointer"
@@ -1179,7 +1656,7 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
                             </button>
                           )}
 
-                          {isPendingAccept && (
+                          {isPendingAccept && allowClinicalAccept && (
                             <button
                               onClick={() => setAcceptingOrder(order)}
                               className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg text-2xs font-bold transition flex items-center gap-1 shadow-xs cursor-pointer"
@@ -1333,7 +1810,7 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
                           )}
                         </div>
                       </th>
-                      <th className="p-3 min-w-[210px]">状态流转流程 (4步追踪)</th>
+                      <th className="p-3 min-w-[260px]">状态流转流程 (5步追踪)</th>
                       <th className="p-3 text-center">操作</th>
                     </tr>
                   </thead>
@@ -1376,10 +1853,20 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
                         </td>
                         <td className="p-3 font-mono text-2xs text-slate-600">{order.reportTime}</td>
                         <td className="p-3 font-medium text-slate-800">
-                          {order.assignedEngineerName ? (
-                            <span className="text-indigo-700 font-bold">{order.assignedEngineerName}</span>
-                          ) : (
-                            <span className="text-rose-600 font-bold">待指派</span>
+                          <div>
+                            {order.assignedEngineerName ? (
+                              <span className="text-indigo-700 font-bold">{order.assignedEngineerName}</span>
+                            ) : order.status === 'pre_dispatched' && order.proposedEngineerName ? (
+                              <span className="text-violet-700 font-bold">拟定: {order.proposedEngineerName}</span>
+                            ) : (
+                              <span className="text-rose-600 font-bold">待拟定</span>
+                            )}
+                          </div>
+                          {(order.dispatchChannel === 'outsourced' || order.externalPartner) && (
+                            <div className="text-[10.5px] text-amber-800 font-semibold mt-0.5 flex items-center gap-1">
+                              <Building2 className="w-3 h-3 shrink-0" />
+                              <span className="truncate max-w-[140px]">{order.externalVendorShortName || order.externalPartner}</span>
+                            </div>
                           )}
                         </td>
                         <td className="p-3 font-mono text-2xs">
@@ -1388,11 +1875,14 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
                         <td className="p-3 font-mono text-slate-800 font-bold">
                           {order.totalDowntimeHours}h
                         </td>
-                        <td className="p-3 min-w-[210px]">
+                        <td className="p-3 min-w-[260px]">
                           <WorkOrderStepBar
                             status={order.status}
                             size="sm"
                             showSubStatus={true}
+                            proposedEngineerName={order.proposedEngineerName}
+                            assignedEngineerName={order.assignedEngineerName}
+                            discussionCount={order.internalDiscussions?.length || 0}
                             onStepClick={() => setTrackingOrder(order)}
                           />
                         </td>
@@ -1405,15 +1895,23 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
                             >
                               <Eye className="w-3.5 h-3.5" />
                             </button>
-                            {order.status === 'pending_dispatch' && (
+                            {order.status === 'pending_dispatch' && (allowDispatch || allowDiscuss) && (
                               <button
                                 onClick={() => setAssigningOrder(order)}
                                 className="px-2 py-1 bg-indigo-600 text-white rounded text-2xs font-bold hover:bg-indigo-700 cursor-pointer"
                               >
-                                派工
+                                {allowDispatch ? '预派/派工' : '讨论'}
                               </button>
                             )}
-                            {['dispatched', 'accepted', 'arrived_inspecting', 'waiting_parts'].includes(order.status) && (
+                            {order.status === 'pre_dispatched' && (allowDispatch || allowDiscuss) && (
+                              <button
+                                onClick={() => setAssigningOrder(order)}
+                                className="px-2 py-1 bg-violet-600 text-white rounded text-2xs font-bold hover:bg-violet-700 cursor-pointer"
+                              >
+                                {allowDispatch ? '讨论/确认' : '讨论'}
+                              </button>
+                            )}
+                            {['dispatched', 'accepted', 'arrived_inspecting', 'waiting_parts'].includes(order.status) && allowFieldRepair && (
                               <button
                                 onClick={() => setOperatingOrder(order)}
                                 className="px-2 py-1 bg-blue-600 text-white rounded text-2xs font-bold hover:bg-blue-700 cursor-pointer"
@@ -1421,7 +1919,7 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
                                 作业
                               </button>
                             )}
-                            {order.status === 'repaired_pending_acceptance' && (
+                            {order.status === 'repaired_pending_acceptance' && allowClinicalAccept && (
                               <button
                                 onClick={() => setAcceptingOrder(order)}
                                 className="px-2 py-1 bg-cyan-600 text-white rounded text-2xs font-bold hover:bg-cyan-700 cursor-pointer"
@@ -1733,7 +2231,7 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
       )}
 
       {/* View Sub-Tab 4: Spare Parts Warehouse Linkage */}
-      {viewSubTab === 'warehouse' && (
+      {viewSubTab === 'warehouse' && allowSpareParts && (
         <div className="bg-white rounded-xl border border-slate-200 shadow-2xs flex-1 min-h-0 flex flex-col overflow-hidden p-3">
           <SparePartsWarehouseView
             currentUserName={currentUser?.name}
@@ -1750,16 +2248,37 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
         isOpen={isCreateModalOpen}
         equipmentList={equipmentList}
         currentUser={currentUser}
-        onClose={() => setIsCreateModalOpen(false)}
-        onCreateWorkOrder={handleCreateWorkOrder}
+        initialRepairRecord={createModalInitialRecord}
+        initialEquipment={createModalInitialEquipment}
+        onClose={() => {
+          setIsCreateModalOpen(false);
+          setCreateModalInitialRecord(null);
+          setCreateModalInitialEquipment(null);
+        }}
+        onCreateWorkOrder={(newOrder) => {
+          handleCreateWorkOrder(newOrder);
+          setIsCreateModalOpen(false);
+          setCreateModalInitialRecord(null);
+          setCreateModalInitialEquipment(null);
+        }}
       />
 
       <DispatchAssignModal
         isOpen={Boolean(assigningOrder)}
         workOrder={assigningOrder}
         engineers={liveEngineers}
+        currentUserName={currentUser?.name || '医工调度中心'}
+        currentUserRole={currentUser?.role || '医工调度员'}
+        canDispatch={allowDispatch}
         onClose={() => setAssigningOrder(null)}
+        onPreDispatch={handlePreDispatch}
+        onAddDiscussion={handleAddDiscussion}
         onConfirmDispatch={handleConfirmDispatch}
+        onNavigateToVendorCollab={onNavigateToVendorCollab}
+        onNavigateToProjectLedger={(projectId) => {
+          setAssigningOrder(null);
+          window.dispatchEvent(new CustomEvent('medtech:focus-project-ledger', { detail: { projectId } }));
+        }}
       />
 
       <FieldOperationModal
@@ -1792,6 +2311,10 @@ export const DispatchWorkOrderView: React.FC<DispatchWorkOrderViewProps> = ({
         isOpen={Boolean(trackingOrder)}
         workOrder={trackingOrder}
         onClose={() => setTrackingOrder(null)}
+        canDispatch={allowDispatch}
+        canDiscuss={allowDiscuss}
+        canFieldOp={allowFieldRepair}
+        canAccept={allowClinicalAccept}
         onAssignEngineer={(order) => {
           setTrackingOrder(null);
           setAssigningOrder(order);

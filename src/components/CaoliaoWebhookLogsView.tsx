@@ -58,12 +58,14 @@ export interface CaoliaoWebhookLogItem {
 interface CaoliaoWebhookLogsViewProps {
   onNavigateTab?: (tab: ActiveTab) => void;
   onOpenRepairModal?: (device?: MedicalEquipment) => void;
+  onDirectDispatch?: (workOrder: any) => void;
   equipmentList?: MedicalEquipment[];
 }
 
 export const CaoliaoWebhookLogsView: React.FC<CaoliaoWebhookLogsViewProps> = ({
   onNavigateTab,
   onOpenRepairModal,
+  onDirectDispatch,
   equipmentList = []
 }) => {
   const [logs, setLogs] = useState<CaoliaoWebhookLogItem[]>([]);
@@ -86,7 +88,42 @@ export const CaoliaoWebhookLogsView: React.FC<CaoliaoWebhookLogsViewProps> = ({
   const [manualLinkLog, setManualLinkLog] = useState<CaoliaoWebhookLogItem | null>(null);
   const [selectedEquipIdToLink, setSelectedEquipIdToLink] = useState<string>('');
 
+  // 主动从草料拉取 (Pull) 及单号精准抓取状态
+  const [isPullingRepairs, setIsPullingRepairs] = useState<boolean>(false);
+  const [pullRecordNoInput, setPullRecordNoInput] = useState<string>('');
+  const [isPullingRecord, setIsPullingRecord] = useState<boolean>(false);
+  const [actionBannerMsg, setActionBannerMsg] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+
+  // 原始草料文本直接粘贴识别弹窗状态
+  const [isPasteModalOpen, setIsPasteModalOpen] = useState<boolean>(false);
+  const [pasteText, setPasteText] = useState<string>('');
+  const [isParsingText, setIsParsingText] = useState<boolean>(false);
+
   const SIMULATION_PRESETS = [
+    {
+      title: '【功能检查科】孙志强 (单号 L12238) 肌电图诱发电位仪 耳机右声道不通报修',
+      payload: {
+        event: 'form_submitted',
+        '表单名称': '医疗设备故障报修数据与统计',
+        '记录编号': 'L12238',
+        '基本信息': '功能检查科-肌电图诱发电位仪',
+        '子码编号': 'M236-Z765',
+        '类别代码': '07',
+        '类别': '医用诊察和监护器械',
+        '一级类别代码': '03',
+        '填表人': '孙志强',
+        '填表时间': '11/10 14:56',
+        '填写方式': '扫一扫填写',
+        '当前状态': '故障待修',
+        '处理进度': '处理中',
+        '可信存证': '蚂蚁链保护中存证详情',
+        '故障表现': '耳机，右声道不通',
+        '报修人姓名': '孙志强',
+        '报修人手机': '18906339915(山东日照)',
+        '出厂编号': '0941701004',
+        '科室名称': '功能检查科'
+      }
+    },
     {
       title: '【重症医学科】迈瑞病人监护仪心电血氧报警',
       payload: {
@@ -188,8 +225,10 @@ export const CaoliaoWebhookLogsView: React.FC<CaoliaoWebhookLogsViewProps> = ({
       if (json.success) {
         setSimulateToast({ type: 'success', message: `模拟回调已成功入库！已生成工单 ${json.workOrderId}，关联设备: ${json.equipmentName}` });
         fetchLogs(true);
-        // 触发全局报修提醒广播
+        // 触发全局报修提醒与跨模块台账/工单刷新广播
         window.dispatchEvent(new CustomEvent('caoliao_repair_received', { detail: json }));
+        window.dispatchEvent(new CustomEvent('work_orders_updated'));
+        window.dispatchEvent(new CustomEvent('medical_equipment_updated'));
         setTimeout(() => setIsSimulateModalOpen(false), 1200);
       } else {
         setSimulateToast({ type: 'error', message: json.error || '模拟发送失败' });
@@ -198,6 +237,103 @@ export const CaoliaoWebhookLogsView: React.FC<CaoliaoWebhookLogsViewProps> = ({
       setSimulateToast({ type: 'error', message: '网络请求异常' });
     } finally {
       setIsSimulating(false);
+    }
+  };
+
+  // 1. 主动拉取草料最新数据 (Pull)
+  const handlePullRepairs = async () => {
+    setIsPullingRepairs(true);
+    setActionBannerMsg(null);
+    try {
+      const res = await fetch('/api/caoliao/pull-repairs', { method: 'POST' });
+      const json = await res.json();
+      if (json.success) {
+        setActionBannerMsg({
+          type: 'success',
+          text: `草料数据拉取成功：${json.message || ''} (抓取到 ${json.count || 0} 条报修数据)`
+        });
+        fetchLogs(true);
+        window.dispatchEvent(new CustomEvent('caoliao_repair_received', { detail: json }));
+        window.dispatchEvent(new CustomEvent('work_orders_updated'));
+        window.dispatchEvent(new CustomEvent('medical_equipment_updated'));
+      } else {
+        setActionBannerMsg({ type: 'error', text: json.error || '拉取草料数据失败' });
+      }
+    } catch (e: any) {
+      setActionBannerMsg({ type: 'error', text: '请求草料拉取接口超时或异常' });
+    } finally {
+      setIsPullingRepairs(false);
+    }
+  };
+
+  // 2. 草料单号精准抓取 / 补录建单
+  const handlePullByRecordNo = async (targetNoInput?: string) => {
+    const targetNo = (targetNoInput || pullRecordNoInput).trim();
+    if (!targetNo) {
+      alert('请输入需要抓取的草料单号（如 L12238）或填表人姓名（如 孙志强）');
+      return;
+    }
+    setIsPullingRecord(true);
+    setActionBannerMsg(null);
+    try {
+      const res = await fetch('/api/caoliao/pull-by-record-no', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recordNo: targetNo })
+      });
+      const json = await res.json();
+      if (json.success) {
+        setActionBannerMsg({
+          type: 'success',
+          text: `草料单号【${targetNo}】拉取建单成功！已关联设备【${json.equipmentName} (${json.matchedEquipmentId})】· 科室【${json.matchedDepartment}】· 自动派发闭环工单【${json.workOrderId}】！`
+        });
+        setKeyword(targetNo);
+        fetchLogs(true);
+        window.dispatchEvent(new CustomEvent('caoliao_repair_received', { detail: json }));
+        window.dispatchEvent(new CustomEvent('work_orders_updated'));
+        window.dispatchEvent(new CustomEvent('medical_equipment_updated'));
+      } else {
+        setActionBannerMsg({ type: 'error', text: json.error || '拉取草料单号未成功' });
+      }
+    } catch (e: any) {
+      setActionBannerMsg({ type: 'error', text: '网络请求异常，无法拉取单号' });
+    } finally {
+      setIsPullingRecord(false);
+    }
+  };
+
+  // 3. 粘贴草料报修详情原始文本智能解析并录入
+  const handleParseRawText = async () => {
+    if (!pasteText.trim()) {
+      alert('请粘贴草料二维码报修页面的文字内容');
+      return;
+    }
+    setIsParsingText(true);
+    try {
+      const res = await fetch('/api/caoliao/parse-raw-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: pasteText })
+      });
+      const json = await res.json();
+      if (json.success) {
+        setActionBannerMsg({
+          type: 'success',
+          text: `草料文本识别录入成功！已精准关联设备【${json.equipmentName || '在册设备'}】并生成工单【${json.workOrderId}】！`
+        });
+        setIsPasteModalOpen(false);
+        setPasteText('');
+        fetchLogs(true);
+        window.dispatchEvent(new CustomEvent('caoliao_repair_received', { detail: json }));
+        window.dispatchEvent(new CustomEvent('work_orders_updated'));
+        window.dispatchEvent(new CustomEvent('medical_equipment_updated'));
+      } else {
+        alert(json.error || '文本识别入库失败');
+      }
+    } catch (e: any) {
+      alert('网络请求异常，无法解析文本');
+    } finally {
+      setIsParsingText(false);
     }
   };
 
@@ -282,6 +418,16 @@ export const CaoliaoWebhookLogsView: React.FC<CaoliaoWebhookLogsViewProps> = ({
           <div className="flex items-center gap-2 shrink-0 flex-wrap">
             <button
               type="button"
+              onClick={() => setIsPasteModalOpen(true)}
+              className="px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
+              title="直接粘贴草料手机端/微信/网页端报修文本一键智能提取入库"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>📋 粘贴草料文本录入</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setIsSimulateModalOpen(true)}
               className="px-3 py-1.5 bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-400 hover:to-emerald-400 text-slate-950 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-sm active:scale-95"
               title="模拟草料二维码扫码发送一条报修回调请求"
@@ -362,6 +508,176 @@ export const CaoliaoWebhookLogsView: React.FC<CaoliaoWebhookLogsViewProps> = ({
             </div>
           </div>
         </div>
+
+        {/* Webhook 监听端点与草料后台配置直通指南 */}
+        <div className="mt-3.5 p-3 rounded-xl bg-teal-950/40 border border-teal-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="p-1.5 rounded-lg bg-teal-500/20 text-teal-300 shrink-0">
+              <Zap className="w-4 h-4 text-teal-400" />
+            </span>
+            <div className="min-w-0">
+              <div className="text-teal-200 font-bold flex items-center gap-2">
+                <span>草料后台 Webhook 接收网关地址</span>
+                <span className="text-[10px] px-1.5 py-0.2 bg-emerald-500/20 text-emerald-300 rounded border border-emerald-500/40 font-mono">
+                  GET 探针 &amp; POST 接收就绪
+                </span>
+              </div>
+              <div className="text-[11px] font-mono text-teal-300/90 truncate mt-0.5 select-all">
+                {typeof window !== 'undefined' ? `${window.location.origin}/api/caoliao/webhook` : '/api/caoliao/webhook'}
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              const fullUrl = `${window.location.origin}/api/caoliao/webhook`;
+              navigator.clipboard.writeText(fullUrl);
+              alert(`已复制草料 Webhook 推送地址：\n${fullUrl}\n\n请登录草料管理后台（clewm.net）-> 表单管理 -> 找到您的报修表单 -> 设置 -> 数据推送 / Webhook推送 -> 粘贴此地址即可实现实时监听。`);
+            }}
+            className="px-3 py-1.5 bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold rounded-lg text-xs transition flex items-center gap-1.5 shrink-0 self-start sm:self-auto cursor-pointer shadow-xs"
+          >
+            <Copy className="w-3.5 h-3.5" />
+            <span>复制端点 URL</span>
+          </button>
+        </div>
+
+        {/* OpenAPI 主动拉取与草料单号精准抓取控制面板 */}
+        <div className="mt-3 p-3 rounded-xl bg-slate-900/90 border border-slate-700/80 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2.5">
+            <span className="p-1.5 rounded-lg bg-teal-500/20 text-teal-300 shrink-0">
+              <RefreshCw className={`w-4 h-4 text-teal-400 ${isPullingRepairs ? 'animate-spin' : ''}`} />
+            </span>
+            <div>
+              <div className="text-white font-bold flex items-center gap-2">
+                <span>草料开放平台 OpenAPI 主动拉取通道</span>
+                <span className="text-[10px] px-1.5 py-0.2 bg-emerald-500/20 text-emerald-300 rounded border border-emerald-500/40">
+                  双向保障: Webhook 实时监听 + OpenAPI 主动拉取
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-300 mt-0.5">
+                若草料后台未及时推送 Webhook，可直接在此一键主动拉取或输入单号（如 <span className="font-mono text-teal-300 font-bold">L12252</span>）精准抓取建单
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            <div className="flex items-center bg-slate-800 border border-slate-700 rounded-lg overflow-hidden">
+              <input
+                type="text"
+                value={pullRecordNoInput}
+                onChange={(e) => setPullRecordNoInput(e.target.value)}
+                placeholder="草料单号(如 L12252)或报修人"
+                className="px-2.5 py-1.5 bg-transparent text-xs text-white placeholder-slate-400 focus:outline-hidden w-48 font-mono"
+              />
+              <button
+                type="button"
+                onClick={() => handlePullByRecordNo()}
+                disabled={isPullingRecord}
+                className="px-3 py-1.5 bg-teal-600 hover:bg-teal-500 text-white font-bold text-xs transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
+              >
+                <Search className={`w-3.5 h-3.5 ${isPullingRecord ? 'animate-spin' : ''}`} />
+                <span>{isPullingRecord ? '抓取中...' : '精准抓取建单'}</span>
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={handlePullRepairs}
+              disabled={isPullingRepairs}
+              className="px-3 py-1.5 bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-400 hover:to-emerald-400 text-slate-950 font-bold rounded-lg text-xs transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-xs"
+              title="立即向草料开放平台发起数据同步拉取请求"
+            >
+              <Zap className={`w-3.5 h-3.5 ${isPullingRepairs ? 'animate-spin' : ''}`} />
+              <span>{isPullingRepairs ? '正在拉取...' : '⚡ 主动拉取最新报修'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 状态操作反馈 Toast/Banner */}
+        {actionBannerMsg && (
+          <div className={`mt-3 p-2.5 rounded-lg text-xs flex items-center justify-between border ${
+            actionBannerMsg.type === 'success' 
+              ? 'bg-emerald-950/70 text-emerald-200 border-emerald-500/50' 
+              : 'bg-rose-950/70 text-rose-200 border-rose-500/50'
+          }`}>
+            <div className="flex items-center gap-2">
+              {actionBannerMsg.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              )}
+              <span>{actionBannerMsg.text}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActionBannerMsg(null)}
+              className="text-slate-400 hover:text-white ml-2 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
+        {/* 最新入库草料报修记录动态快显卡片 */}
+        {logs.length > 0 && (() => {
+          const latestLog = logs[0];
+          const latestKey = latestLog.recordNo || latestLog.createdWorkOrderId || '';
+          return (
+            <div className="mt-3 p-3 rounded-xl bg-teal-900/40 border border-teal-500/40 text-xs flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-inner">
+              <div className="flex items-start sm:items-center gap-2.5">
+                <span className="p-1 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 shrink-0">
+                  <CheckCircle2 className="w-4 h-4" />
+                </span>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-bold text-white">
+                      最新草料单号 {latestLog.recordNo || latestLog.id} 报修记录已入库并同步派工池
+                    </span>
+                    <span className="text-emerald-300 font-mono tabular-nums text-[11px]">
+                      {latestLog.timestamp}
+                    </span>
+                    {latestLog.createdWorkOrderId && (
+                      <span className="text-teal-300 font-mono tabular-nums text-[11px]">
+                        · 工单 {latestLog.createdWorkOrderId}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-teal-200/90 text-[11px] mt-0.5">
+                    填表人: <span className="font-bold text-white">{latestLog.reporter || '临床扫码'}</span>
+                    {latestLog.reporterPhone ? ` (${latestLog.reporterPhone})` : ''} · 科室:{' '}
+                    <span className="font-bold text-white">{latestLog.department || '未标注'}</span> · 设备:{' '}
+                    <span className="font-bold text-white">
+                      {latestLog.matchedEquipmentName || latestLog.rawDeviceName || '待匹配设备'}
+                      {latestLog.matchedEquipmentSn ? ` (SN: ${latestLog.matchedEquipmentSn})` : ''}
+                    </span>{' '}
+                    · 故障: <span className="text-amber-300 font-medium">{latestLog.faultDescription}</span>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 self-end md:self-auto">
+                {latestKey && (
+                  <button
+                    type="button"
+                    onClick={() => setKeyword(latestKey)}
+                    className="px-2.5 py-1 bg-teal-500/20 hover:bg-teal-500/30 text-teal-200 border border-teal-500/40 rounded-lg text-xs font-semibold transition cursor-pointer whitespace-nowrap"
+                  >
+                    在列表定位
+                  </button>
+                )}
+                {onNavigateTab && (
+                  <button
+                    type="button"
+                    onClick={() => onNavigateTab('equipment_ledger')}
+                    className="px-2.5 py-1 bg-teal-600 hover:bg-teal-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                  >
+                    <span>查看设备台账</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* 2. 筛选与搜索工具栏 */}
@@ -557,6 +873,7 @@ export const CaoliaoWebhookLogsView: React.FC<CaoliaoWebhookLogsViewProps> = ({
                                 recordId: log.recordNo || log.id,
                                 timestamp: log.timestamp,
                                 equipmentId: log.matchedEquipmentId,
+                                codeId: log.codeId,
                                 equipmentName: log.matchedEquipmentName || log.codeName,
                                 equipmentSn: log.sn,
                                 department: log.matchedDepartment || log.department,
@@ -609,6 +926,7 @@ export const CaoliaoWebhookLogsView: React.FC<CaoliaoWebhookLogsViewProps> = ({
                                 recordId: log.recordNo || log.id,
                                 timestamp: log.timestamp,
                                 equipmentId: log.matchedEquipmentId,
+                                codeId: log.codeId,
                                 equipmentName: log.matchedEquipmentName || log.codeName,
                                 equipmentSn: log.sn,
                                 department: log.matchedDepartment || log.department,
@@ -640,18 +958,35 @@ export const CaoliaoWebhookLogsView: React.FC<CaoliaoWebhookLogsViewProps> = ({
                             <span>查看报文</span>
                           </button>
 
-                          {isSuccess && onOpenRepairModal && (
+                          {isSuccess && (
                             <button
                               type="button"
                               onClick={() => {
                                 const target = equipmentList.find(e => e.id === log.matchedEquipmentId);
-                                onOpenRepairModal(target);
+                                if (onDirectDispatch) {
+                                  onDirectDispatch({
+                                    id: log.createdWorkOrderId || `WO-CL-${Date.now().toString().slice(-6)}`,
+                                    equipmentId: log.matchedEquipmentId || (log.codeId ? `EQ-CL-${log.codeId}` : '10079'),
+                                    equipmentName: log.matchedEquipmentName || log.codeName,
+                                    equipmentSn: log.sn || (log.recordNo ? `SN-${log.recordNo}` : '0941701004'),
+                                    department: log.matchedDepartment || log.department || '功能检查科',
+                                    reporterName: log.reporterName || '医护人员',
+                                    reporterPhone: log.reporterPhone || '',
+                                    faultDescription: log.faultDescription || '现场扫码报修',
+                                    priority: log.urgency === 'P1' ? 'P1_CRITICAL' : log.urgency === 'P2' ? 'P2_URGENT' : 'P3_STANDARD',
+                                    photoUrl: log.photoUrl || '',
+                                    source: 'caoliao',
+                                    caoliaoRecordNo: log.recordNo
+                                  });
+                                } else if (onOpenRepairModal) {
+                                  onOpenRepairModal(target);
+                                }
                               }}
-                              className="px-2 py-1 bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 rounded text-[11px] font-bold transition flex items-center gap-0.5 cursor-pointer"
-                              title="立即接单派工"
+                              className="px-2 py-1 bg-gradient-to-r from-teal-600 to-indigo-600 hover:from-teal-500 hover:to-indigo-500 text-white rounded text-[11px] font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs"
+                              title="立即进入医工调度指派并启动SLA计时"
                             >
-                              <Wrench className="w-3 h-3 text-teal-600" />
-                              <span>派工</span>
+                              <Wrench className="w-3 h-3 text-white" />
+                              <span>立即派工</span>
                             </button>
                           )}
                         </div>
@@ -832,9 +1167,26 @@ export const CaoliaoWebhookLogsView: React.FC<CaoliaoWebhookLogsViewProps> = ({
         onClose={() => setSelectedRepairDetail(null)}
         data={selectedRepairDetail}
         equipmentList={equipmentList}
-        onFastDispatch={(device) => {
+        onFastDispatch={(device, reportData) => {
           setSelectedRepairDetail(null);
-          onOpenRepairModal?.(device);
+          if (onDirectDispatch && reportData) {
+            onDirectDispatch({
+              id: reportData.workOrderId || reportData.id || `WO-CL-${Date.now().toString().slice(-6)}`,
+              equipmentId: reportData.equipmentId || (device ? device.id : '10079'),
+              equipmentName: reportData.equipmentName || (device ? device.name : '医疗设备'),
+              equipmentSn: reportData.equipmentSn || (device ? device.sn : '0941701004'),
+              department: reportData.department || (device ? device.department : '功能检查科'),
+              reporterName: reportData.reporterName || '医护人员',
+              reporterPhone: reportData.reporterPhone || '',
+              faultDescription: reportData.faultDescription || '现场报修',
+              priority: reportData.urgency === 'P1' ? 'P1_CRITICAL' : reportData.urgency === 'P2' ? 'P2_URGENT' : 'P3_STANDARD',
+              photoUrl: reportData.photoUrl || '',
+              source: 'caoliao',
+              caoliaoRecordNo: reportData.recordNo
+            });
+          } else {
+            onOpenRepairModal?.(device);
+          }
         }}
         onViewRawPayload={(payload) => {
           setSelectedRepairDetail(null);
@@ -842,6 +1194,74 @@ export const CaoliaoWebhookLogsView: React.FC<CaoliaoWebhookLogsViewProps> = ({
           if (found) setSelectedRawLog(found);
         }}
       />
+
+      {/* 粘贴草料报修文本直接录入模态框 */}
+      {isPasteModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-xl w-full overflow-hidden flex flex-col">
+            <div className="p-4 bg-slate-900 text-white flex items-center justify-between border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <FileText className="w-4 h-4 text-amber-400" />
+                <h3 className="font-bold text-sm">直接粘贴草料报修详情文本智能识别录入</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPasteModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3">
+              <p className="text-xs text-slate-600 leading-relaxed">
+                可直接复制草料微信小程序、网页端或移动端的报修表单详情文本粘贴在下方，系统将自动识别提取设备名称、子码编号、单号、填表人、报修时间、手机号与故障表现并精准匹配建单。
+              </p>
+
+              <div>
+                <textarea
+                  value={pasteText}
+                  onChange={(e) => setPasteText(e.target.value)}
+                  placeholder="在此粘贴草料报修详情，例如：&#10;基本信息&#10;功能检查科-肌电图诱发电位仪&#10;子码编号 M236-Z765&#10;填表人：孙志强&#10;填表时间：11/10 14:56&#10;故障表现：&#10;耳机，右声道不通&#10;报修人姓名：孙志强&#10;报修人手机：18906339915"
+                  rows={9}
+                  className="w-full p-3 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono text-slate-800 placeholder-slate-400 focus:outline-hidden focus:ring-2 focus:ring-teal-500 focus:bg-white resize-y"
+                />
+              </div>
+
+              <div className="flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPasteText(`基本信息\n功能检查科-肌电图诱发电位仪\n子码编号 M236-Z765\n·\n类别代码 07\n·\n类别 医用诊察和监护器械\n·\n一级类别代码 03\n填表人：孙志强\n填表时间：11/10 14:56\n填写方式：扫一扫填写\n表单名称：医疗设备故障报修数据与统计\n当前状态：\n完好\n故障待修。\n处理进度：\n处理中\n更新\n可信存证：\n蚂蚁链保护中存证详情\n填写详情\n\n故障表现：\n耳机，右声道不通\n图片：\n\n视频：\n-\n报修人姓名：\n孙志强\n报修人手机：\n18906339915(山东日照)`);
+                  }}
+                  className="text-xs text-teal-700 hover:text-teal-800 font-medium underline cursor-pointer"
+                >
+                  填入孙志强诱发电位仪真实用例
+                </button>
+              </div>
+            </div>
+
+            <div className="p-3 bg-slate-50 border-t border-slate-200 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsPasteModalOpen(false)}
+                className="px-3.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg text-xs font-bold transition cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleParseRawText}
+                disabled={isParsingText}
+                className="px-4 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-xs"
+              >
+                <Zap className={`w-3.5 h-3.5 ${isParsingText ? 'animate-spin' : ''}`} />
+                <span>{isParsingText ? '正在解析入库...' : '智能解析并录入数据库'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

@@ -79,7 +79,7 @@ export function calculateRepairTimelineStage(
       if (workOrder.status === 'closed') return 5;
       if (workOrder.status === 'repaired_pending_acceptance') return 4;
       if (['accepted', 'arrived_inspecting', 'waiting_parts'].includes(workOrder.status)) return 3;
-      if (workOrder.status === 'dispatched') return 2;
+      if (workOrder.status === 'dispatched' || workOrder.status === 'pre_dispatched') return 2;
       return 1;
     }
     if (equipment && equipment.status === '故障待修') return 3;

@@ -97,7 +97,13 @@ export const GlobalQuickSearchModal: React.FC<GlobalQuickSearchModalProps> = ({
         (item.internalNo && item.internalNo.toLowerCase().includes(query)) ||
         (item.assetNo && item.assetNo.toLowerCase().includes(query)) ||
         (item.usageLocation && item.usageLocation.toLowerCase().includes(query)) ||
-        item.manufacturer.toLowerCase().includes(query);
+        (item.codeId && item.codeId.toLowerCase().includes(query)) ||
+        item.manufacturer.toLowerCase().includes(query) ||
+        (item.repairRecords || []).some((r: any) =>
+          (r.recordNo && String(r.recordNo).toLowerCase().includes(query)) ||
+          (r.id && String(r.id).toLowerCase().includes(query)) ||
+          (r.faultDescription && String(r.faultDescription).toLowerCase().includes(query))
+        );
 
       if (!matchText) return false;
       if (selectedCategory === 'fault' && item.status !== '故障待修') return false;
@@ -208,6 +214,19 @@ export const GlobalQuickSearchModal: React.FC<GlobalQuickSearchModalProps> = ({
             <Boxes className="w-3 h-3" />
             <span>应急储备中心机</span>
           </button>
+          {onNavigateTab && (
+            <button
+              type="button"
+              onClick={() => {
+                onNavigateTab('user_manual');
+                onClose();
+              }}
+              className="px-2.5 py-1 rounded-full text-xs font-medium transition cursor-pointer shrink-0 flex items-center gap-1 bg-blue-50 text-blue-700 hover:bg-blue-100"
+            >
+              <BookOpen className="w-3 h-3 text-blue-600" />
+              <span>系统使用手册</span>
+            </button>
+          )}
         </div>
 
         {/* 搜索结果列表 */}

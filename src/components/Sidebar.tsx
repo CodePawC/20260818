@@ -34,7 +34,9 @@ import {
   Award,
   Trash2,
   Radio,
-  Network
+  Network,
+  BookMarked,
+  FileSpreadsheet
 } from 'lucide-react';
 import { ActiveTab, AuthUser } from '../types';
 import { canAccessTab, isHeadNurse, isDepartmentRestricted, getUserDepartment } from '../utils/authUtils';
@@ -212,6 +214,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           description: '全生命周期设备技术档案与动态'
         },
         {
+          key: 'project_ledger',
+          label: '设备项目台账',
+          nurseLabel: '设备项目台账',
+          icon: FileSpreadsheet,
+          description: '443项立项报批、经办公司与发票查验全生命周期台账（指定人员权限）'
+        },
+        {
           key: 'mobile_inspection',
           label: '移动巡检盘点',
           nurseLabel: '移动巡检盘点',
@@ -375,6 +384,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'standards_system',
       title: '档案与系统',
       items: [
+        {
+          key: 'user_manual',
+          label: '系统使用手册',
+          nurseLabel: '科室操作指南',
+          icon: BookMarked,
+          description: '全流程操作指南、各岗位角色手册、常见问题与实操SOP'
+        },
+        {
+          key: 'regulatory_platforms',
+          label: '监管平台档案',
+          nurseLabel: '监管平台档案',
+          icon: ShieldCheck,
+          description: '生态环境部、市监总局、卫健委等国家与省市监管平台账号密码、公文与经办记录'
+        },
         {
           key: 'regulations',
           label: '医工规章制度',

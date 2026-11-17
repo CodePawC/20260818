@@ -8,14 +8,25 @@ export type WorkOrderType =
   | 'accessory_cable';       // 专用附件/探头电缆受损
 
 export type WorkOrderStatus = 
-  | 'pending_dispatch'            // 待派工 (调度室分配中)
-  | 'dispatched'                  // 已派工 (等待工程师接单响应)
+  | 'pending_dispatch'            // 待派工 (调度室待拟定)
+  | 'pre_dispatched'              // 预派工/拟定工程师 (内部讨论确认中，暂未正式下发)
+  | 'dispatched'                  // 已正式派工 (等待工程师接单响应)
   | 'accepted'                    // 已接单 (工程师在途赶往现场)
   | 'arrived_inspecting'          // 已到场 (现场检修与排查中)
   | 'waiting_parts'               // 待配件 (等待备件或原厂支援)
   | 'repaired_pending_acceptance' // 维修完成 (待临床科室验收)
   | 'closed'                      // 临床验收通过 (工单闭环归档)
   | 'cancelled';                  // 已撤单
+
+export interface DispatchDiscussionNote {
+  id: string;
+  authorName: string;
+  authorRole?: string;
+  content: string;
+  timestamp: string;
+  proposedEngineerName?: string;
+  actionType?: 'pre_dispatch' | 'discussion' | 'confirm_dispatch';
+}
 
 export type BiomedicalGroup = 
   | '急救生命支持技术组'
@@ -48,6 +59,42 @@ export interface WorkOrderPart {
   status?: 'issued' | 'returned'; // 领料状态: 已出库领用 | 已退料还库
 }
 
+export type DispatchChannel = 'internal' | 'outsourced';
+
+export type OutsourceServiceMode =
+  | 'annual_contract'      // 年度全保/技术保覆盖（免单次人工报价）
+  | 'warranty_free'        // 质保期内原厂免费保修
+  | 'single_paid_quote'    // 单次付费报价 · 需多科室议价会签
+  | 'factory_return';      // 返厂检测/备件周转置换
+
+export type VendorDispatchStatus =
+  | 'dispatched_to_vendor' // 已下发外协服务商，待接单报价/响应
+  | 'pending_quote'        // 待外协上传正式盖章报价单
+  | 'negotiating'          // 院内多科室联合议价磋商中
+  | 'vendor_on_site'       // 维保商工程师已获准进场作业
+  | 'completed_pending_acceptance' // 外协完工待医工及临床联合验收
+  | 'archived';            // 外协一案一档归档闭环
+
+export interface OutsourcedDispatchMeta {
+  dispatchChannel: DispatchChannel;
+  externalVendorId?: string;
+  externalPartner?: string;
+  externalVendorShortName?: string;
+  externalVendorType?: 'manufacturer' | 'third_party_repair' | 'maintenance_vendor' | 'custom';
+  externalVendorContact?: string;
+  externalVendorPhone?: string;
+  externalContractNo?: string;
+  outsourceServiceMode?: OutsourceServiceMode;
+  outsourceReason?: string;
+  estimatedOutsourceCost?: number;
+  requiresVendorQuote?: boolean;
+  syncToVendorPortal?: boolean;
+  hasCost?: boolean;
+  estimatedCost?: number;
+  costTriggerStage?: 'dispatch' | 'field_operation';
+  autoCreateProjectLedger?: boolean;
+}
+
 export interface EngineeringWorkOrder {
   id: string; // e.g. "WO-20260906-001"
   equipmentId: string;
@@ -77,13 +124,49 @@ export interface EngineeringWorkOrder {
   photoUrl?: string;
   videoUrl?: string;
 
-  // 派工与调度信息
+  // 预派工 / 拟定工程师内部讨论暂存信息
+  proposedEngineerId?: string;
+  proposedEngineerName?: string;
+  proposedEngineerPhone?: string;
+  preDispatcherName?: string;
+  preDispatchTime?: string; // YYYY-MM-DD HH:mm
+  preDispatchNotes?: string;
+  internalDiscussions?: DispatchDiscussionNote[];
+
+  // 正式派工与调度信息
   dispatcherName?: string;
   dispatchTime?: string; // YYYY-MM-DD HH:mm
   dispatchNotes?: string;
   assignedEngineerId?: string;
   assignedEngineerName?: string;
   assignedEngineerPhone?: string;
+
+  // 外协原厂 / 第三方维保协同派工全链路字段
+  dispatchChannel?: DispatchChannel;
+  externalVendorId?: string;
+  externalPartner?: string; // 协同厂商/原厂/第三方维保名称
+  externalVendorShortName?: string;
+  externalVendorType?: 'manufacturer' | 'third_party_repair' | 'maintenance_vendor' | 'custom';
+  externalVendorContact?: string;
+  externalVendorPhone?: string;
+  externalContractNo?: string;
+  outsourceServiceMode?: OutsourceServiceMode;
+  outsourceReason?: string;
+  estimatedOutsourceCost?: number;
+  requiresVendorQuote?: boolean;
+  vendorDispatchTime?: string;
+  vendorStatus?: VendorDispatchStatus;
+  linkedVendorOrderId?: string; // 关联外协协同单号 (EXT-...)
+
+  // 费用判定、设备项目台账联动与审计合规门禁
+  hasCost?: boolean; // 是否有费用产生
+  estimatedCost?: number; // 预估费用金额 (元)
+  costTriggerStage?: 'dispatch' | 'field_operation'; // 费用触发环节
+  linkedProjectId?: string; // 自动生成的设备项目台账 ID
+  requiredComplianceMode?: 'exempt' | 'price_comparison' | 'negotiation' | 'bidding';
+  auditArchiveStatus?: 'exempt' | 'pending_audit' | 'audit_ready' | 'archived';
+  auditArchivedAt?: string;
+  auditArchivedBy?: string;
 
   // 工程师作业现场打卡与维修过程
   acceptedTime?: string; // YYYY-MM-DD HH:mm
@@ -94,7 +177,6 @@ export interface EngineeringWorkOrder {
   faultAnalysis?: string; // 现场检测结论与故障点定位
   repairAction?: string; // 修复措施与工艺
   partsReplaced: WorkOrderPart[];
-  externalPartner?: string; // 协同厂商/原厂/第三方维保
   electricalSafetyPassed?: boolean; // 修复后电气安全质控检测
   performanceCalibrationPassed?: boolean; // 性能计量自检
   repairFinishedTime?: string; // 维修完成时间
@@ -141,6 +223,7 @@ export interface BiomedicalEngineerProfile {
 export interface MttrKpiStats {
   totalCount: number;
   pendingDispatchCount: number;
+  preDispatchedCount?: number;
   inProgressCount: number;
   pendingAcceptanceCount: number;
   closedCount: number;

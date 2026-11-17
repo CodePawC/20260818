@@ -77,6 +77,8 @@ export interface ApprovalApplication {
   equipmentPurchaseDate?: string;
   equipmentCumulativeMaintenanceCost?: number;
   targetEquipmentId?: string;
+  linkedProjectId?: string;
+  linkedWorkOrderId?: string;
 
   // 1. 增配与采购论证专项 (procurement_increase)
   targetEquipmentName?: string;

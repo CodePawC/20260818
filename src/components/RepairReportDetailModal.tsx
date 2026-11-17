@@ -27,7 +27,8 @@ import {
   Activity,
   Award
 } from 'lucide-react';
-import { MedicalEquipment } from '../types';
+import { MedicalEquipment, AuthUser } from '../types';
+import { canDispatchWorkOrder, canParticipateDispatchDiscussion } from '../utils/authUtils';
 
 export interface RepairReportDetailData {
   id?: string;
@@ -37,6 +38,7 @@ export interface RepairReportDetailData {
   timestamp?: string;
   faultDate?: string;
   equipmentId?: string | null;
+  codeId?: string;
   equipmentName?: string;
   equipmentSn?: string;
   model?: string;
@@ -64,10 +66,11 @@ interface RepairReportDetailModalProps {
   isOpen: boolean;
   onClose: () => void;
   data: RepairReportDetailData | null;
-  onFastDispatch?: (device?: MedicalEquipment) => void;
+  onFastDispatch?: (device?: MedicalEquipment, reportData?: RepairReportDetailData) => void;
   onViewEquipmentDetail?: (device: MedicalEquipment) => void;
   onViewRawPayload?: (payload: any) => void;
   equipmentList?: MedicalEquipment[];
+  currentUser?: AuthUser | null;
 }
 
 export const RepairReportDetailModal: React.FC<RepairReportDetailModalProps> = ({
@@ -77,7 +80,8 @@ export const RepairReportDetailModal: React.FC<RepairReportDetailModalProps> = (
   onFastDispatch,
   onViewEquipmentDetail,
   onViewRawPayload,
-  equipmentList = []
+  equipmentList = [],
+  currentUser
 }) => {
   const [copiedPhone, setCopiedPhone] = useState(false);
   const [copiedWorkOrder, setCopiedWorkOrder] = useState(false);
@@ -85,12 +89,61 @@ export const RepairReportDetailModal: React.FC<RepairReportDetailModalProps> = (
 
   if (!isOpen || !data) return null;
 
-  // 寻找匹配的在册设备
-  const matchedDevice = equipmentList.find(e => 
-    (data.equipmentId && e.id === data.equipmentId) ||
-    (data.equipmentSn && e.sn && e.sn.toLowerCase() === data.equipmentSn.toLowerCase()) ||
-    (data.equipmentName && e.name.includes(data.equipmentName.replace(/^[^-]+-/, '')))
-  ) || null;
+  // 寻找匹配的在册设备（严格按资产ID -> 草料codeId -> 出厂SN -> 活码全称 -> 科室+型号/名称降级优先级匹配，避免同名设备首条截胡）
+  const matchedDevice = (() => {
+    if (!equipmentList || equipmentList.length === 0) return null;
+
+    if (data.equipmentId) {
+      const byId = equipmentList.find(e => e.id === data.equipmentId);
+      if (byId) return byId;
+    }
+
+    if (data.codeId) {
+      const targetCodeId = String(data.codeId).trim();
+      const byCodeId = equipmentList.find(e => e.codeId && String(e.codeId).trim() === targetCodeId);
+      if (byCodeId) return byCodeId;
+    }
+
+    if (data.equipmentSn) {
+      const targetSn = data.equipmentSn.trim().toLowerCase();
+      const bySn = equipmentList.find(e => e.sn && e.sn.trim().toLowerCase() === targetSn);
+      if (bySn) return bySn;
+    }
+
+    if (data.equipmentName) {
+      const rawName = data.equipmentName.trim();
+      const byCodeName = equipmentList.find(e => e.caoliaoCodeName && e.caoliaoCodeName.trim() === rawName);
+      if (byCodeName) return byCodeName;
+
+      const cleanName = rawName.replace(/^[^-]+-/, '').trim();
+      const inferredDept = data.department || (rawName.includes('-') ? rawName.split('-')[0].trim() : '');
+      const modelMatched = data.model
+        ? equipmentList.find(
+            e =>
+              e.model &&
+              e.model.trim().toLowerCase() === data.model!.trim().toLowerCase() &&
+              (!inferredDept || e.department === inferredDept)
+          )
+        : undefined;
+      if (modelMatched) return modelMatched;
+
+      if (inferredDept) {
+        const deptExact = equipmentList.find(e => e.department === inferredDept && e.name === cleanName);
+        if (deptExact) return deptExact;
+        const deptFuzzy = equipmentList.find(
+          e => e.department === inferredDept && (e.name.includes(cleanName) || cleanName.includes(e.name))
+        );
+        if (deptFuzzy) return deptFuzzy;
+      }
+
+      const exactName = equipmentList.find(e => e.name === cleanName);
+      if (exactName) return exactName;
+
+      return equipmentList.find(e => e.name.includes(cleanName)) || null;
+    }
+
+    return null;
+  })();
 
   const displayWorkOrder = data.workOrderId || data.id || `WO-CL-${Date.now().toString().slice(-6)}`;
   const displayRecordNo = data.recordNo || `REC-${Date.now().toString().slice(-8)}`;
@@ -344,26 +397,71 @@ export const RepairReportDetailModal: React.FC<RepairReportDetailModalProps> = (
               {data.faultDescription || '设备发生故障异常，扫码直接报修。'}
             </p>
 
-            {/* 现场拍摄照片 */}
-            {data.photoUrl && (
-              <div className="pt-2">
-                <span className="text-[11px] font-bold text-slate-700 block mb-1.5 flex items-center gap-1">
-                  <Camera className="w-3.5 h-3.5 text-slate-500" />
-                  <span>现场拍照存证凭据:</span>
-                </span>
-                <div className="inline-block relative rounded-xl overflow-hidden border border-slate-300 shadow-xs group cursor-pointer" onClick={() => setActivePhotoModal(data.photoUrl!)}>
-                  <img
-                    src={data.photoUrl}
-                    alt="现场故障照片"
-                    className="w-48 h-32 object-cover transition-transform group-hover:scale-105"
-                  />
-                  <div className="absolute inset-0 bg-slate-900/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-bold gap-1">
-                    <Eye className="w-4 h-4" />
-                    <span>点击放大照片</span>
-                  </div>
+            {/* 现场拍摄照片与维保签字凭据 */}
+            {(() => {
+              const rawPhotoList = Array.isArray(data.rawPayload?.photoUrls)
+                ? data.rawPayload.photoUrls
+                : String(data.photoUrl || '')
+                    .split(',')
+                    .map((s: string) => s.trim())
+                    .filter(Boolean);
+              const signatureUrl =
+                data.rawPayload?.acceptanceSignature ||
+                data.rawPayload?.['科室签字_3473415'] ||
+                '';
+
+              if (rawPhotoList.length === 0 && !signatureUrl) return null;
+              return (
+                <div className="pt-2 space-y-2.5">
+                  {rawPhotoList.length > 0 && (
+                    <div>
+                      <span className="text-[11px] font-bold text-slate-700 block mb-1.5 flex items-center gap-1">
+                        <Camera className="w-3.5 h-3.5 text-slate-500" />
+                        <span>现场拍照存证凭据 ({rawPhotoList.length} 张):</span>
+                      </span>
+                      <div className="flex flex-wrap gap-2.5">
+                        {rawPhotoList.map((imgUrl: string, idx: number) => (
+                          <div
+                            key={`${imgUrl}-${idx}`}
+                            className="inline-block relative rounded-xl overflow-hidden border border-slate-300 shadow-xs group cursor-pointer"
+                            onClick={() => setActivePhotoModal(imgUrl)}
+                          >
+                            <img
+                              src={imgUrl}
+                              alt={`现场存证照片 ${idx + 1}`}
+                              className="w-40 h-28 object-cover transition-transform group-hover:scale-105"
+                            />
+                            <div className="absolute inset-0 bg-slate-900/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-bold gap-1">
+                              <Eye className="w-4 h-4" />
+                              <span>点击放大</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {signatureUrl && (
+                    <div>
+                      <span className="text-[11px] font-bold text-slate-700 block mb-1 flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>科室现场电子签字确认:</span>
+                      </span>
+                      <div
+                        className="inline-block bg-white rounded-lg border border-emerald-200 p-1.5 cursor-pointer hover:border-emerald-400"
+                        onClick={() => setActivePhotoModal(signatureUrl)}
+                      >
+                        <img
+                          src={signatureUrl}
+                          alt="科室签字"
+                          className="h-14 w-auto object-contain"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
 
           {/* C. AI 智能辅助分诊与排查指导 */}
@@ -507,17 +605,17 @@ export const RepairReportDetailModal: React.FC<RepairReportDetailModalProps> = (
               关闭
             </button>
 
-            {onFastDispatch && (
+            {onFastDispatch && canParticipateDispatchDiscussion(currentUser) && (
               <button
                 type="button"
                 onClick={() => {
                   onClose();
-                  onFastDispatch(matchedDevice || undefined);
+                  onFastDispatch(matchedDevice || undefined, data || undefined);
                 }}
                 className="px-4 py-1.5 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-bold rounded-lg text-xs transition flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95"
               >
                 <Wrench className="w-3.5 h-3.5" />
-                <span>立即派工抢修</span>
+                <span>{canDispatchWorkOrder(currentUser) ? '立即派工抢修' : '参与派前讨论'}</span>
               </button>
             )}
           </div>

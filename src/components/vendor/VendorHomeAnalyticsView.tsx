@@ -12,6 +12,7 @@ import {
   CorporateQualification,
   StructuredDocumentRecord 
 } from '../../types/vendorCollaborationTypes';
+import { matchesVendorAccount } from '../../utils/vendorCollaborationData';
 import {
   ResponsiveContainer,
   BarChart,
@@ -48,7 +49,7 @@ export const VendorHomeAnalyticsView: React.FC<VendorHomeAnalyticsViewProps> = (
   onOpenQuickUpload,
 }) => {
   // 过滤本供应商数据
-  const vendorOrders = orders.filter(o => o.vendorId === currentVendor.vendorId);
+  const vendorOrders = orders.filter(o => matchesVendorAccount(o, currentVendor));
   const effectiveOrders = vendorOrders.length > 0 ? vendorOrders : orders;
 
   // 1. 核心指标统计

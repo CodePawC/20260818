@@ -16,7 +16,8 @@ import {
   QrCode,
   Eye
 } from 'lucide-react';
-import { MedicalEquipment } from '../types';
+import { MedicalEquipment, AuthUser } from '../types';
+import { canDispatchWorkOrder, canParticipateDispatchDiscussion } from '../utils/authUtils';
 
 export interface RepairAlertData {
   id: string;
@@ -39,11 +40,12 @@ export interface RepairAlertData {
 interface RepairAlertPopupModalProps {
   alert: RepairAlertData | null;
   onClose: () => void;
-  onFastDispatch: (device?: MedicalEquipment) => void;
-  onViewLogs: () => void;
+  onFastDispatch: (device?: MedicalEquipment, alertData?: RepairAlertData) => void;
+  onViewLogs?: () => void;
   onViewEquipmentDetail?: (device: MedicalEquipment) => void;
   onViewRepairDetail?: (alert: RepairAlertData) => void;
   equipmentList?: MedicalEquipment[];
+  currentUser?: AuthUser | null;
 }
 
 export const RepairAlertPopupModal: React.FC<RepairAlertPopupModalProps> = ({
@@ -53,7 +55,8 @@ export const RepairAlertPopupModal: React.FC<RepairAlertPopupModalProps> = ({
   onViewLogs,
   onViewEquipmentDetail,
   onViewRepairDetail,
-  equipmentList = []
+  equipmentList = [],
+  currentUser
 }) => {
   const [isSoundMuted, setIsSoundMuted] = useState<boolean>(false);
 
@@ -104,6 +107,8 @@ export const RepairAlertPopupModal: React.FC<RepairAlertPopupModalProps> = ({
 
   const matchedDevice = equipmentList.find(e => e.id === alert.equipmentId);
   const isP1 = alert.urgency === 'P1';
+  const allowDispatch = canDispatchWorkOrder(currentUser);
+  const allowDiscuss = canParticipateDispatchDiscussion(currentUser);
 
   return (
     <div className="fixed top-4 right-4 z-50 max-w-md w-[calc(100vw-2rem)] sm:w-[440px] animate-in slide-in-from-top-4 fade-in duration-300 drop-shadow-2xl">
@@ -221,14 +226,16 @@ export const RepairAlertPopupModal: React.FC<RepairAlertPopupModalProps> = ({
                 </>
               )}
             </div>
-            <button
-              type="button"
-              onClick={onViewLogs}
-              className="text-teal-400 hover:text-teal-300 font-bold flex items-center gap-0.5 cursor-pointer hover:underline text-[11px]"
-            >
-              <span>查看接口日志</span>
-              <ArrowRight className="w-3 h-3" />
-            </button>
+            {onViewLogs && (
+              <button
+                type="button"
+                onClick={onViewLogs}
+                className="text-teal-400 hover:text-teal-300 font-bold flex items-center gap-0.5 cursor-pointer hover:underline text-[11px]"
+              >
+                <span>查看接口日志</span>
+                <ArrowRight className="w-3 h-3" />
+              </button>
+            )}
           </div>
 
         </div>
@@ -273,17 +280,19 @@ export const RepairAlertPopupModal: React.FC<RepairAlertPopupModalProps> = ({
               </button>
             )}
 
-            <button
-              type="button"
-              onClick={() => {
-                onClose();
-                onFastDispatch(matchedDevice);
-              }}
-              className="px-3.5 py-1.5 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95"
-            >
-              <Wrench className="w-3.5 h-3.5" />
-              <span>立即派工抢修</span>
-            </button>
+            {allowDiscuss && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose();
+                  onFastDispatch(matchedDevice, alert);
+                }}
+                className="px-3.5 py-1.5 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-md active:scale-95"
+              >
+                <Wrench className="w-3.5 h-3.5" />
+                <span>{allowDispatch ? '立即派工抢修' : '参与派前讨论'}</span>
+              </button>
+            )}
           </div>
         </div>
 

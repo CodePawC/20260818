@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Building2, ArrowLeft, Printer, FileSpreadsheet, 
   Wrench, Users, Receipt, ChevronDown, Check,
@@ -14,9 +14,10 @@ import {
   StructuredDocumentRecord,
   BidSubmission
 } from '../types/vendorCollaborationTypes';
-import { VENDOR_ACCOUNTS } from '../utils/vendorCollaborationData';
+import { VENDOR_ACCOUNTS, matchesVendorAccount } from '../utils/vendorCollaborationData';
 import { 
   getBiddingProjects, 
+  saveBiddingProjects,
   getCorporateQualifications, 
   getStructuredDocuments,
   submitBid,
@@ -69,6 +70,37 @@ export const VendorPortalView: React.FC<VendorPortalViewProps> = ({
   const [qualifications, setQualifications] = useState<CorporateQualification[]>(() => getCorporateQualifications());
   const [structuredDocs, setStructuredDocs] = useState<StructuredDocumentRecord[]>(() => getStructuredDocuments());
 
+  // 拉取后端发起的公开招标/竞价标段并合并本地缓存
+  useEffect(() => {
+    let active = true;
+    const syncBiddingFromServer = async () => {
+      try {
+        const res = await fetch('/api/bidding-projects');
+        const json = await res.json();
+        if (!active || !json?.success || !Array.isArray(json.data) || json.data.length === 0) return;
+        setBiddingProjects(prev => {
+          const map = new Map<string, BiddingProject>();
+          json.data.forEach((p: BiddingProject) => map.set(p.id, p));
+          prev.forEach(p => {
+            if (!map.has(p.id)) map.set(p.id, p);
+          });
+          const merged = Array.from(map.values());
+          saveBiddingProjects(merged);
+          return merged;
+        });
+      } catch {
+        // ignore background fetch error
+      }
+    };
+    syncBiddingFromServer();
+    const onLedgerUpdate = () => syncBiddingFromServer();
+    window.addEventListener('medtech:project-ledger-updated', onLedgerUpdate);
+    return () => {
+      active = false;
+      window.removeEventListener('medtech:project-ledger-updated', onLedgerUpdate);
+    };
+  }, []);
+
   // 快捷上传单据类型透传
   const [quickUploadType, setQuickUploadType] = useState<'INVOICE' | 'REPAIR_REPORT' | 'QUOTATION' | null>(null);
 
@@ -90,7 +122,7 @@ export const VendorPortalView: React.FC<VendorPortalViewProps> = ({
   };
 
   // 本供应商专属工单
-  const vendorOrders = orders.filter(o => o.vendorId === currentVendor.vendorId);
+  const vendorOrders = orders.filter(o => matchesVendorAccount(o, currentVendor));
   const effectiveOrders = vendorOrders.length > 0 ? vendorOrders : orders;
 
   // 待办与指标数据
@@ -192,7 +224,32 @@ export const VendorPortalView: React.FC<VendorPortalViewProps> = ({
   // 投标操作
   const handleSubmitBid = (projectId: string, submission: BidSubmission) => {
     const updated = submitBid(projectId, submission);
-    setBiddingProjects(updated);
+    setBiddingProjects(prev => {
+      const hasInUpdated = updated.some(p => p.id === projectId);
+      if (hasInUpdated) return updated;
+      const next = prev.map(p => p.id === projectId ? {
+        ...p,
+        status: 'BIDDED' as const,
+        bidsCount: (p.bidsCount || 0) + 1,
+        mySubmission: submission
+      } : p);
+      saveBiddingProjects(next);
+      return next;
+    });
+    fetch(`/api/bidding-projects/${encodeURIComponent(projectId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        status: 'BIDDED',
+        bidsCountIncrement: true,
+        mySubmission: submission
+      })
+    })
+      .then(() => {
+        window.dispatchEvent(new CustomEvent('medtech:project-ledger-updated'));
+      })
+      .catch(() => {});
+    showToast(`投标响应方案已提交并回传医院采招台账（报价 ¥${submission.quoteAmount.toLocaleString()}）！`, 'success');
   };
 
   // 资质更新/上传

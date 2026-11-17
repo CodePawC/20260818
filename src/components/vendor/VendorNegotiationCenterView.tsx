@@ -10,6 +10,7 @@ import {
   VendorUserAccount, 
   NegotiationRound 
 } from '../../types/vendorCollaborationTypes';
+import { matchesVendorAccount } from '../../utils/vendorCollaborationData';
 
 interface VendorNegotiationCenterViewProps {
   currentVendor: VendorUserAccount;
@@ -26,7 +27,7 @@ export const VendorNegotiationCenterView: React.FC<VendorNegotiationCenterViewPr
   onToast,
   onOpenDossierModal,
 }) => {
-  const vendorOrders = orders.filter(o => o.vendorId === currentVendor.vendorId);
+  const vendorOrders = orders.filter(o => matchesVendorAccount(o, currentVendor));
   const effectiveOrders = vendorOrders.length > 0 ? vendorOrders : orders;
 
   const [selectedOrderId, setSelectedOrderId] = useState<string>(effectiveOrders[0]?.id || '');

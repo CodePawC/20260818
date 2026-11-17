@@ -61,6 +61,7 @@ export const CaoliaoSyncSettingsView: React.FC<CaoliaoSyncSettingsViewProps> = (
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [isTesting, setIsTesting] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [isPullingRepairs, setIsPullingRepairs] = useState<boolean>(false);
 
   // API Key 密码显示切换与复制状态
   const [showApiKey, setShowApiKey] = useState<boolean>(false);
@@ -79,6 +80,34 @@ export const CaoliaoSyncSettingsView: React.FC<CaoliaoSyncSettingsViewProps> = (
 
   // 预设真实报修用例
   const WEBHOOK_PRESETS = [
+    {
+      id: 'emg_evoked_potential',
+      title: '【功能检查科】孙志强 (L12238) 肌电图诱发电位仪 耳机右声道不通',
+      deviceTarget: '生理参数诱发诊断设备 (10079) · 功能检查科 · 孙志强',
+      badge: 'P2 待修 · 真实扫码',
+      badgeColor: 'bg-teal-100 text-teal-800 border-teal-200',
+      payload: {
+        event: 'form_submitted',
+        '表单名称': '医疗设备故障报修数据与统计',
+        '记录编号': 'L12238',
+        '基本信息': '功能检查科-肌电图诱发电位仪',
+        '子码编号': 'M236-Z765',
+        '类别代码': '07',
+        '类别': '医用诊察和监护器械',
+        '一级类别代码': '03',
+        '填表人': '孙志强',
+        '填表时间': '11/10 14:56',
+        '填写方式': '扫一扫填写',
+        '当前状态': '故障待修',
+        '处理进度': '处理中',
+        '可信存证': '蚂蚁链保护中存证详情',
+        '故障表现': '耳机，右声道不通',
+        '报修人姓名': '孙志强',
+        '报修人手机': '18906339915(山东日照)',
+        '出厂编号': '0941701004',
+        '科室名称': '功能检查科'
+      }
+    },
     {
       id: 'icu_monitor',
       title: '【重症医学科】迈瑞病人监护仪心电血氧报警',
@@ -280,6 +309,29 @@ export const CaoliaoSyncSettingsView: React.FC<CaoliaoSyncSettingsViewProps> = (
     }
   };
 
+  // 立即从草料开放平台拉取最新报修数据
+  const handlePullRepairs = async () => {
+    setIsPullingRepairs(true);
+    try {
+      const res = await fetch('/api/caoliao/pull-repairs', { method: 'POST' });
+      const json = await res.json();
+      if (json.success) {
+        showToast('success', json.message || `成功拉取草料最新报修！抓取到 ${json.count || 0} 条记录`);
+        fetchSettings();
+        fetchWebhookLogs();
+        window.dispatchEvent(new CustomEvent('caoliao_repair_received', { detail: json }));
+        window.dispatchEvent(new CustomEvent('work_orders_updated'));
+        window.dispatchEvent(new CustomEvent('medical_equipment_updated'));
+      } else {
+        showToast('error', json.error || '拉取草料最新报修失败');
+      }
+    } catch (err: any) {
+      showToast('error', '网络异常，拉取失败');
+    } finally {
+      setIsPullingRepairs(false);
+    }
+  };
+
   // 5. 重置为三甲医院标准分类映射模版
   const handleResetDefaults = async () => {
     if (!window.confirm('确认将设备分类映射规则重置为五莲县人民医院标准 22 大类模版吗？当前自定规则将被覆盖。')) {
@@ -442,7 +494,9 @@ export const CaoliaoSyncSettingsView: React.FC<CaoliaoSyncSettingsViewProps> = (
         setWebhookTestResult(json);
         showToast('success', `🎉 报修回调解析成功！已自动转建工单 [${json.workOrderId}] 并关联设备 [${json.equipmentName}]`);
         fetchWebhookLogs();
+        window.dispatchEvent(new CustomEvent('caoliao_repair_received', { detail: json }));
         window.dispatchEvent(new CustomEvent('work_orders_updated'));
+        window.dispatchEvent(new CustomEvent('medical_equipment_updated'));
       } else {
         setWebhookTestResult({ error: json.error || '解析转建失败' });
         showToast('error', json.error || 'Webhook 解析转建失败');
@@ -557,6 +611,17 @@ export const CaoliaoSyncSettingsView: React.FC<CaoliaoSyncSettingsViewProps> = (
             >
               <Zap className={`w-3.5 h-3.5 text-emerald-400 ${isTesting ? 'animate-spin' : ''}`} />
               <span>{isTesting ? '握手中...' : '测试 API Key 连通性'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handlePullRepairs}
+              disabled={isPullingRepairs}
+              className="px-3.5 py-2 bg-teal-800/80 hover:bg-teal-700 text-teal-200 border border-teal-500/40 rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-50"
+              title="立即通过草料 OpenAPI 抓取云端最新表单报修数据"
+            >
+              <Zap className={`w-3.5 h-3.5 text-teal-300 ${isPullingRepairs ? 'animate-spin' : ''}`} />
+              <span>{isPullingRepairs ? '正在拉取...' : '⚡ 拉取草料最新报修'}</span>
             </button>
 
             <button

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Building2, FileSpreadsheet, Receipt, MessageSquare, CheckCircle, 
   Clock, AlertTriangle, Upload, Plus, Trash2, Send, Eye, ShieldCheck,
@@ -12,6 +12,7 @@ import {
   QuotePartItem, 
   VendorCollabStatus 
 } from '../../types/vendorCollaborationTypes';
+import { matchesVendorAccount } from '../../utils/vendorCollaborationData';
 
 interface VendorSpecialOrderWorkbenchProps {
   currentVendor: VendorUserAccount;
@@ -29,10 +30,15 @@ export const VendorSpecialOrderWorkbench: React.FC<VendorSpecialOrderWorkbenchPr
   onOpenDossierModal,
 }) => {
   // 只显示本供应商承接的外协工单
-  const vendorOrders = orders.filter(o => o.vendorId === currentVendor.vendorId);
+  const vendorOrders = orders.filter(o => matchesVendorAccount(o, currentVendor));
   const effectiveOrders = vendorOrders.length > 0 ? vendorOrders : orders;
 
   const [selectedOrderId, setSelectedOrderId] = useState<string>(effectiveOrders[0]?.id || '');
+  useEffect(() => {
+    if (effectiveOrders.length > 0 && !effectiveOrders.some(o => o.id === selectedOrderId)) {
+      setSelectedOrderId(effectiveOrders[0].id);
+    }
+  }, [effectiveOrders, selectedOrderId]);
   const selectedOrder = effectiveOrders.find(o => o.id === selectedOrderId) || effectiveOrders[0];
 
   const [activeTab, setActiveTab] = useState<'DETAILS' | 'QUOTE' | 'NEGOTIATION' | 'COMPLETION' | 'INVOICE' | 'MESSAGES'>('DETAILS');

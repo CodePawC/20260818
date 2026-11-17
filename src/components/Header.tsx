@@ -5,6 +5,7 @@ import { ActiveTab } from './Sidebar';
 import { AuthUser, StaffPersonMaster } from '../types';
 import { UserNavMenu } from './UserNavMenu';
 import { isHeadNurse, isDepartmentRestricted, getUserDepartment } from '../utils/authUtils';
+import { resolveRoleArchetype, ROLE_ARCHETYPE_LABELS } from '../utils/rbacPolicy';
 import { FontScale, FONT_SCALE_OPTIONS, getStoredFontScale, applyFontScale } from '../utils/fontSizeScale';
 import { 
   Search, 
@@ -70,6 +71,8 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const userDept = getUserDepartment(currentUser);
   const isDeptScoped = (isHeadNurse(currentUser) || isDepartmentRestricted(currentUser)) && Boolean(userDept);
+  const roleArchetype = resolveRoleArchetype(currentUser);
+  const roleArchetypeLabel = ROLE_ARCHETYPE_LABELS[roleArchetype];
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [fontScale, setFontScale] = useState<FontScale>(() => getStoredFontScale());
   const [showFontMenu, setShowFontMenu] = useState(false);
@@ -123,6 +126,12 @@ export const Header: React.FC<HeaderProps> = ({
             badge: `${userDept} 临床医疗设备管理制度 · 操作SOP · 应急预案`, 
             category: '决策与档案' 
           };
+        case 'regulatory_platforms':
+          return { 
+            title: `【${userDept}】监管平台档案`, 
+            badge: `${userDept} 涉及的辐射安全、特种设备、计量强检等国家系统账号与公文`, 
+            category: '决策与档案' 
+          };
         default:
           return { title: `【${userDept}】资产管理`, badge: '科室专属运维协同', category: '工作台概览' };
       }
@@ -133,6 +142,8 @@ export const Header: React.FC<HeaderProps> = ({
         return { title: '全院设备运营总览看板', badge: '全院资产运营大盘与预警调度中心', category: '工作台概览' };
       case 'ledger':
         return { title: '设备全景技术资产台账', badge: '国家药监22大类 · 全生命周期技术主数据', category: '技术资产与库房' };
+      case 'project_ledger':
+        return { title: '全院设备项目全生命周期总台账', badge: '443项立项报批 · 询价议价 · 经办服务商资质 · 增值税发票查验 · 费用预批单', category: '技术资产与库房' };
       case 'mobile_inspection':
         return { title: '移动巡检与PDA实物盘点', badge: '现场扫码打卡 / 在位核实纠偏 / 现场即时报修', category: '技术资产与库房' };
       case 'emergency_reserve':
@@ -167,6 +178,10 @@ export const Header: React.FC<HeaderProps> = ({
         return { title: '国家卫健委医院智慧管理分级评估与HIS/PACS互联专区', badge: '1-5级指标自评体系 · HIS计费与PACS影像实时对齐 · 漏费拦截', category: '决策与评审' };
       case 'digital_twin_sandbox':
         return { title: '全院设备空间数字孪生模拟沙盘与应急调度中心', badge: '多建筑楼层空间热力 · 实时负荷感知 · 突发抢救应急动员演练', category: '资产与库房' };
+      case 'user_manual':
+        return { title: '五莲县人民医院医学装备管理系统 · 官方使用手册', badge: '全流程业务SOP · 岗位角色指南 · 快捷键与实操问答', category: '档案与系统' };
+      case 'regulatory_platforms':
+        return { title: '国家与省市监管平台档案库', badge: '生态环境部 · 市场监管总局 · 卫健委等官方系统账号密码 · 官方公文 · 登录经办流水', category: '档案与系统' };
       case 'regulations':
         return { title: '医学工程管理规章制度中心', badge: '国家药监法规 · 院级制度 · PM强检规程 · 临床SOP与应急预案', category: '档案与系统' };
       case 'diagnostics':
@@ -214,6 +229,9 @@ export const Header: React.FC<HeaderProps> = ({
             </h1>
             <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200/70 shrink-0 whitespace-nowrap">
               {category}
+            </span>
+            <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200 shrink-0 whitespace-nowrap" title="当前生效的岗位权限视角">
+              视角：{roleArchetypeLabel}
             </span>
             {badge && (
               <span className="text-xs text-slate-400 truncate hidden xl:inline max-w-sm font-normal">

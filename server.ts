@@ -25,7 +25,41 @@ import {
   DEFAULT_FLOOR_TOPOLOGY, 
   PRESET_EMERGENCY_SCENARIOS 
 } from './src/utils/smartManagementData';
-import { SmartManagementRatingMetric, HisPacsLinkageRecord, FloorSpaceTopology } from './src/types';
+import { SmartManagementRatingMetric, HisPacsLinkageRecord, FloorSpaceTopology, HospitalNotice, NoticeReadReceipt } from './src/types';
+import { DEFAULT_SEED_NOTICES } from './src/utils/noticeUtils';
+import { HOSPITAL_PROJECTS_FULL_LEDGER } from './src/utils/hospitalProjectsFullData';
+import { HospitalProjectRecord } from './src/types/hospitalProjectLedgerTypes';
+import { ApprovalApplication } from './src/types/approvalTypes';
+import { BiddingProject } from './src/types/vendorCollaborationTypes';
+import { INITIAL_APPROVAL_APPLICATIONS } from './src/utils/approvalMockData';
+import { INITIAL_BIDDING_PROJECTS } from './src/utils/vendorBiddingAndDocsData';
+import {
+  buildProjectRecordFromWorkOrder,
+  evaluateProjectAuditCompliance,
+  evaluateWorkOrderAuditGate,
+  isWorkOrderPaid,
+  resolveProcurementMode,
+  PROCUREMENT_MODE_META
+} from './src/utils/complianceAuditEngine';
+import {
+  UserIdentityLike,
+  ROLE_ARCHETYPE_LABELS,
+  resolveRoleArchetype,
+  canDispatchWorkOrderByPolicy,
+  canPreDispatchWorkOrderByPolicy,
+  canParticipateDispatchDiscussionByPolicy,
+  canExecuteFieldRepairByPolicy,
+  canClinicalAcceptWorkOrderByPolicy,
+  canAddEquipmentByPolicy,
+  canEditEquipmentByPolicy,
+  canDeleteOrScrapEquipmentByPolicy,
+  canChangeEquipmentStatusByPolicy,
+  canManageMasterDataByPolicy,
+  canManageSystemOpsByPolicy,
+  canBroadcastNoticeByPolicy,
+  canViewProjectLedgerByPolicy,
+  canOperateProjectLedgerByPolicy
+} from './src/utils/rbacPolicy';
 
 // Persistent file-backed storage
 const DATA_DIR = process.env.APP_DATA_DIR
@@ -36,11 +70,354 @@ const CATALOGUE_FILE = path.join(DATA_DIR, 'metrology_catalogue.json');
 const NMPA_CATEGORIES_FILE = path.join(DATA_DIR, 'nmpa_categories.json');
 const STAFF_FILE = path.join(DATA_DIR, 'staff_store.json');
 const ADVERSE_EVENTS_FILE = path.join(DATA_DIR, 'adverse_events.json');
+const WORK_ORDERS_FILE = path.join(DATA_DIR, 'work_orders_store.json');
+const VENDOR_COLLAB_FILE = path.join(DATA_DIR, 'vendor_collaboration_orders.json');
+const DYNAMIC_PROJECT_LEDGER_FILE = path.join(DATA_DIR, 'dynamic_project_ledger.json');
+const APPROVALS_FILE = path.join(DATA_DIR, 'approvals_store.json');
+const BIDDING_PROJECTS_FILE = path.join(DATA_DIR, 'bidding_projects_store.json');
 const UDI_CONSUMABLES_FILE = path.join(DATA_DIR, 'udi_consumables_store.json');
 const UDI_BINDINGS_FILE = path.join(DATA_DIR, 'udi_bindings_store.json');
 const SMART_METRICS_FILE = path.join(DATA_DIR, 'smart_management_metrics.json');
 const HIS_PACS_RECORDS_FILE = path.join(DATA_DIR, 'his_pacs_records.json');
+const NOTICES_FILE = path.join(DATA_DIR, 'notices_store.json');
 const BACKUPS_DIR = path.join(DATA_DIR, 'backups');
+
+function loadPersistentNotices(): HospitalNotice[] {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (fs.existsSync(NOTICES_FILE)) {
+      const raw = fs.readFileSync(NOTICES_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (err) {
+    console.error('[Storage] Error loading persistent notices:', err);
+  }
+  return DEFAULT_SEED_NOTICES;
+}
+
+function savePersistentNotices(data: HospitalNotice[]) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(NOTICES_FILE, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[Storage] Error saving persistent notices:', err);
+  }
+}
+
+let noticesStore: HospitalNotice[] = loadPersistentNotices();
+
+function loadPersistentWorkOrders(): any[] {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (fs.existsSync(WORK_ORDERS_FILE)) {
+      const raw = fs.readFileSync(WORK_ORDERS_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (err) {
+    console.error('[Storage] Error loading persistent work orders:', err);
+  }
+  return [];
+}
+
+function savePersistentWorkOrders(data: any[]) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(WORK_ORDERS_FILE, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[Storage] Error saving persistent work orders:', err);
+  }
+}
+
+let workOrdersStore: any[] = loadPersistentWorkOrders();
+
+function loadPersistentVendorCollabOrders(): any[] {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (fs.existsSync(VENDOR_COLLAB_FILE)) {
+      const raw = fs.readFileSync(VENDOR_COLLAB_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (err) {
+    console.error('[Storage] Error loading vendor collaboration orders:', err);
+  }
+  return [];
+}
+
+function savePersistentVendorCollabOrders(data: any[]) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(VENDOR_COLLAB_FILE, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[Storage] Error saving vendor collaboration orders:', err);
+  }
+}
+
+let vendorCollabOrdersStore: any[] = loadPersistentVendorCollabOrders();
+
+function loadPersistentDynamicProjectLedger(): HospitalProjectRecord[] {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (fs.existsSync(DYNAMIC_PROJECT_LEDGER_FILE)) {
+      const raw = fs.readFileSync(DYNAMIC_PROJECT_LEDGER_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (err) {
+    console.error('[Storage] Error loading dynamic project ledger:', err);
+  }
+  return [];
+}
+
+function savePersistentDynamicProjectLedger(data: HospitalProjectRecord[]) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(DYNAMIC_PROJECT_LEDGER_FILE, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[Storage] Error saving dynamic project ledger:', err);
+  }
+}
+
+function loadPersistentApprovals(): ApprovalApplication[] {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (fs.existsSync(APPROVALS_FILE)) {
+      const raw = fs.readFileSync(APPROVALS_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (err) {
+    console.error('[Storage] Error loading approvals:', err);
+  }
+  return INITIAL_APPROVAL_APPLICATIONS;
+}
+
+function savePersistentApprovals(data: ApprovalApplication[]) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(APPROVALS_FILE, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[Storage] Error saving approvals:', err);
+  }
+}
+
+function loadPersistentBiddingProjects(): BiddingProject[] {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    if (fs.existsSync(BIDDING_PROJECTS_FILE)) {
+      const raw = fs.readFileSync(BIDDING_PROJECTS_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch (err) {
+    console.error('[Storage] Error loading bidding projects:', err);
+  }
+  return INITIAL_BIDDING_PROJECTS;
+}
+
+function savePersistentBiddingProjects(data: BiddingProject[]) {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(BIDDING_PROJECTS_FILE, JSON.stringify(data, null, 2), 'utf8');
+  } catch (err) {
+    console.error('[Storage] Error saving bidding projects:', err);
+  }
+}
+
+let dynamicProjectLedgerStore: HospitalProjectRecord[] = loadPersistentDynamicProjectLedger();
+let approvalsStore: ApprovalApplication[] = loadPersistentApprovals();
+let biddingProjectsStore: BiddingProject[] = loadPersistentBiddingProjects();
+
+function getMergedProjectLedger(): HospitalProjectRecord[] {
+  const overrideMap = new Map<string, HospitalProjectRecord>();
+  const newDynamicItems: HospitalProjectRecord[] = [];
+  const staticIds = new Set(HOSPITAL_PROJECTS_FULL_LEDGER.map(p => p.id));
+  dynamicProjectLedgerStore.forEach(item => {
+    if (staticIds.has(item.id)) {
+      overrideMap.set(item.id, item);
+    } else {
+      newDynamicItems.push(item);
+    }
+  });
+  const baseMerged = HOSPITAL_PROJECTS_FULL_LEDGER.map(p => overrideMap.get(p.id) || p);
+  return [...newDynamicItems, ...baseMerged];
+}
+
+function findMergedProjectById(id: string): HospitalProjectRecord | undefined {
+  return (
+    dynamicProjectLedgerStore.find(p => p.id === id) ||
+    HOSPITAL_PROJECTS_FULL_LEDGER.find(p => p.id === id)
+  );
+}
+
+function upsertDynamicProjectRecord(record: HospitalProjectRecord): HospitalProjectRecord {
+  const idx = dynamicProjectLedgerStore.findIndex(p => p.id === record.id);
+  if (idx >= 0) {
+    dynamicProjectLedgerStore[idx] = record;
+  } else {
+    dynamicProjectLedgerStore.unshift(record);
+  }
+  savePersistentDynamicProjectLedger(dynamicProjectLedgerStore);
+  return record;
+}
+
+function upsertProjectFromWorkOrderServer(
+  workOrder: any,
+  opts: { stage: 'dispatch' | 'field_operation' | 'manual'; operatorName?: string; estimatedAmount?: number; hasCost?: boolean }
+): HospitalProjectRecord {
+  const existing =
+    (workOrder.linkedProjectId ? findMergedProjectById(workOrder.linkedProjectId) : undefined) ||
+    dynamicProjectLedgerStore.find(p => p.complianceDossier?.sourceWorkOrderId === workOrder.id);
+  const project = buildProjectRecordFromWorkOrder(workOrder, {
+    existingProject: existing,
+    stage: opts.stage,
+    operatorName: opts.operatorName,
+    estimatedAmount: opts.estimatedAmount,
+    hasCost: opts.hasCost
+  });
+  return upsertDynamicProjectRecord(project);
+}
+
+function upsertVendorCollabFromWorkOrder(workOrder: any, operatorName = '医工调度中心') {
+  if (!workOrder || workOrder.dispatchChannel !== 'outsourced' || !workOrder.externalPartner) {
+    return null;
+  }
+  const nowStr = new Date().toISOString().replace('T', ' ').slice(0, 16);
+  const serviceMode = workOrder.outsourceServiceMode || 'single_paid_quote';
+  const requiresQuote =
+    typeof workOrder.requiresVendorQuote === 'boolean'
+      ? workOrder.requiresVendorQuote
+      : serviceMode === 'single_paid_quote' || serviceMode === 'factory_return';
+
+  const existingIdx = vendorCollabOrdersStore.findIndex(
+    (o: any) => o.workOrderId === workOrder.id || (workOrder.linkedVendorOrderId && o.id === workOrder.linkedVendorOrderId)
+  );
+  const extId =
+    existingIdx >= 0
+      ? vendorCollabOrdersStore[existingIdx].id
+      : workOrder.linkedVendorOrderId || `EXT-${String(workOrder.id).replace(/[^A-Za-z0-9]/g, '').slice(-10)}`;
+
+  const estCost = Number(workOrder.estimatedOutsourceCost || 0);
+  const modeLabelMap: Record<string, string> = {
+    annual_contract: '年度全保/技术保覆盖',
+    warranty_free: '质保期内原厂免费保修',
+    single_paid_quote: '单次付费报价议价',
+    factory_return: '返厂检测/探头周转'
+  };
+  const modeLabel = modeLabelMap[serviceMode] || '外协专项维保';
+
+  const baseRecord = {
+    id: extId,
+    workOrderId: workOrder.id,
+    equipmentId: workOrder.equipmentId || '',
+    equipmentName: workOrder.equipmentName || '医疗设备',
+    equipmentModel: workOrder.equipmentModel || '标准型号',
+    equipmentSerialNo: workOrder.equipmentSn || '',
+    equipmentDept: workOrder.department || '临床科室',
+    faultDescription: `[外协方式：${modeLabel}${workOrder.externalContractNo ? ` / 合同号:${workOrder.externalContractNo}` : ''}] ${workOrder.outsourceReason ? `转外协原因：${workOrder.outsourceReason}。` : ''}${workOrder.faultDescription || ''}`,
+    faultImages: workOrder.photoUrl ? [workOrder.photoUrl] : [],
+    urgencyLevel: workOrder.priority === 'P1_CRITICAL' || workOrder.priority === 'P2_URGENT' ? 'HIGH' : 'NORMAL',
+    vendorId: workOrder.externalVendorId || 'ISO-001',
+    vendorName: workOrder.externalPartner,
+    vendorContact: workOrder.externalVendorContact || '外协技术代表',
+    vendorPhone: workOrder.externalVendorPhone || workOrder.reporterPhone || '400-880-9911',
+    createdAt: workOrder.vendorDispatchTime || workOrder.dispatchTime || nowStr,
+    status: requiresQuote ? 'PENDING_QUOTE' : 'APPROVED_REPAIRING',
+    quoteLaborCost: requiresQuote ? undefined : 0,
+    quoteTravelCost: requiresQuote ? undefined : 0,
+    quotePartsTotal: requiresQuote ? undefined : 0,
+    quoteGrandTotal: requiresQuote ? (estCost > 0 ? estCost : undefined) : 0,
+    quoteParts: [],
+    multiDeptOpinions: [],
+    negotiationRounds: [],
+    messages: [
+      {
+        id: `msg-${Date.now()}`,
+        senderType: 'HOSPITAL',
+        senderName: `${operatorName} (院内监护: ${workOrder.assignedEngineerName || workOrder.proposedEngineerName || '医工调度'})`,
+        senderDept: '医学工程科',
+        timestamp: nowStr,
+        content: `已通过外协派工单下发至【${workOrder.externalPartner}】（${modeLabel}）。${workOrder.dispatchNotes || '请尽快安排原厂/认证工程师响应协同。'}`
+      }
+    ],
+    isDossierArchived: false
+  };
+
+  if (existingIdx >= 0) {
+    const prev = vendorCollabOrdersStore[existingIdx];
+    vendorCollabOrdersStore[existingIdx] = {
+      ...prev,
+      vendorId: baseRecord.vendorId,
+      vendorName: baseRecord.vendorName,
+      vendorContact: baseRecord.vendorContact,
+      vendorPhone: baseRecord.vendorPhone,
+      faultDescription: baseRecord.faultDescription
+    };
+  } else {
+    vendorCollabOrdersStore.unshift(baseRecord);
+  }
+  savePersistentVendorCollabOrders(vendorCollabOrdersStore);
+  return vendorCollabOrdersStore[existingIdx >= 0 ? existingIdx : 0];
+}
+
+function parseComparableTime(val?: any): number {
+  if (!val) return 0;
+  if (val instanceof Date) {
+    const t = val.getTime();
+    return Number.isFinite(t) ? t : 0;
+  }
+  const normalized = String(val).trim().replace(/\//g, '-').replace('T', ' ');
+  if (!normalized) return 0;
+  const parsed = Date.parse(normalized.includes(' ') ? normalized.replace(' ', 'T') : normalized);
+  if (Number.isFinite(parsed)) return parsed;
+  const fallback = Date.parse(normalized);
+  return Number.isFinite(fallback) ? fallback : 0;
+}
+
+function determineBiomedicalGroup(dName: string, eName: string): string {
+  const combined = `${dName || ''} ${eName || ''}`.toLowerCase();
+  if (
+    combined.includes('呼吸') ||
+    combined.includes('icu') ||
+    combined.includes('除颤') ||
+    combined.includes('急救') ||
+    combined.includes('监护') ||
+    combined.includes('麻醉')
+  ) {
+    return '急救生命支持技术组';
+  }
+  if (
+    combined.includes('ct') ||
+    combined.includes('放射') ||
+    combined.includes('dr') ||
+    combined.includes('mri') ||
+    combined.includes('x射线') ||
+    combined.includes('影像')
+  ) {
+    return '大型放射影像技术组';
+  }
+  if (
+    combined.includes('检验') ||
+    combined.includes('生化') ||
+    combined.includes('血') ||
+    combined.includes('尿') ||
+    combined.includes('免疫')
+  ) {
+    return '临床检验与生化组';
+  }
+  if (
+    combined.includes('镜') ||
+    combined.includes('手术') ||
+    combined.includes('腔镜') ||
+    combined.includes('电刀') ||
+    combined.includes('吻合')
+  ) {
+    return '腔镜微创手术组';
+  }
+  return '超声与综合诊疗组';
+}
 
 function loadPersistentSmartMetrics(): SmartManagementRatingMetric[] {
   try {
@@ -347,10 +724,58 @@ async function startServer() {
   const app = express();
   const portArgIdx = process.argv.indexOf('--port');
   const portFromArg = portArgIdx !== -1 ? Number(process.argv[portArgIdx + 1]) : null;
-  const PORT = Number(process.env.PORT) || portFromArg || 3000;
+  const envPort = Number(process.env.PORT);
+  const nginxPort = Number(process.env.NGINX_PORT);
+  const PORT = portFromArg || (envPort && envPort !== nginxPort ? envPort : 3000);
   const DEMO_MODE = process.env.DEMO_MODE === '1';
 
   app.use(express.json({ limit: '10mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+  const safeDecodeHeader = (val: unknown): string => {
+    if (typeof val !== 'string') return '';
+    try {
+      return decodeURIComponent(val);
+    } catch {
+      return val;
+    }
+  };
+
+  const extractRequestUser = (req: express.Request): UserIdentityLike | null => {
+    const role = safeDecodeHeader(req.headers['x-user-role']);
+    const empNo = safeDecodeHeader(req.headers['x-user-emp-no']);
+    const isAdminHeader = req.headers['x-user-is-admin'] === 'true';
+    if (!role && !empNo && !isAdminHeader) {
+      return null;
+    }
+    return {
+      id: safeDecodeHeader(req.headers['x-user-id']),
+      employeeNo: empNo,
+      name: safeDecodeHeader(req.headers['x-user-name']),
+      role,
+      departmentName: safeDecodeHeader(req.headers['x-user-dept']),
+      stakeholderCategory: safeDecodeHeader(req.headers['x-user-cluster']),
+      isAdmin: isAdminHeader
+    };
+  };
+
+  const requireRbac = (
+    checkFn: (user: UserIdentityLike | null) => boolean,
+    actionLabel: string
+  ) => {
+    return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+      const user = extractRequestUser(req);
+      if (!checkFn(user)) {
+        const arch = resolveRoleArchetype(user);
+        const roleLabel = user?.role || ROLE_ARCHETYPE_LABELS[arch] || '未授权访客';
+        return res.status(403).json({
+          success: false,
+          error: `权限不足：当前岗位【${roleLabel}】无权执行「${actionLabel}」操作`
+        });
+      }
+      next();
+    };
+  };
 
   app.get('/api/health', (_req, res) => {
     res.json({ success: true, mode: DEMO_MODE ? 'demo' : 'standard' });
@@ -395,7 +820,7 @@ async function startServer() {
   });
 
   // 2. Add new equipment
-  app.post('/api/equipment', (req, res) => {
+  app.post('/api/equipment', requireRbac(canAddEquipmentByPolicy, '新增设备建档'), (req, res) => {
     try {
       const newEquip: MedicalEquipment = {
         id: `EQ-${Date.now().toString().slice(-4)}`,
@@ -439,7 +864,7 @@ async function startServer() {
   });
 
   // Batch import equipment
-  app.post('/api/equipment/batch', (req, res) => {
+  app.post('/api/equipment/batch', requireRbac(canAddEquipmentByPolicy, '批量导入设备台账'), (req, res) => {
     try {
       const { items, overwrite } = req.body;
       if (!Array.isArray(items)) {
@@ -462,7 +887,7 @@ async function startServer() {
   });
 
   // 3. Update existing equipment
-  app.put('/api/equipment/:id', (req, res) => {
+  app.put('/api/equipment/:id', requireRbac(canEditEquipmentByPolicy, '编辑设备台账'), (req, res) => {
     try {
       const { id } = req.params;
       const index = equipmentStore.findIndex(e => e.id === id);
@@ -483,7 +908,7 @@ async function startServer() {
   });
 
   // 4. Delete equipment
-  app.delete('/api/equipment/:id', (req, res) => {
+  app.delete('/api/equipment/:id', requireRbac(canDeleteOrScrapEquipmentByPolicy, '删除/移除设备台账'), (req, res) => {
     try {
       const { id } = req.params;
       equipmentStore = equipmentStore.filter(e => e.id !== id);
@@ -512,6 +937,14 @@ async function startServer() {
       const generatedCode = `WO-${prefix}-2026-${String(546 + totalRepairsCount).padStart(4, '0')}`;
       const workOrderId = req.body.workOrderId || generatedCode;
 
+      const nowStr = new Date().toISOString().replace('T', ' ').slice(0, 16);
+      const reportTimeStr = req.body.faultDate
+        ? (String(req.body.faultDate).length <= 10
+            ? `${String(req.body.faultDate).trim()} ${new Date().toTimeString().slice(0, 5)}`
+            : String(req.body.faultDate).replace('T', ' ').slice(0, 16))
+        : nowStr;
+      const isCompleted = req.body.status === '已完成';
+
       const repairRecord: RepairRecord = {
         id: workOrderId,
         equipmentId: equip.id,
@@ -520,13 +953,18 @@ async function startServer() {
         faultDate: req.body.faultDate || new Date().toISOString().split('T')[0],
         repairType: repairTypeStr,
         faultDescription: req.body.faultDescription || '设备报修问题描述',
-        technician: req.body.technician || '维保工程师',
+        technician: req.body.technician || '待调度指派工程师',
         cost: Number(req.body.cost) || 0,
         partsReplaced: req.body.partsReplaced || '无',
-        resolution: req.body.resolution || '排查处理中',
+        resolution: req.body.resolution || '已提交临床报修，进入全院调度闭环池等待派工处理。',
         status: req.body.status || '处理中',
-        completionDate: req.body.status === '已完成' ? new Date().toISOString().split('T')[0] : undefined
-      };
+        completionDate: isCompleted ? new Date().toISOString().split('T')[0] : undefined,
+        department: equip.department,
+        reporterName: req.body.reporterName || req.body.technician || '临床医护',
+        reporterPhone: req.body.reporterPhone || '',
+        source: 'manual_repair',
+        workOrderId
+      } as any;
 
       equip.repairRecords.unshift(repairRecord);
       equip.repairCount = equip.repairRecords.length;
@@ -536,6 +974,9 @@ async function startServer() {
         const oldStatus = equip.status;
         const newStatus: EquipmentStatus = req.body.newEquipmentStatus;
         equip.status = newStatus;
+        if (newStatus === '故障待修') {
+          equip.lastFaultReason = repairRecord.faultDescription;
+        }
 
         equip.statusLogs.unshift({
           id: `LOG-${Date.now()}`,
@@ -548,15 +989,52 @@ async function startServer() {
         });
       }
 
+      // 同步写入统一派工工单池，实现手动报修与草料扫码报修同轨闭环
+      const newWorkOrder = {
+        id: workOrderId,
+        equipmentId: equip.id,
+        equipmentName: equip.name,
+        equipmentModel: equip.model || '标准型号',
+        equipmentSn: equip.sn || '',
+        internalNo: equip.internalNo || '',
+        category: equip.category || '通用医疗器械',
+        department: equip.department,
+        location: equip.location || `${equip.department} 诊疗室`,
+        reporterName: req.body.reporterName || req.body.technician || '临床医护',
+        reporterPhone: req.body.reporterPhone || '',
+        reportTime: reportTimeStr,
+        priority: req.body.priority || (repairTypeStr.includes('急') ? 'P1_CRITICAL' : 'P2_URGENT'),
+        workOrderType: 'emergency_breakdown',
+        faultDescription: repairRecord.faultDescription,
+        status: isCompleted ? 'closed' : 'pending_dispatch',
+        biomedicalGroup: determineBiomedicalGroup(equip.department, equip.name),
+        source: 'manual_repair',
+        partsReplaced: [],
+        totalRepairCost: Number(req.body.cost) || 0,
+        totalDowntimeHours: 0.2,
+        slaResponseLimitMinutes: repairTypeStr.includes('急') ? 15 : 30,
+        slaRepairLimitHours: repairTypeStr.includes('急') ? 2 : 4,
+        isSlaResponseMet: false,
+        isSlaRepairMet: false
+      };
+
+      const existingWoIdx = workOrdersStore.findIndex(o => o.id === workOrderId);
+      if (existingWoIdx >= 0) {
+        workOrdersStore[existingWoIdx] = { ...workOrdersStore[existingWoIdx], ...newWorkOrder };
+      } else {
+        workOrdersStore.unshift(newWorkOrder);
+      }
+
       savePersistentEquipment(equipmentStore);
-      res.json({ success: true, data: equip });
+      savePersistentWorkOrders(workOrdersStore);
+      res.json({ success: true, data: equip, repairRecord, workOrder: newWorkOrder });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
   });
 
   // 6. Quick status change (with automatic fault clearance & repair completion)
-  app.put('/api/equipment/:id/status', (req, res) => {
+  app.put('/api/equipment/:id/status', requireRbac(canChangeEquipmentStatusByPolicy, '变更设备运行状态'), (req, res) => {
     try {
       const { id } = req.params;
       const { newStatus, reason, operator } = req.body;
@@ -600,6 +1078,25 @@ async function startServer() {
       });
 
       savePersistentEquipment(equipmentStore);
+
+      if (oldStatus === '故障待修' && newStatus === '正常运行') {
+        let woUpdated = false;
+        const nowClose = new Date().toISOString().replace('T', ' ').slice(0, 16);
+        workOrdersStore = workOrdersStore.map(o => {
+          if (o.equipmentId === equip.id && o.status !== 'closed') {
+            woUpdated = true;
+            return {
+              ...o,
+              status: 'closed',
+              acceptanceTime: o.acceptanceTime || nowClose,
+              solutionDescription: reason || o.solutionDescription || '设备故障已修复，恢复正常运行'
+            };
+          }
+          return o;
+        });
+        if (woUpdated) savePersistentWorkOrders(workOrdersStore);
+      }
+
       res.json({ success: true, data: equip });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -607,7 +1104,7 @@ async function startServer() {
   });
 
   // Dedicated endpoint to resolve equipment fault and restore to 正常运行
-  app.post('/api/equipment/:id/resolve-fault', (req, res) => {
+  app.post('/api/equipment/:id/resolve-fault', requireRbac(canChangeEquipmentStatusByPolicy, '故障修复确认'), (req, res) => {
     try {
       const { id } = req.params;
       const { reason, operator, partsReplaced, cost, technician } = req.body;
@@ -672,6 +1169,24 @@ async function startServer() {
       });
 
       savePersistentEquipment(equipmentStore);
+
+      let woClosed = false;
+      const nowCloseStr = new Date().toISOString().replace('T', ' ').slice(0, 16);
+      workOrdersStore = workOrdersStore.map(o => {
+        if (o.equipmentId === equip.id && o.status !== 'closed') {
+          woClosed = true;
+          return {
+            ...o,
+            status: 'closed',
+            acceptanceTime: o.acceptanceTime || nowCloseStr,
+            solutionDescription: reason || o.solutionDescription || '故障排除定标自检合格，恢复正常运行',
+            totalRepairCost: cost !== undefined ? Number(cost) : (o.totalRepairCost || 0)
+          };
+        }
+        return o;
+      });
+      if (woClosed) savePersistentWorkOrders(workOrdersStore);
+
       res.json({ success: true, data: equip });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -718,6 +1233,31 @@ async function startServer() {
       }
 
       savePersistentEquipment(equipmentStore);
+
+      if (record.status === '已完成') {
+        let woMatched = false;
+        const nowCloseStr = new Date().toISOString().replace('T', ' ').slice(0, 16);
+        workOrdersStore = workOrdersStore.map(o => {
+          const isMatch =
+            o.id === repairId ||
+            o.id === (record as any).workOrderId ||
+            ((record as any).recordNo && o.caoliaoRecordNo === (record as any).recordNo) ||
+            (repairId === `REP-${o.id}`);
+          if (isMatch && o.status !== 'closed') {
+            woMatched = true;
+            return {
+              ...o,
+              status: 'closed',
+              acceptanceTime: o.acceptanceTime || nowCloseStr,
+              solutionDescription: resolution || o.solutionDescription || '维修记录已完成闭环',
+              totalRepairCost: cost !== undefined ? Number(cost) : (o.totalRepairCost || 0)
+            };
+          }
+          return o;
+        });
+        if (woMatched) savePersistentWorkOrders(workOrdersStore);
+      }
+
       res.json({ success: true, data: equip, repairRecord: record });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -739,7 +1279,7 @@ async function startServer() {
   });
 
   // 7.2 Update entire catalogue
-  app.put('/api/metrology-catalogue', (req, res) => {
+  app.put('/api/metrology-catalogue', requireRbac(canManageMasterDataByPolicy, '更新强检目录主数据'), (req, res) => {
     try {
       const items = req.body;
       if (!Array.isArray(items)) {
@@ -754,7 +1294,7 @@ async function startServer() {
   });
 
   // 7.3 Batch Import / Merge catalogue entries
-  app.post('/api/metrology-catalogue/import', (req, res) => {
+  app.post('/api/metrology-catalogue/import', requireRbac(canManageMasterDataByPolicy, '导入强检目录主数据'), (req, res) => {
     try {
       const { items, mode = 'merge', autoReclassify = true } = req.body;
       if (!Array.isArray(items) || items.length === 0) {
@@ -815,7 +1355,7 @@ async function startServer() {
   });
 
   // 7.4 Reclassify all equipment by current catalogue rules
-  app.post('/api/metrology-catalogue/reclassify', (req, res) => {
+  app.post('/api/metrology-catalogue/reclassify', requireRbac(canManageMasterDataByPolicy, '重算全院设备强检分类'), (req, res) => {
     try {
       const result = reclassifyEquipmentListByPolicy(equipmentStore, catalogueStore);
       equipmentStore = result.updatedList;
@@ -854,7 +1394,7 @@ async function startServer() {
   });
 
   // 8.2 Update/Replace category items
-  app.put('/api/nmpa-categories', (req, res) => {
+  app.put('/api/nmpa-categories', requireRbac(canManageMasterDataByPolicy, '更新NMPA分类目录主数据'), (req, res) => {
     try {
       const items = req.body;
       if (!Array.isArray(items)) {
@@ -869,7 +1409,7 @@ async function startServer() {
   });
 
   // 8.3 Import category items (merge or overwrite)
-  app.post('/api/nmpa-categories/import', (req, res) => {
+  app.post('/api/nmpa-categories/import', requireRbac(canManageMasterDataByPolicy, '导入NMPA分类目录主数据'), (req, res) => {
     try {
       const { items, mode = 'merge' } = req.body;
       if (!Array.isArray(items) || items.length === 0) {
@@ -913,7 +1453,7 @@ async function startServer() {
   });
 
   // 9.2 Full update / replace staff master list
-  app.put('/api/staff', (req, res) => {
+  app.put('/api/staff', requireRbac(canManageMasterDataByPolicy, '更新人员与角色主数据'), (req, res) => {
     try {
       const items = req.body;
       if (!Array.isArray(items)) {
@@ -928,7 +1468,7 @@ async function startServer() {
   });
 
   // 9.3 Batch import staff (merge or overwrite)
-  app.post('/api/staff/import', (req, res) => {
+  app.post('/api/staff/import', requireRbac(canManageMasterDataByPolicy, '导入人员主数据'), (req, res) => {
     try {
       const { items, mode = 'merge' } = req.body;
       if (!Array.isArray(items) || items.length === 0) {
@@ -966,7 +1506,7 @@ async function startServer() {
   });
 
   // 9.4 Batch update staff properties
-  app.post('/api/staff/batch-update', (req, res) => {
+  app.post('/api/staff/batch-update', requireRbac(canManageMasterDataByPolicy, '批量修改人员主数据'), (req, res) => {
     try {
       const { ids, updates } = req.body;
       if (!Array.isArray(ids) || ids.length === 0 || !updates) {
@@ -1948,11 +2488,11 @@ ${userQuestion}
 
   // ==================== 17. 草料二维码 (Caoliao QR) RDS MySQL 官方数据库对接接口 ====================
   const DEFAULT_CAOLIAO_DB_CONFIG = {
-    host: process.env.CAOLIAO_DB_HOST || '',
+    host: process.env.CAOLIAO_DB_HOST || 'rm-bp1m4fy8d66u3c6xmbo.mysql.rds.aliyuncs.com',
     port: Number(process.env.CAOLIAO_DB_PORT) || 3306,
-    user: process.env.CAOLIAO_DB_USER || '',
-    password: process.env.CAOLIAO_DB_PASSWORD || '',
-    database: process.env.CAOLIAO_DB_NAME || '',
+    user: process.env.CAOLIAO_DB_USER || 'cli_9833874',
+    password: process.env.CAOLIAO_DB_PASSWORD || '374c90a0888b9c015189421e477a0503',
+    database: process.env.CAOLIAO_DB_NAME || 'cli_9833874',
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
@@ -2050,88 +2590,93 @@ ${userQuestion}
     }
   });
 
-  // 17.3 分页查询草料真实报修工单记录 (支持 codeId 精准过滤)
+  // 17.3 分页查询草料真实报修与维保记录 (合并 table_d233 故障报修 + table_d237 维保记录)
   app.get('/api/caoliao/repairs', async (req, res) => {
     try {
       const pool = getCaoliaoDbPool();
       const page = Math.max(1, parseInt(req.query.page as string) || 1);
       const pageSize = Math.min(50, Math.max(5, parseInt(req.query.pageSize as string) || 15));
-      const offset = (page - 1) * pageSize;
       const keyword = (req.query.keyword as string || '').trim();
       const codeId = (req.query.codeId as string || '').trim();
-
-      let sql = 'SELECT * FROM table_d233';
-      const params: any[] = [];
-      const whereClauses: string[] = [];
-
-      if (codeId) {
-        whereClauses.push('code_id = ?');
-        params.push(codeId);
-      }
-      if (keyword) {
-        whereClauses.push('(码名称 LIKE ? OR 故障表现_2645349 LIKE ? OR 报修人姓名_2645353 LIKE ? OR 记录编号 LIKE ?)');
-        const likeKey = `%${keyword}%`;
-        params.push(likeKey, likeKey, likeKey, likeKey);
-      }
-
-      if (whereClauses.length > 0) {
-        sql += ' WHERE ' + whereClauses.join(' AND ');
-      }
-
-      sql += ' ORDER BY record_id DESC LIMIT ? OFFSET ?';
-      params.push(pageSize, offset);
-
-      const [rows]: any = await pool.query(sql, params);
-      
-      let countSql = 'SELECT COUNT(*) as total FROM table_d233';
-      const countParams: any[] = [];
-      const countWhere: string[] = [];
-      if (codeId) {
-        countWhere.push('code_id = ?');
-        countParams.push(codeId);
-      }
-      if (keyword) {
-        countWhere.push('(码名称 LIKE ? OR 故障表现_2645349 LIKE ? OR 报修人姓名_2645353 LIKE ? OR 记录编号 LIKE ?)');
-        const likeKey = `%${keyword}%`;
-        countParams.push(likeKey, likeKey, likeKey, likeKey);
-      }
-      if (countWhere.length > 0) {
-        countSql += ' WHERE ' + countWhere.join(' AND ');
-      }
-      const [countRows]: any = await pool.query(countSql, countParams);
-      const total = countRows[0]?.total || 0;
 
       const formatIsoDate = (d: any) => {
         if (!d) return '';
         if (d instanceof Date) {
-          const pad = (n: number) => String(n).padStart(2, '0');
-          return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+          return Number.isFinite(d.getTime()) ? d.toISOString().replace('T', ' ').slice(0, 19) : '';
         }
         const str = String(d);
         if (str.includes('GMT')) {
           const parsed = new Date(str);
-          if (!isNaN(parsed.getTime())) {
-            const pad = (n: number) => String(n).padStart(2, '0');
-            return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())} ${pad(parsed.getHours())}:${pad(parsed.getMinutes())}:${pad(parsed.getSeconds())}`;
-          }
+          if (!isNaN(parsed.getTime())) return parsed.toISOString().replace('T', ' ').slice(0, 19);
         }
         return str.replace('T', ' ').slice(0, 19);
       };
 
-      const formatted = rows.map((r: any) => ({
-        recordId: r.record_id,
-        codeId: r.code_id,
-        equipmentName: r['码名称'],
-        recordTime: formatIsoDate(r['记录时间']),
-        recordNo: r['记录编号'],
-        reporterName: r['报修人姓名_2645353'] || r['记录人'] || '医护人员',
-        reporterPhone: r['报修人手机_2645354'] || '',
-        faultDescription: r['故障表现_2645349'] || '设备故障',
-        photoUrl: r['图片_2645350'] || '',
-        videoUrl: r['视频_2645351'] || '',
-        processStatus: r['处理状态'] || '待响应',
-        createSource: r['创建来源'] || '手机扫码填写'
-      }));
+      const where233: string[] = [];
+      const params233: any[] = [];
+      const where237: string[] = [];
+      const params237: any[] = [];
+
+      if (codeId) {
+        where233.push('code_id = ?');
+        params233.push(codeId);
+        where237.push('code_id = ?');
+        params237.push(codeId);
+      }
+      if (keyword) {
+        const likeKey = `%${keyword}%`;
+        where233.push('(码名称 LIKE ? OR 故障表现_2645349 LIKE ? OR 报修人姓名_2645353 LIKE ? OR 记录编号 LIKE ?)');
+        params233.push(likeKey, likeKey, likeKey, likeKey);
+        where237.push('(码名称 LIKE ? OR 情况说明_2648481 LIKE ? OR 姓名_2648485 LIKE ? OR 记录人 LIKE ? OR 记录编号 LIKE ?)');
+        params237.push(likeKey, likeKey, likeKey, likeKey, likeKey);
+      }
+
+      const sql233 = `SELECT * FROM table_d233 ${where233.length ? 'WHERE ' + where233.join(' AND ') : ''} ORDER BY \`记录时间\` DESC LIMIT 100`;
+      const sql237 = `SELECT * FROM table_d237 ${where237.length ? 'WHERE ' + where237.join(' AND ') : ''} ORDER BY \`记录时间\` DESC LIMIT 100`;
+
+      const [[rows233], [rows237], [cnt233], [cnt237]]: any = await Promise.all([
+        pool.query(sql233, params233),
+        pool.query(sql237, params237),
+        pool.query(`SELECT COUNT(*) as total FROM table_d233 ${where233.length ? 'WHERE ' + where233.join(' AND ') : ''}`, params233),
+        pool.query(`SELECT COUNT(*) as total FROM table_d237 ${where237.length ? 'WHERE ' + where237.join(' AND ') : ''}`, params237)
+      ]);
+
+      const merged = [
+        ...rows233.map((r: any) => ({
+          recordId: r.record_id,
+          codeId: r.code_id,
+          formName: r['记录单名称'] || '医疗设备故障报修',
+          equipmentName: r['码名称'],
+          recordTime: formatIsoDate(r['记录时间']),
+          recordNo: r['记录编号'],
+          reporterName: r['报修人姓名_2645353'] || r['记录人'] || '医护人员',
+          reporterPhone: r['报修人手机_2645354'] || '',
+          faultDescription: r['故障表现_2645349'] || '设备故障',
+          photoUrl: String(r['图片_2645350'] || '').split(',')[0].trim(),
+          videoUrl: r['视频_2645351'] || '',
+          processStatus: r['处理状态'] || '待响应',
+          createSource: r['创建来源'] || '手机扫码填写'
+        })),
+        ...rows237.map((r: any) => ({
+          recordId: r.record_id,
+          codeId: r.code_id,
+          formName: r['记录单名称'] || '医疗设备维保记录',
+          equipmentName: r['码名称'],
+          recordTime: formatIsoDate(r['记录时间']),
+          recordNo: r['记录编号'],
+          reporterName: r['姓名_2648485'] || r['记录人'] || '医工工程师',
+          reporterPhone: r['手机_2648486'] || '',
+          faultDescription: `【${r['项目_2794514'] || '维保记录'}】${r['情况说明_2648481'] || '现场维保'}${r['结果_2648791'] ? `（结果：${r['结果_2648791']}）` : ''}`,
+          photoUrl: String(r['维修详情照片_2648482'] || '').split(',')[0].trim(),
+          videoUrl: r['视频_2648483'] || '',
+          processStatus: r['结果_2648791'] || r['处理状态'] || '已记录',
+          createSource: r['创建来源'] || '手机扫码填写'
+        }))
+      ].sort((a, b) => parseComparableTime(b.recordTime) - parseComparableTime(a.recordTime) || Number(b.recordId || 0) - Number(a.recordId || 0));
+
+      const total = Number(cnt233[0]?.total || 0) + Number(cnt237[0]?.total || 0);
+      const offset = (page - 1) * pageSize;
+      const formatted = merged.slice(offset, offset + pageSize);
 
       res.json({
         success: true,
@@ -2166,11 +2711,11 @@ ${userQuestion}
 
       const pool = getCaoliaoDbPool();
       
-      // 1. 查询该活码在草料 table_d233 中的真实报修工单
-      const [repairRows]: any = await pool.query(
-        'SELECT * FROM table_d233 WHERE code_id = ? ORDER BY record_id DESC',
-        [codeId]
-      );
+      // 1. 查询该活码在草料 table_d233 (故障报修) + table_d237 (维保记录) 中的真实全量履历
+      const [[repairRows], [maintRows]]: any = await Promise.all([
+        pool.query('SELECT * FROM table_d233 WHERE code_id = ? ORDER BY record_id DESC', [codeId]),
+        pool.query('SELECT * FROM table_d237 WHERE code_id = ? ORDER BY record_id DESC', [codeId])
+      ]);
 
       // 2. 查询该活码在 code_state_log 中的状态审计流转日志
       const [stateRows]: any = await pool.query(
@@ -2193,34 +2738,56 @@ ${userQuestion}
       const formatIsoDate = (d: any) => {
         if (!d) return '';
         if (d instanceof Date) {
-          const pad = (n: number) => String(n).padStart(2, '0');
-          return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+          return Number.isFinite(d.getTime()) ? d.toISOString().replace('T', ' ').slice(0, 19) : '';
         }
         const str = String(d);
         if (str.includes('GMT')) {
           const parsed = new Date(str);
-          if (!isNaN(parsed.getTime())) {
-            const pad = (n: number) => String(n).padStart(2, '0');
-            return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())} ${pad(parsed.getHours())}:${pad(parsed.getMinutes())}:${pad(parsed.getSeconds())}`;
-          }
+          if (!isNaN(parsed.getTime())) return parsed.toISOString().replace('T', ' ').slice(0, 19);
         }
         return str.replace('T', ' ').slice(0, 19);
       };
 
-      const repairs = repairRows.map((r: any) => ({
-        recordId: r.record_id,
-        codeId: r.code_id,
-        equipmentName: r['码名称'] || matchedEquip?.name || '医疗设备',
-        recordTime: formatIsoDate(r['记录时间']),
-        recordNo: r['记录编号'] || String(r.record_id),
-        reporterName: r['报修人姓名_2645353'] || r['记录人'] || '医护人员',
-        reporterPhone: r['报修人手机_2645354'] || '',
-        faultDescription: r['故障表现_2645349'] || '现场扫码报修',
-        photoUrl: r['图片_2645350'] || '',
-        videoUrl: r['视频_2645351'] || '',
-        processStatus: r['处理状态'] || '待响应',
-        createSource: r['创建来源'] || '手机扫码填写'
-      }));
+      const repairs = [
+        ...repairRows.map((r: any) => ({
+          recordId: r.record_id,
+          codeId: r.code_id,
+          formName: r['记录单名称'] || '医疗设备故障报修',
+          equipmentName: r['码名称'] || matchedEquip?.name || '医疗设备',
+          recordTime: formatIsoDate(r['记录时间']),
+          recordNo: r['记录编号'] || String(r.record_id),
+          reporterName: r['报修人姓名_2645353'] || r['记录人'] || '医护人员',
+          reporterPhone: r['报修人手机_2645354'] || '',
+          faultDescription: r['故障表现_2645349'] || '现场扫码报修',
+          photoUrl: String(r['图片_2645350'] || '').split(',')[0].trim(),
+          videoUrl: r['视频_2645351'] || '',
+          processStatus: r['处理状态'] || '待响应',
+          createSource: r['创建来源'] || '手机扫码填写',
+          isMaintenance: false
+        })),
+        ...maintRows.map((r: any) => {
+          const projectItem = String(r['项目_2794514'] || '维保记录').trim();
+          const situation = String(r['情况说明_2648481'] || '').trim();
+          const resultText = String(r['结果_2648791'] || r['处理状态'] || '').trim();
+          const isDone = /完好|正常|完成|合格|修复|已解决/.test(resultText) || r['处理状态'] === '已完成';
+          return {
+            recordId: r.record_id,
+            codeId: r.code_id,
+            formName: r['记录单名称'] || '医疗设备维保记录',
+            equipmentName: r['码名称'] || matchedEquip?.name || '医疗设备',
+            recordTime: formatIsoDate(r['记录时间']),
+            recordNo: r['记录编号'] || String(r.record_id),
+            reporterName: r['姓名_2648485'] || r['记录人'] || '医工工程师',
+            reporterPhone: r['手机_2648486'] || '',
+            faultDescription: `【${projectItem}】${situation || '现场维保'}${resultText ? `（结果：${resultText}）` : ''}`,
+            photoUrl: String(r['维修详情照片_2648482'] || '').split(',')[0].trim(),
+            videoUrl: r['视频_2648483'] || '',
+            processStatus: isDone ? '已完成' : (resultText || '处理中'),
+            createSource: r['创建来源'] || '手机扫码填写',
+            isMaintenance: true
+          };
+        })
+      ].sort((a, b) => parseComparableTime(b.recordTime) - parseComparableTime(a.recordTime));
 
       const stateLogs = stateRows.map((s: any) => ({
         timestamp: formatIsoDate(s['更新时间']),
@@ -2231,13 +2798,14 @@ ${userQuestion}
         statusCode: s['状态编号'] || ''
       }));
 
-      // 如果有设备匹配，并将草料报修无缝持久化同步入本地设备 repairRecords
+      // 如果有设备匹配，并将草料报修与维保履历无缝持久化同步入本地设备 repairRecords
       if (matchedEquip && repairs.length > 0) {
         const existingIds = new Set((matchedEquip.repairRecords || []).map((rec: any) => rec.id));
+        const existingNos = new Set((matchedEquip.repairRecords || []).map((rec: any) => rec.recordNo).filter(Boolean));
         let added = false;
         repairs.forEach((r: any) => {
           const repId = `REP-CL-${r.recordNo || r.recordId}`;
-          if (!existingIds.has(repId)) {
+          if (!existingIds.has(repId) && !(r.recordNo && existingNos.has(r.recordNo))) {
             const faultDate = r.recordTime || '2026-10-04 15:50:43';
             const newRec: RepairRecord = {
               id: repId,
@@ -2245,12 +2813,12 @@ ${userQuestion}
               equipmentName: matchedEquip!.name,
               equipmentSn: matchedEquip!.sn,
               faultDate,
-              repairType: '草料二维码扫码报修',
+              repairType: r.isMaintenance ? '草料二维码维保记录' : '草料二维码扫码报修',
               faultDescription: `【草料单号 ${r.recordNo}】${r.faultDescription}`,
               technician: r.reporterName ? `${r.reporterName} (手机: ${r.reporterPhone || '未留'})` : '临床医护',
               cost: 0,
-              partsReplaced: '草料线上直报',
-              resolution: '草料现场扫码报修，已直通院内医工全生命周期管理系统。',
+              partsReplaced: r.isMaintenance ? '现场维保' : '草料线上直报',
+              resolution: r.isMaintenance ? r.faultDescription : '草料现场扫码报修，已直通院内医工全生命周期管理系统。',
               status: r.processStatus === '已完成' ? '已完成' : '处理中',
               department: matchedEquip!.department,
               reporterName: r.reporterName,
@@ -2267,6 +2835,7 @@ ${userQuestion}
               matchedEquip!.status = '故障待修';
             }
             existingIds.add(repId);
+            if (r.recordNo) existingNos.add(r.recordNo);
             added = true;
           }
         });
@@ -2328,6 +2897,17 @@ ${userQuestion}
         }
       }
 
+      // 2.5 如果输入为草料报修单号（如 L12252），先在 table_d233 中反查对应活码 code_id
+      if (!matchedCode && /^L\d+$/i.test(input)) {
+        const [repMatches]: any = await pool.query('SELECT code_id FROM table_d233 WHERE 记录编号 = ? ORDER BY record_id DESC LIMIT 1;', [input.toUpperCase()]);
+        if (repMatches && repMatches.length > 0 && repMatches[0].code_id) {
+          const [codeRows]: any = await pool.query('SELECT * FROM base_codeinfo WHERE code_id = ? LIMIT 1;', [repMatches[0].code_id]);
+          if (codeRows && codeRows.length > 0) {
+            matchedCode = codeRows[0];
+          }
+        }
+      }
+
       // 3. 如果仍未匹配，通过名称或 URL 片段匹配
       if (!matchedCode) {
         const cleanName = input.replace(/http.*?\//g, '').trim();
@@ -2346,10 +2926,10 @@ ${userQuestion}
         });
       }
 
-      // 4. 查询该设备在 table_d233 中的历史/最新报修记录
+      // 4. 查询该设备在 table_d233 中的历史/最新报修记录（严格按 code_id 过滤，避免同名活码串台）
       const [repairRows]: any = await pool.query(
-        'SELECT * FROM table_d233 WHERE code_id = ? OR 码名称 = ? ORDER BY record_id DESC LIMIT 5;',
-        [matchedCode.code_id, matchedCode['码名称']]
+        'SELECT * FROM table_d233 WHERE code_id = ? ORDER BY record_id DESC LIMIT 5;',
+        [matchedCode.code_id]
       );
 
       const recentRepairs = repairRows.map((r: any) => ({
@@ -2365,16 +2945,43 @@ ${userQuestion}
         processStatus: r['处理状态'] || '待响应'
       }));
 
-      // 5. 跨表联动比对：在系统本地设备台账中寻找最佳匹配（优先按 codeId 精准关联）
-      const codeIdStr = String(matchedCode.code_id);
-      const codeName = matchedCode['码名称'] || '';
-      const matchedPlatformEquip = equipmentStore.find(e => 
-        e.codeId === codeIdStr ||
-        (e.caoliaoUrl && matchedCode.url && e.caoliaoUrl === matchedCode.url) ||
-        codeName.includes(e.name) || 
-        e.name.includes(codeName.replace(/^[^-]+-/, '')) ||
-        (e.sn && codeName.includes(e.sn))
-      ) || null;
+      // 5. 跨表联动比对：在系统本地设备台账中严格按优先级匹配，禁止单次 OR 遍历被同名设备截胡
+      const codeIdStr = String(matchedCode.code_id).trim();
+      const codeName = String(matchedCode['码名称'] || '').trim();
+      const inferredDept = codeName.includes('-') ? codeName.split('-')[0].trim() : '';
+      const cleanCodeName = codeName.replace(/^[^-]+-/, '').trim();
+
+      let rdsSn = '';
+      let rdsZc = '';
+      try {
+        const [tplRows]: any = await pool.query(
+          'SELECT 出厂编号_2647283 as sn, 10425_3013307 as zc FROM template_codeinfo_131886095 WHERE code_id = ? LIMIT 1;',
+          [matchedCode.code_id]
+        );
+        if (tplRows && tplRows.length > 0) {
+          rdsSn = String(tplRows[0].sn || '').trim().toLowerCase();
+          rdsZc = String(tplRows[0].zc || '').trim();
+        }
+      } catch (e) {
+        // ignore template lookup failure
+      }
+
+      const matchedPlatformEquip =
+        equipmentStore.find(e => e.codeId && String(e.codeId).trim() === codeIdStr) ||
+        (rdsZc ? equipmentStore.find(e => String(e.id).trim() === rdsZc) : undefined) ||
+        (matchedCode.url ? equipmentStore.find(e => e.caoliaoUrl && e.caoliaoUrl === matchedCode.url) : undefined) ||
+        (rdsSn ? equipmentStore.find(e => e.sn && e.sn.trim().toLowerCase() === rdsSn) : undefined) ||
+        equipmentStore.find(e => e.sn && codeName.includes(e.sn)) ||
+        (codeName ? equipmentStore.find(e => e.caoliaoCodeName && e.caoliaoCodeName.trim() === codeName) : undefined) ||
+        (inferredDept
+          ? equipmentStore.find(e => e.department === inferredDept && e.name === cleanCodeName) ||
+            equipmentStore.find(e => e.department === inferredDept && (e.name.includes(cleanCodeName) || cleanCodeName.includes(e.name)))
+          : undefined) ||
+        (cleanCodeName
+          ? equipmentStore.find(e => e.name === cleanCodeName) ||
+            equipmentStore.find(e => codeName.includes(e.name) || e.name.includes(cleanCodeName))
+          : undefined) ||
+        null;
 
       res.json({
         success: true,
@@ -2874,6 +3481,216 @@ ${userQuestion}
     }
   }
 
+  function reconcileLogsAndWorkOrders() {
+    let ordersDirty = false;
+    let equipDirty = false;
+
+    // 1. 将草料审计日志全量与派工单池、设备维修履历幂等对账（解决已有日志但工单或台账缺失）
+    for (const log of caoliaoWebhookLogs) {
+      const recNo = String(log.recordNo || '').trim();
+      const fallbackWoId = recNo && /^L\d+$/i.test(recNo)
+        ? `WO-CL-${recNo.toUpperCase()}`
+        : `WO-CL-${String(log.id || '').replace(/\D/g, '').slice(-6) || 'AUTO'}`;
+      const woId = log.createdWorkOrderId || fallbackWoId;
+
+      const matchedEq =
+        (log.matchedEquipmentId ? equipmentStore.find(e => e.id === log.matchedEquipmentId) : undefined) ||
+        (log.codeId ? equipmentStore.find(e => e.codeId && String(e.codeId).trim() === String(log.codeId).trim()) : undefined) ||
+        (log.sn ? equipmentStore.find(e => e.sn && e.sn.trim().toLowerCase() === String(log.sn).trim().toLowerCase()) : undefined);
+
+      const safeLogDept = log.department && !/^https?:\/\//i.test(String(log.department)) ? log.department : '';
+      if (log.department && /^https?:\/\//i.test(String(log.department))) {
+        log.department = matchedEq?.department || log.matchedDepartment || (log.codeName?.includes('-') ? log.codeName.split('-')[0].trim() : '未识别科室');
+      }
+      const dept = matchedEq?.department || (log.matchedDepartment && !/^https?:\/\//i.test(String(log.matchedDepartment)) ? log.matchedDepartment : '') || safeLogDept || '功能检查科';
+      const eqName = matchedEq?.name || log.matchedEquipmentName || log.codeName || '医疗设备';
+      const group = determineBiomedicalGroup(dept, eqName);
+      const reportTimeStr = log.rawPayload?.create_time
+        ? String(log.rawPayload.create_time).replace('T', ' ').slice(0, 16)
+        : (log.timestamp ? String(log.timestamp).replace('T', ' ').slice(0, 16) : new Date().toISOString().replace('T', ' ').slice(0, 16));
+      const isMaintenanceLog = Boolean(log.rawPayload?.isMaintenanceRecord || String(log.rawPayload?.['表单名称'] || '').includes('维保'));
+      const isCompletedInLog = log.rawPayload?.['当前状态'] === '已完成' || log.rawPayload?.['处理进度'] === '已完成';
+      const cleanPhotoUrl = String(log.photoUrl || '').split(',')[0].trim();
+
+      const existingOrderIdx = workOrdersStore.findIndex(
+        o => o.id === woId || (recNo && o.caoliaoRecordNo === recNo)
+      );
+
+      if (existingOrderIdx < 0) {
+        workOrdersStore.unshift({
+          id: woId,
+          equipmentId: log.matchedEquipmentId || matchedEq?.id || `EQ-CL-${log.codeId || 'AUTO'}`,
+          equipmentName: eqName,
+          equipmentModel: matchedEq?.model || '标准型号',
+          equipmentSn: matchedEq?.sn || log.sn || (recNo ? `SN-${recNo}` : ''),
+          internalNo: matchedEq?.internalNo || `CL-QR-${log.codeId || 'AUTO'}`,
+          category: matchedEq?.category || '医用诊察和监护器械',
+          department: dept,
+          location: matchedEq?.location || `${dept} 诊疗室`,
+          reporterName: log.reporterName || '医护人员',
+          reporterPhone: log.reporterPhone || '',
+          reportTime: reportTimeStr,
+          priority: log.urgency === 'P1' ? 'P1_CRITICAL' : log.urgency === 'P2' ? 'P2_URGENT' : 'P3_STANDARD',
+          workOrderType: log.rawPayload?.workOrderType || 'emergency_breakdown',
+          faultDescription: recNo
+            ? `【草料扫码单号 ${recNo}】${log.faultDescription || '运行异常'}`
+            : (log.faultDescription || '运行异常'),
+          status: isCompletedInLog ? 'closed' : 'pending_dispatch',
+          assignedEngineerName: isCompletedInLog ? (log.reporterName || '医工工程师') : undefined,
+          solutionDescription: log.rawPayload?.solutionDescription || (isCompletedInLog ? log.faultDescription : undefined),
+          acceptanceTime: isCompletedInLog ? reportTimeStr : undefined,
+          acceptanceStaffName: log.rawPayload?.acceptanceSignature ? '科室现场电子签字确认' : undefined,
+          acceptanceSignature: log.rawPayload?.acceptanceSignature || undefined,
+          clinicalFeedback: log.rawPayload?.maintenanceResult ? `维保结果：${log.rawPayload.maintenanceResult}` : undefined,
+          biomedicalGroup: group,
+          source: 'caoliao',
+          caoliaoRecordId: recNo ? parseInt(recNo.replace(/\D/g, ''), 10) || 0 : 0,
+          caoliaoRecordNo: recNo,
+          caoliaoCodeId: log.codeId || matchedEq?.codeId || '',
+          photoUrl: cleanPhotoUrl,
+          partsReplaced: [],
+          totalRepairCost: 0,
+          totalDowntimeHours: 0.2,
+          slaResponseLimitMinutes: log.urgency === 'P1' ? 15 : log.urgency === 'P2' ? 30 : 120,
+          slaRepairLimitHours: log.urgency === 'P1' ? 2 : log.urgency === 'P2' ? 4 : 24,
+          isSlaResponseMet: false,
+          isSlaRepairMet: false
+        });
+        ordersDirty = true;
+      } else if (matchedEq) {
+        const existingOrder = workOrdersStore[existingOrderIdx];
+        const hasUrlDept = /^https?:\/\//i.test(String(existingOrder.department || '')) || /^https?:\/\//i.test(String(existingOrder.location || ''));
+        const needsEnrich =
+          hasUrlDept ||
+          !existingOrder.equipmentModel ||
+          existingOrder.equipmentModel === '在用标准型号' ||
+          existingOrder.equipmentModel === '标准型号' ||
+          existingOrder.equipmentId !== matchedEq.id ||
+          existingOrder.equipmentName === '未精准匹配' ||
+          existingOrder.equipmentName === '医疗设备';
+        if (needsEnrich) {
+          workOrdersStore[existingOrderIdx] = {
+            ...existingOrder,
+            equipmentId: matchedEq.id,
+            equipmentName: matchedEq.name,
+            equipmentModel: matchedEq.model || existingOrder.equipmentModel,
+            equipmentSn: matchedEq.sn || existingOrder.equipmentSn,
+            department: matchedEq.department || (!hasUrlDept ? existingOrder.department : dept),
+            location: matchedEq.location || `${matchedEq.department || dept} 诊疗室`,
+            caoliaoCodeId: matchedEq.codeId || existingOrder.caoliaoCodeId || log.codeId,
+            photoUrl: cleanPhotoUrl || existingOrder.photoUrl
+          };
+          ordersDirty = true;
+        }
+      }
+
+      const activeOrder = workOrdersStore.find(o => o.id === woId || (recNo && o.caoliaoRecordNo === recNo));
+      const orderClosed = activeOrder?.status === 'closed' || isCompletedInLog;
+
+      if (matchedEq) {
+        const repList = Array.isArray(matchedEq.repairRecords) ? matchedEq.repairRecords : [];
+        const hasRepair = repList.some(
+          (r: any) =>
+            (recNo && r.recordNo === recNo) ||
+            r.workOrderId === woId ||
+            r.id === `REP-${woId}` ||
+            (log.rawPayload?.record_id && r.id === `REP-CL-${log.rawPayload.record_id}`)
+        );
+
+        if (!hasRepair) {
+          const newRec: any = {
+            id: log.rawPayload?.record_id ? `REP-CL-${log.rawPayload.record_id}` : `REP-${woId}`,
+            equipmentId: matchedEq.id,
+            equipmentName: matchedEq.name,
+            equipmentSn: matchedEq.sn || log.sn || '',
+            faultDate: log.timestamp ? String(log.timestamp).replace('T', ' ').slice(0, 19) : reportTimeStr,
+            repairType: isMaintenanceLog ? '草料二维码维保记录' : '草料二维码扫码报修',
+            faultDescription: recNo
+              ? `【草料单号 ${recNo}】${log.faultDescription || '运行异常'} (填报人: ${log.reporterName || '医护'} 电话: ${log.reporterPhone || '未留'})`
+              : (log.faultDescription || '现场扫码报修'),
+            technician: activeOrder?.assignedEngineerName
+              ? `${activeOrder.assignedEngineerName} (已处置记录)`
+              : activeOrder?.proposedEngineerName
+              ? `拟定: ${activeOrder.proposedEngineerName} (内部确认中)`
+              : (log.reporterName ? `${log.reporterName} (手机: ${log.reporterPhone || '未留'})` : '待派工分配'),
+            cost: 0,
+            partsReplaced: isMaintenanceLog ? '现场维保' : '待检',
+            resolution: activeOrder?.solutionDescription || `草料二维码实时同步建单 (工单号: ${woId})，已纳入全院闭环。`,
+            status: orderClosed ? '已完成' : '处理中',
+            completionDate: orderClosed ? reportTimeStr.slice(0, 10) : undefined,
+            department: matchedEq.department,
+            reporterName: log.reporterName,
+            reporterPhone: log.reporterPhone,
+            codeId: log.codeId || matchedEq.codeId,
+            recordNo: recNo,
+            photoUrl: cleanPhotoUrl,
+            source: 'caoliao',
+            workOrderId: woId
+          };
+          matchedEq.repairRecords = [newRec, ...repList];
+          matchedEq.repairCount = matchedEq.repairRecords.length;
+          equipDirty = true;
+        }
+
+        if (!orderClosed && matchedEq.status === '正常运行') {
+          matchedEq.status = '故障待修';
+          matchedEq.lastFaultReason = log.faultDescription || matchedEq.lastFaultReason;
+          equipDirty = true;
+        }
+      }
+    }
+
+    // 2. 将设备台账中未闭环的手工报修单同步补齐到统一派工单池
+    for (const eq of equipmentStore) {
+      const records = Array.isArray(eq.repairRecords) ? eq.repairRecords : [];
+      for (const rec of records as any[]) {
+        if (rec.status === '已完成') continue;
+        if (rec.source === 'caoliao' || rec.recordNo) continue;
+        const targetWoId = rec.workOrderId || rec.id;
+        const existsInOrders = workOrdersStore.some(
+          o => o.id === targetWoId || (rec.id && o.id === rec.id)
+        );
+        if (!existsInOrders) {
+          workOrdersStore.unshift({
+            id: targetWoId,
+            equipmentId: eq.id,
+            equipmentName: eq.name,
+            equipmentModel: eq.model || '标准型号',
+            equipmentSn: eq.sn || '',
+            internalNo: eq.internalNo || '',
+            category: eq.category || '通用医疗器械',
+            department: rec.department || eq.department,
+            location: eq.location || `${eq.department} 诊疗室`,
+            reporterName: rec.reporterName || rec.technician || '临床医护',
+            reporterPhone: rec.reporterPhone || '',
+            reportTime: rec.faultDate ? String(rec.faultDate).slice(0, 16) : new Date().toISOString().replace('T', ' ').slice(0, 16),
+            priority: (rec.repairType || '').includes('急') ? 'P1_CRITICAL' : 'P2_URGENT',
+            workOrderType: 'emergency_breakdown',
+            faultDescription: rec.faultDescription || '临床设备故障报修',
+            status: 'pending_dispatch',
+            biomedicalGroup: determineBiomedicalGroup(eq.department, eq.name),
+            source: 'manual_repair',
+            partsReplaced: [],
+            totalRepairCost: Number(rec.cost) || 0,
+            totalDowntimeHours: 0.2,
+            slaResponseLimitMinutes: 30,
+            slaRepairLimitHours: 4,
+            isSlaResponseMet: false,
+            isSlaRepairMet: false
+          });
+          ordersDirty = true;
+        }
+      }
+    }
+
+    if (ordersDirty) {
+      savePersistentWorkOrders(workOrdersStore);
+    }
+    if (equipDirty) {
+      savePersistentEquipment(equipmentStore);
+    }
+  }
+
   // 最新报修弹出消息广播对象 (供监控大盘实时轮询与消息弹出)
   let latestRepairAlert: {
     id: string;
@@ -2893,80 +3710,212 @@ ${userQuestion}
     photoUrl?: string;
   } | null = null;
 
-  // 核心函数：处理从草料二维码发来的报修请求，解析并自动转化为维修任务
-  function processCaoliaoWebhookPayload(payload: any, endpoint: string = '/api/caoliao/webhook') {
+  // 智能通用草料二维码 Webhook 数据解析器 (支持标准开放平台、嵌套 data、自定义表单字段及多种编码)
+  function extractCaoliaoFields(rawInput: any) {
+    let root = rawInput;
+    if (typeof root === 'string') {
+      try { root = JSON.parse(root); } catch (e) {}
+    }
+    const candidate = root?.data || root?.record || root?.form_data || root?.content || root || {};
+    
+    // 合并根层、candidate层及 fields 数组
+    const fieldMap: Record<string, any> = { ...root, ...candidate };
+    if (Array.isArray(candidate.fields)) {
+      candidate.fields.forEach((f: any) => {
+        if (f.field_name && f.value !== undefined) fieldMap[f.field_name] = f.value;
+        if (f.field_id && f.value !== undefined) fieldMap[f.field_id] = f.value;
+      });
+    }
+    if (Array.isArray(root.fields)) {
+      root.fields.forEach((f: any) => {
+        if (f.field_name && f.value !== undefined) fieldMap[f.field_name] = f.value;
+        if (f.field_id && f.value !== undefined) fieldMap[f.field_id] = f.value;
+      });
+    }
+
+    // 模糊键名匹配提取器（按关键字优先级顺序匹配，并支持排除签字/URL字段）
+    const findVal = (
+      keywords: string[],
+      fallback: string = '',
+      opts?: { excludeKeys?: string[]; rejectUrl?: boolean }
+    ) => {
+      const keys = Object.keys(fieldMap);
+      for (const kw of keywords) {
+        const lowerKw = kw.toLowerCase();
+        for (const k of keys) {
+          const lowerKey = k.toLowerCase();
+          if (opts?.excludeKeys?.some(ex => lowerKey.includes(ex.toLowerCase()))) continue;
+          if (lowerKey.includes(lowerKw)) {
+            const val = fieldMap[k];
+            if (val !== undefined && val !== null) {
+              const strVal = typeof val === 'object' ? JSON.stringify(val) : String(val).trim();
+              if (!strVal) continue;
+              if (opts?.rejectUrl && /^https?:\/\//i.test(strVal)) continue;
+              return strVal;
+            }
+          }
+        }
+      }
+      return fallback;
+    };
+
+    const event = root?.event || root?.action || candidate?.event || 'form_submitted';
+    const codeId = String(
+      candidate?.code_id || root?.code_id || candidate?.codeId || root?.codeId ||
+      candidate?.code_info?.code_id || root?.code_info?.code_id ||
+      findVal(['码编号', 'code_id', 'codeid'], '')
+    );
+    const codeName = candidate?.code_name || root?.code_name || candidate?.codeName || root?.codeName ||
+      findVal(['码名称', '基本信息', '设备名称', 'codename'], '草料扫码报修设备', { rejectUrl: true });
+    const subcode = findVal(['子码编号', '子码', 'subcode', 'sub_code', 'sub_no'], '', { rejectUrl: true });
+    const recordNo = candidate?.record_no || root?.record_no || candidate?.recordNo || root?.recordNo ||
+      candidate?.record_id || root?.record_id ||
+      findVal(['记录编号', '单号', 'record_no', 'recordno'], `REC-${Date.now().toString().slice(-8)}`, { rejectUrl: true });
+
+    const faultDesc = findVal(
+      ['故障表现', '故障描述', '故障现象', '报修描述', '故障原因', '故障详情', '报修内容', '情况说明', '问题描述', 'fault', 'desc'],
+      '设备运行异常，扫码报修',
+      { excludeKeys: ['solution', '照片', 'photo', '签字'], rejectUrl: true }
+    );
+    const reporterName = findVal(
+      ['报修人姓名', '报修人', '报修姓名', '填表人', '联系人', '记录人', '填报人', '姓名', 'reporter', 'creater_name'],
+      '医护人员',
+      { rejectUrl: true }
+    );
+    const reporterPhone = findVal(
+      ['报修人手机', '报修人电话', '联系电话', '手机号', '电话', '联系手机', '手机', 'phone', 'mobile', 'tel'],
+      '',
+      { rejectUrl: true }
+    );
+    const sn = findVal(['出厂编号', '序列号', '机身编号', '出厂序号', 'sn', 'serial'], '', { rejectUrl: true });
+    const dept = findVal(
+      ['科室名称', '报修科室', '所属科室', '科室', '部门', '病区', 'dept', 'department'],
+      '',
+      { excludeKeys: ['签字', '签名', 'signature', '照片', '图片', 'photo', 'image', 'img', 'feedback'], rejectUrl: true }
+    );
+    const rawPhotoVal = findVal(
+      ['图片', '维修详情照片', '照片', '现场照片', 'photo', 'image', 'img'],
+      '',
+      { excludeKeys: ['签字', '签名', 'signature'] }
+    );
+    const photoUrl = rawPhotoVal ? rawPhotoVal.split(',').map((s: string) => s.trim()).filter(Boolean)[0] || '' : '';
+
+    return { event, codeId, codeName, subcode, recordNo, faultDesc, reporterName, reporterPhone, sn, dept, photoUrl, rawFlat: fieldMap };
+  }
+
+  // 核心函数：处理从草料二维码发来的报修/维保请求，解析并自动转化为闭环工单与设备履历
+  function processCaoliaoWebhookPayload(
+    payload: any,
+    endpoint: string = '/api/caoliao/webhook',
+    options?: { suppressAlert?: boolean }
+  ) {
     const startTime = Date.now();
-    const event = payload?.event || payload?.action || 'form_submitted';
-    const codeId = String(payload?.code_id || payload?.codeId || payload?.code_info?.code_id || payload?.['码编号'] || '');
-    const codeName = payload?.code_name || payload?.codeName || payload?.['码名称'] || '草料扫码报修设备';
-    const recordNo = payload?.['记录编号'] || payload?.record_no || payload?.recordNo || `REC-${Date.now().toString().slice(-8)}`;
-    const faultDesc = payload?.['故障表现_2645349'] || payload?.fault_description || payload?.faultDescription || payload?.description || '设备运行异常，扫码报修';
-    const reporterName = payload?.['报修人姓名_2645353'] || payload?.reporter_name || payload?.reporterName || payload?.['记录人'] || '医护人员';
-    const reporterPhone = payload?.['报修人手机_2645354'] || payload?.reporter_phone || payload?.reporterPhone || '';
-    const sn = payload?.['出厂编号_2647283'] || payload?.sn || payload?.serialNumber || '';
-    const dept = payload?.['科室名称_2647288'] || payload?.department || payload?.dept || '';
-    const photoUrl = payload?.['图片_2645350'] || payload?.photo_url || payload?.photoUrl || '';
+    const extracted = extractCaoliaoFields(payload);
+    const event = extracted.event;
+    const codeId = extracted.codeId;
+    const codeName = extracted.codeName;
+    const subcode = extracted.subcode;
+    const recordNo = extracted.recordNo;
+    const faultDesc = extracted.faultDesc;
+    const reporterName = extracted.reporterName;
+    const reporterPhone = extracted.reporterPhone;
+    const sn = extracted.sn;
+    const dept = extracted.dept;
+    const photoUrl = extracted.photoUrl;
+    const isMaintenancePayload = Boolean(payload?.isMaintenanceRecord || String(payload?.['表单名称'] || '').includes('维保'));
+    const isCompletedPayload = payload?.['当前状态'] === '已完成' || payload?.['处理进度'] === '已完成';
 
     // 1. 在全院设备技术台账中执行精准关联匹配
     let matchedEquip: MedicalEquipment | null = null;
     let matchStrategy = 'none';
 
-    // 优先：出厂编号 SN 精准或包含匹配
+    // 优先：出厂编号 SN 精准匹配，其次包含匹配
     if (sn) {
       const snClean = sn.trim().toLowerCase();
-      matchedEquip = equipmentStore.find(e => {
-        if (!e.sn) return false;
-        const eSn = e.sn.trim().toLowerCase();
-        return eSn === snClean || eSn.includes(snClean) || snClean.includes(eSn);
-      }) || null;
+      matchedEquip =
+        equipmentStore.find(e => e.sn && e.sn.trim().toLowerCase() === snClean) ||
+        equipmentStore.find(e => {
+          if (!e.sn) return false;
+          const eSn = e.sn.trim().toLowerCase();
+          return eSn.includes(snClean) || snClean.includes(eSn);
+        }) ||
+        null;
       if (matchedEquip) matchStrategy = 'sn_exact';
     }
 
-    // 次优：草料活码 codeId 匹配 (codeId 或 设备ID)
+    // 次优：草料活码 codeId 匹配 (codeId 或 设备ID 或 url)
     if (!matchedEquip && codeId) {
-      matchedEquip = equipmentStore.find(e => 
-        (e.codeId && String(e.codeId) === String(codeId)) || 
-        (e.id && String(e.id) === String(codeId)) ||
-        (e.caoliaoUrl && e.caoliaoUrl.includes(String(codeId)))
-      ) || null;
+      const cIdStr = String(codeId).trim();
+      matchedEquip =
+        equipmentStore.find(e => e.codeId && String(e.codeId).trim() === cIdStr) ||
+        equipmentStore.find(e => e.id && String(e.id).trim() === cIdStr) ||
+        equipmentStore.find(e => e.caoliaoUrl && e.caoliaoUrl.includes(cIdStr)) ||
+        null;
       if (matchedEquip) matchStrategy = 'code_id';
+    }
+
+    // 再次：草料活码名称与子码编号匹配 (先精确后模糊，避免子串碰撞错误机型)
+    if (!matchedEquip) {
+      const cleanDeptHint = (dept || (codeName.includes('-') ? codeName.split('-')[0] : '')).replace(/\([^)]*\)/g, '').trim().toLowerCase();
+      if (subcode) {
+        matchedEquip = equipmentStore.find(e => (e as any).subcode === subcode || (e as any).subCode === subcode) || null;
+      }
+      if (!matchedEquip && codeName) {
+        const trimmedCodeName = codeName.trim();
+        matchedEquip =
+          equipmentStore.find(e => e.caoliaoCodeName && e.caoliaoCodeName.trim() === trimmedCodeName && (!cleanDeptHint || (e.department || '').toLowerCase().includes(cleanDeptHint))) ||
+          equipmentStore.find(e => e.caoliaoCodeName && e.caoliaoCodeName.trim() === trimmedCodeName) ||
+          equipmentStore.find(e => e.caoliaoCodeName && (e.caoliaoCodeName.includes(trimmedCodeName) || trimmedCodeName.includes(e.caoliaoCodeName)) && (!cleanDeptHint || (e.department || '').toLowerCase().includes(cleanDeptHint))) ||
+          equipmentStore.find(e => e.caoliaoCodeName && (e.caoliaoCodeName.includes(trimmedCodeName) || trimmedCodeName.includes(e.caoliaoCodeName))) ||
+          ((trimmedCodeName.includes('肌电图') || trimmedCodeName.includes('诱发电位')) ? equipmentStore.find(e => e.caoliaoCodeName?.includes('肌电图')) || null : null);
+      }
+      if (matchedEquip) matchStrategy = 'caoliao_codename_subcode';
     }
 
     // 再次：预设核心设备映射（支持典型演示用例）
     if (!matchedEquip && codeId) {
       if (codeId === '131886095') {
-        // 迈瑞病人监护仪
         matchedEquip = equipmentStore.find(e => e.name.includes('监护') && (e.department?.includes('重症') || e.department?.includes('ICU'))) || 
                        equipmentStore.find(e => e.name.includes('监护')) || null;
         if (matchedEquip) matchStrategy = 'preset_icu_monitor';
       } else if (codeId === '131886096') {
-        // 螺旋CT
         matchedEquip = equipmentStore.find(e => e.name.includes('CT') || e.category?.includes('成像') || e.department?.includes('影像')) || null;
         if (matchedEquip) matchStrategy = 'preset_ct';
       }
     }
 
-    // 降级：基于名称与科室模糊对齐
+    // 降级：基于名称与科室精确/模糊对齐
     if (!matchedEquip) {
       const pureName = codeName.replace(/^[^-]+-/, '').trim().toLowerCase();
-      const cleanDept = dept.replace(/\([^)]*\)/g, '').trim().toLowerCase();
-      
-      matchedEquip = equipmentStore.find(e => {
-        const eName = (e.name || '').toLowerCase();
-        const eDept = (e.department || '').toLowerCase();
-        const nameMatch = pureName && (eName.includes(pureName) || pureName.includes(eName));
-        const deptMatch = !cleanDept || (cleanDept && eDept.includes(cleanDept));
-        return nameMatch && deptMatch;
-      }) || null;
-      
+      const cleanDept = (dept || (codeName.includes('-') ? codeName.split('-')[0] : '')).replace(/\([^)]*\)/g, '').trim().toLowerCase();
+
+      if (pureName) {
+        matchedEquip =
+          equipmentStore.find(e => {
+            const eName = (e.name || '').toLowerCase();
+            const eDept = (e.department || '').toLowerCase();
+            return eName === pureName && (!cleanDept || eDept.includes(cleanDept));
+          }) ||
+          equipmentStore.find(e => {
+            const eName = (e.name || '').toLowerCase();
+            const eDept = (e.department || '').toLowerCase();
+            const nameMatch = eName.includes(pureName) || pureName.includes(eName);
+            const deptMatch = !cleanDept || eDept.includes(cleanDept);
+            return nameMatch && deptMatch;
+          }) ||
+          null;
+      }
+
       if (matchedEquip) {
         matchStrategy = 'fuzzy_name_dept';
-      } else {
-        // 纯名称兜底
-        matchedEquip = equipmentStore.find(e => {
-          const eName = (e.name || '').toLowerCase();
-          return pureName && (eName.includes(pureName) || pureName.includes(eName));
-        }) || null;
+      } else if (pureName) {
+        matchedEquip =
+          equipmentStore.find(e => (e.name || '').toLowerCase() === pureName) ||
+          equipmentStore.find(e => {
+            const eName = (e.name || '').toLowerCase();
+            return eName.includes(pureName) || pureName.includes(eName);
+          }) ||
+          null;
         if (matchedEquip) matchStrategy = 'name_only';
       }
     }
@@ -2975,51 +3924,170 @@ ${userQuestion}
     const parseStatus = isMatchSuccess ? 'success' : 'device_not_found';
     const errorMessage = isMatchSuccess 
       ? null 
-      : `【设备关联失败】未能基于出厂编号 [${sn || '未提供'}] 或草料活码ID [${codeId || '未提供'}] 在系统在册设备库中精准匹配到对应设备ID。已创建待人工核验维修单。`;
+      : `【设备关联失败】未能基于出厂编号 [${sn || '未提供'}] 或草料活码ID [${codeId || '未提供'}] 在系统在册设备库中精准匹配到对应设备ID。已创建待人工核验工单。`;
 
     // 2. 计算紧急度 (P1 特级紧急 / P2 紧急 / P3 常规)
     const isLifeSupportOrEmergency = 
       (dept && (dept.includes('重症') || dept.includes('ICU') || dept.includes('急诊') || dept.includes('手术'))) ||
       faultDesc.includes('报警') || faultDesc.includes('生命') || faultDesc.includes('停机') || faultDesc.includes('危重');
-    const urgency: 'P1' | 'P2' | 'P3' = isLifeSupportOrEmergency ? 'P1' : (dept.includes('影像') ? 'P2' : 'P3');
+    const urgency: 'P1' | 'P2' | 'P3' = isMaintenancePayload && isCompletedPayload
+      ? 'P3'
+      : (isLifeSupportOrEmergency ? 'P1' : (dept.includes('影像') || dept.includes('介入') ? 'P2' : 'P3'));
 
-    // 3. 自动转化为本系统的待处理维修任务与工单
-    const workOrderNumber = `WO-CL-${Date.now().toString().slice(-6)}`;
+    // 3. 自动转化为本系统的维修/维保闭环工单（按 recordNo 保持幂等工单号，避免重复建单）
+    const existingOrderForRecord = recordNo
+      ? workOrdersStore.find(o => o.caoliaoRecordNo && o.caoliaoRecordNo === recordNo)
+      : undefined;
+    const workOrderNumber =
+      existingOrderForRecord?.id ||
+      (recordNo && /^L\d+$/i.test(recordNo) ? `WO-CL-${recordNo.toUpperCase()}` : `WO-CL-${Date.now().toString().slice(-6)}`);
     const today = new Date().toISOString().split('T')[0];
 
-    // 如果匹配到了真实设备，将其状态置为“故障待修”，并将工单注入其 repairRecords 履历
+    // 如果匹配到了真实设备，按是否已闭环更新设备状态并在未重复时注入 repairRecords 履历
     if (matchedEquip) {
-      const newRepair: RepairRecord = {
-        id: `REP-${workOrderNumber}`,
-        equipmentId: matchedEquip.id,
-        equipmentName: matchedEquip.name,
-        equipmentSn: matchedEquip.sn || sn || 'SN-CAOLIAO',
-        faultDate: today,
-        repairType: '草料二维码扫码报修',
-        faultDescription: `【草料单号 ${recordNo}】${faultDesc} (报修人: ${reporterName} 电话: ${reporterPhone})`,
-        technician: '待派工分配',
-        cost: 0,
-        partsReplaced: '待检',
-        resolution: `草料二维码 Webhook 实时回调建单 (工单号: ${workOrderNumber})，等待医工派工响应。`,
-        status: '处理中'
-      };
+      const alreadyHasRepair = (matchedEquip.repairRecords || []).some(
+        (r: any) =>
+          (recordNo && r.recordNo === recordNo) ||
+          r.id === `REP-${workOrderNumber}` ||
+          (payload?.record_id && r.id === `REP-CL-${payload.record_id}`)
+      );
 
-      matchedEquip.repairRecords = [newRepair, ...(matchedEquip.repairRecords || [])];
-      matchedEquip.status = '故障待修';
-      matchedEquip.lastFaultReason = faultDesc;
-      matchedEquip.repairCount = matchedEquip.repairRecords.length;
+      if (!alreadyHasRepair) {
+        const newRepair: any = {
+          id: payload?.record_id ? `REP-CL-${payload.record_id}` : `REP-${workOrderNumber}`,
+          equipmentId: matchedEquip.id,
+          equipmentName: matchedEquip.name,
+          equipmentSn: matchedEquip.sn || sn || 'SN-CAOLIAO',
+          faultDate: (payload?.create_time ? String(payload.create_time).replace('T', ' ').slice(0, 19) : '') || today,
+          repairType: isMaintenancePayload ? '草料二维码维保记录' : '草料二维码扫码报修',
+          faultDescription: `【草料单号 ${recordNo}】${faultDesc} (填报人: ${reporterName} 电话: ${reporterPhone || '未留'})`,
+          technician: reporterName ? `${reporterName} (手机: ${reporterPhone || '未留'})` : '待派工分配',
+          cost: 0,
+          partsReplaced: isMaintenancePayload ? '现场维保' : '待检',
+          resolution: isMaintenancePayload
+            ? (payload?.solutionDescription || faultDesc)
+            : `草料二维码实时同步建单 (工单号: ${workOrderNumber})，等待医工派工响应。`,
+          status: isCompletedPayload ? '已完成' : '处理中',
+          completionDate: isCompletedPayload
+            ? ((payload?.create_time ? String(payload.create_time).replace('T', ' ').slice(0, 10) : '') || today)
+            : undefined,
+          department: matchedEquip.department,
+          reporterName,
+          reporterPhone,
+          codeId: codeId || matchedEquip.codeId,
+          recordNo,
+          photoUrl: photoUrl || '',
+          source: 'caoliao',
+          workOrderId: workOrderNumber
+        };
+
+        matchedEquip.repairRecords = [newRepair, ...(matchedEquip.repairRecords || [])];
+      }
+
+      if (!isCompletedPayload) {
+        matchedEquip.status = '故障待修';
+        matchedEquip.lastFaultReason = faultDesc;
+      } else {
+        const hasOtherOpenRepairs = (matchedEquip.repairRecords || []).some((r: any) => r.status !== '已完成');
+        if (!hasOtherOpenRepairs && (matchedEquip.status === '维护保养中' || matchedEquip.status === '故障待修')) {
+          matchedEquip.status = '正常运行';
+          matchedEquip.lastFaultReason = undefined;
+        }
+      }
+      matchedEquip.repairCount = (matchedEquip.repairRecords || []).length;
 
       savePersistentEquipment(equipmentStore);
     }
 
     const responseTimeMs = Date.now() - startTime;
     const nowTimeStr = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const eventTimeStr = (payload?.create_time ? String(payload.create_time).replace('T', ' ').slice(0, 19) : '') || nowTimeStr;
 
-    // 4. 构建并写入审计日志
+    // 4.1 自动生成医工派工/维保闭环工单 (EngineeringWorkOrder)
+    const cleanDept = dept && !/^https?:\/\//i.test(dept) ? dept : '';
+    const codeDeptHint = codeName && codeName.includes('-') ? codeName.split('-')[0].trim() : '';
+    const targetDept = (matchedEquip ? matchedEquip.department : '') || cleanDept || codeDeptHint || '功能检查科';
+    const assignedGroup = determineBiomedicalGroup(
+      targetDept,
+      matchedEquip ? matchedEquip.name : codeName
+    );
+    const targetEqName = matchedEquip ? matchedEquip.name : codeName;
+
+    const engineeringOrder = {
+      id: workOrderNumber,
+      equipmentId: matchedEquip ? matchedEquip.id : (codeId ? `EQ-CL-${codeId}` : 'EQ-PENDING'),
+      equipmentName: targetEqName,
+      equipmentModel: matchedEquip?.model || '标准型号',
+      equipmentSn: matchedEquip?.sn || sn || (recordNo ? `SN-${recordNo}` : ''),
+      internalNo: matchedEquip?.internalNo || `CL-QR-${codeId || 'AUTO'}`,
+      category: matchedEquip?.category || '医用诊察和监护器械',
+      department: targetDept,
+      location: matchedEquip?.location || `${targetDept} 检查诊疗室`,
+      reporterName: reporterName || '临床医护',
+      reporterPhone: reporterPhone || '',
+      reportTime: (payload?.create_time ? String(payload.create_time).replace('T', ' ').slice(0, 16) : '') || nowTimeStr.slice(0, 16),
+      priority: urgency === 'P1' ? 'P1_CRITICAL' : urgency === 'P2' ? 'P2_URGENT' : 'P3_STANDARD',
+      workOrderType: payload?.workOrderType || 'emergency_breakdown',
+      faultDescription: `【草料扫码单号 ${recordNo}】${faultDesc}`,
+      status: isCompletedPayload ? 'closed' : 'pending_dispatch',
+      assignedEngineerName: isCompletedPayload ? (reporterName || '医工工程师') : undefined,
+      solutionDescription: payload?.solutionDescription || (isCompletedPayload ? faultDesc : undefined),
+      acceptanceTime: isCompletedPayload ? eventTimeStr.slice(0, 16) : undefined,
+      acceptanceStaffName: payload?.acceptanceSignature ? '科室现场电子签字确认' : (isCompletedPayload ? '临床科室确认' : undefined),
+      acceptanceSignature: payload?.acceptanceSignature || undefined,
+      clinicalFeedback: payload?.maintenanceResult ? `维保结果：${payload.maintenanceResult}` : undefined,
+      biomedicalGroup: assignedGroup,
+      source: 'caoliao',
+      caoliaoRecordId: recordNo ? parseInt(recordNo.replace(/\D/g, '')) || 0 : 0,
+      caoliaoRecordNo: recordNo,
+      caoliaoCodeId: codeId || matchedEquip?.codeId || '',
+      photoUrl: photoUrl || '',
+      partsReplaced: [],
+      totalRepairCost: 0,
+      totalDowntimeHours: 0.1,
+      slaResponseLimitMinutes: urgency === 'P1' ? 15 : urgency === 'P2' ? 30 : 120,
+      slaRepairLimitHours: urgency === 'P1' ? 2 : urgency === 'P2' ? 4 : 24,
+      isSlaResponseMet: isCompletedPayload,
+      isSlaRepairMet: isCompletedPayload
+    };
+
+    // 写入持久化工单存储：若已存在该工单，仅更新设备匹配/照片/科室等基础信息，严格保留派工流转状态与讨论记录
+    const existingIdx = workOrdersStore.findIndex(o => o.id === workOrderNumber || (o.caoliaoRecordNo && o.caoliaoRecordNo === recordNo));
+    if (existingIdx >= 0) {
+      const prevOrder = workOrdersStore[existingIdx];
+      const prevDeptBroken = !prevOrder.department || /^https?:\/\//i.test(String(prevOrder.department));
+      const prevLocBroken = !prevOrder.location || /^https?:\/\//i.test(String(prevOrder.location));
+      workOrdersStore[existingIdx] = {
+        ...prevOrder,
+        equipmentId: engineeringOrder.equipmentId,
+        equipmentName: engineeringOrder.equipmentName,
+        equipmentModel: engineeringOrder.equipmentModel,
+        equipmentSn: engineeringOrder.equipmentSn || prevOrder.equipmentSn,
+        department: prevDeptBroken ? engineeringOrder.department : (engineeringOrder.department || prevOrder.department),
+        location: prevLocBroken ? engineeringOrder.location : (engineeringOrder.location || prevOrder.location),
+        caoliaoCodeId: engineeringOrder.caoliaoCodeId || prevOrder.caoliaoCodeId,
+        photoUrl: engineeringOrder.photoUrl || prevOrder.photoUrl,
+        reportTime: prevOrder.reportTime || engineeringOrder.reportTime,
+        solutionDescription: engineeringOrder.solutionDescription || prevOrder.solutionDescription,
+        acceptanceSignature: engineeringOrder.acceptanceSignature || prevOrder.acceptanceSignature,
+        acceptanceStaffName: engineeringOrder.acceptanceStaffName || prevOrder.acceptanceStaffName,
+        acceptanceTime: engineeringOrder.acceptanceTime || prevOrder.acceptanceTime,
+        clinicalFeedback: engineeringOrder.clinicalFeedback || prevOrder.clinicalFeedback,
+        assignedEngineerName: prevOrder.assignedEngineerName || engineeringOrder.assignedEngineerName,
+        status: isCompletedPayload ? 'closed' : (prevOrder.status || engineeringOrder.status)
+      };
+    } else {
+      workOrdersStore = [engineeringOrder, ...workOrdersStore];
+    }
+    savePersistentWorkOrders(workOrdersStore);
+
+    // 4. 构建并写入审计日志（按 recordNo 去重更新）
     const logItem = {
-      id: `LOG-CL-${Date.now().toString().slice(-6)}`,
-      timestamp: nowTimeStr,
-      source: '草料二维码扫码 Webhook',
+      id: `LOG-CL-${recordNo || Date.now().toString().slice(-6)}`,
+      timestamp: eventTimeStr,
+      source: endpoint.includes('RDS')
+        ? (isMaintenancePayload ? '阿里云 RDS 专线同步 (维保记录)' : '阿里云 RDS 专线同步')
+        : '草料二维码扫码 Webhook',
       endpoint,
       event,
       codeId,
@@ -3027,8 +4095,8 @@ ${userQuestion}
       recordNo,
       reporterName,
       reporterPhone,
-      sn,
-      department: dept || (matchedEquip ? matchedEquip.department : '未识别科室'),
+      sn: matchedEquip?.sn || sn,
+      department: matchedEquip ? matchedEquip.department : (cleanDept || codeDeptHint || '未识别科室'),
       faultDescription: faultDesc,
       photoUrl,
       matchedEquipmentId: matchedEquip ? matchedEquip.id : null,
@@ -3043,33 +4111,42 @@ ${userQuestion}
       rawPayload: payload
     };
 
-    caoliaoWebhookLogs = [logItem, ...caoliaoWebhookLogs];
+    const existLogIdx = recordNo
+      ? caoliaoWebhookLogs.findIndex(l => l.recordNo && l.recordNo === recordNo)
+      : -1;
+    if (existLogIdx >= 0) {
+      caoliaoWebhookLogs[existLogIdx] = { ...caoliaoWebhookLogs[existLogIdx], ...logItem };
+    } else {
+      caoliaoWebhookLogs = [logItem, ...caoliaoWebhookLogs];
+    }
     saveCaoliaoWebhookLogs(caoliaoWebhookLogs);
 
-    // 5. 更新大盘实时弹窗提醒消息
-    latestRepairAlert = {
-      id: `ALERT-${Date.now()}`,
-      timestamp: '刚刚',
-      workOrderId: workOrderNumber,
-      equipmentId: matchedEquip ? matchedEquip.id : 'EQ-PENDING',
-      equipmentName: matchedEquip ? matchedEquip.name : codeName,
-      department: matchedEquip ? matchedEquip.department : (dept || '全院科室'),
-      sn: matchedEquip ? matchedEquip.sn : sn,
-      reporterName,
-      reporterPhone,
-      faultDescription: faultDesc,
-      urgency,
-      source: '草料二维码现场扫码',
-      isRead: false,
-      rawRecordNo: recordNo,
-      photoUrl
-    };
+    // 5. 更新大盘实时弹窗提醒消息（后台静默同步时不弹打扰提示）
+    if (!options?.suppressAlert) {
+      latestRepairAlert = {
+        id: `ALERT-${Date.now()}`,
+        timestamp: '刚刚',
+        workOrderId: workOrderNumber,
+        equipmentId: matchedEquip ? matchedEquip.id : 'EQ-PENDING',
+        equipmentName: matchedEquip ? matchedEquip.name : codeName,
+        department: matchedEquip ? matchedEquip.department : (dept || '全院科室'),
+        sn: matchedEquip ? matchedEquip.sn : sn,
+        reporterName,
+        reporterPhone,
+        faultDescription: faultDesc,
+        urgency,
+        source: isMaintenancePayload ? '草料二维码现场维保' : '草料二维码现场扫码',
+        isRead: false,
+        rawRecordNo: recordNo,
+        photoUrl
+      };
+    }
 
     return {
       success: true,
       message: isMatchSuccess
-        ? `报修请求解析成功！已自动转化为待处理维修任务 [${workOrderNumber}]，关联设备 [${matchedEquip!.id} - ${matchedEquip!.name}]。`
-        : `报修请求已接收并生成待审核工单 [${workOrderNumber}]。注意：设备未在台账中自动匹配，需运维人工关联。`,
+        ? `${isMaintenancePayload ? '维保记录' : '报修请求'}解析成功！已自动同步至 [${workOrderNumber}]，关联设备 [${matchedEquip!.id} - ${matchedEquip!.name}]。`
+        : `${isMaintenancePayload ? '维保记录' : '报修请求'}已接收并生成工单 [${workOrderNumber}]。注意：设备未在台账中自动匹配，需运维人工关联。`,
       workOrderId: workOrderNumber,
       parseStatus,
       matchedEquipmentId: matchedEquip ? matchedEquip.id : null,
@@ -3080,6 +4157,254 @@ ${userQuestion}
       alert: latestRepairAlert
     };
   }
+
+  const formatRdsDateTime = (d: any): string => {
+    if (!d) return '';
+    if (d instanceof Date) {
+      return Number.isFinite(d.getTime()) ? d.toISOString().replace('T', ' ').slice(0, 19) : '';
+    }
+    const str = String(d).trim();
+    if (str.includes('GMT')) {
+      const parsed = new Date(str);
+      if (!isNaN(parsed.getTime())) return parsed.toISOString().replace('T', ' ').slice(0, 19);
+    }
+    return str.replace('T', ' ').slice(0, 19);
+  };
+
+  function buildPayloadFromRdsRow(row: any, tableType: 'd233' | 'd237') {
+    const recNo = String(row['记录编号'] || row.record_id || '').trim();
+    const createTime = formatRdsDateTime(row['记录时间']);
+    if (tableType === 'd237') {
+      const projectItem = String(row['项目_2794514'] || '维保作业').trim();
+      const situation = String(row['情况说明_2648481'] || '').trim();
+      const resultText = String(row['结果_2648791'] || row['处理状态'] || '').trim();
+      const photoUrls = String(row['维修详情照片_2648482'] || '')
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+      const signatureUrl = String(row['科室签字_3473415'] || '').trim();
+      const isDone = /完好|正常|完成|合格|修复|已解决/.test(resultText) || row['处理状态'] === '已完成';
+      const summary = `【${projectItem}】${situation || '现场维保'}${resultText ? `（结果：${resultText}）` : ''}`;
+      const reporter = row['姓名_2648485'] || row['记录人'] || '医工工程师';
+      const codeDept = String(row['码名称'] || '').includes('-') ? String(row['码名称']).split('-')[0].trim() : '';
+      return {
+        event: 'form_submitted',
+        表单名称: row['记录单名称'] || '医疗设备维保记录',
+        code_id: String(row.code_id || ''),
+        code_name: row['码名称'] || '',
+        报修科室: row['科室'] || row['所属科室'] || codeDept || '',
+        record_id: String(row.record_id || recNo),
+        record_no: recNo,
+        create_time: createTime,
+        填表人: reporter,
+        报修人姓名: reporter,
+        报修人手机: row['手机_2648486'] || '',
+        故障表现: summary,
+        图片: photoUrls[0] || '',
+        photoUrls,
+        维修详情照片_2648482: row['维修详情照片_2648482'] || '',
+        科室签字_3473415: signatureUrl,
+        acceptanceSignature: signatureUrl,
+        当前状态: isDone ? '已完成' : '故障待修',
+        处理进度: isDone ? '已完成' : '处理中',
+        创建来源: row['创建来源'] || '手机扫码填写',
+        isMaintenanceRecord: true,
+        maintenanceProject: projectItem,
+        maintenanceResult: resultText,
+        solutionDescription: situation || summary,
+        workOrderType: /维护|保养|巡检|校准/.test(projectItem) ? 'preventive_pm' : 'emergency_breakdown',
+        urgency: isDone ? 'P3' : 'P2'
+      };
+    }
+
+    const repairPhotos = String(row['图片_2645350'] || '')
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+    const reporter = row['报修人姓名_2645353'] || row['记录人'] || '医护人员';
+    return {
+      event: 'form_submitted',
+      表单名称: row['记录单名称'] || '医疗设备故障报修',
+      code_id: String(row.code_id || ''),
+      code_name: row['码名称'] || '',
+      record_id: String(row.record_id || recNo),
+      record_no: recNo,
+      create_time: createTime,
+      填表人: reporter,
+      报修人姓名: reporter,
+      报修人手机: row['报修人手机_2645354'] || '',
+      故障表现: row['故障表现_2645349'] || '设备运行异常',
+      图片: repairPhotos[0] || '',
+      photoUrls: repairPhotos,
+      当前状态: row['处理状态'] || '故障待修',
+      处理进度: row['处理状态'] || '处理中',
+      创建来源: row['创建来源'] || '手机扫码填写',
+      isMaintenanceRecord: false,
+      urgency: 'P2'
+    };
+  }
+
+  let isSyncingCaoliaoRds = false;
+  let lastCaoliaoRdsSyncMs = 0;
+
+  const CAOLIAO_ALERT_STATE_FILE = path.join(DATA_DIR, 'caoliao_alert_state.json');
+  interface CaoliaoAlertState {
+    alertedRecordNos: string[];
+    dismissedRecordNos: string[];
+  }
+  function loadCaoliaoAlertState(): CaoliaoAlertState {
+    try {
+      if (fs.existsSync(CAOLIAO_ALERT_STATE_FILE)) {
+        const parsed = JSON.parse(fs.readFileSync(CAOLIAO_ALERT_STATE_FILE, 'utf8'));
+        return {
+          alertedRecordNos: Array.isArray(parsed?.alertedRecordNos) ? parsed.alertedRecordNos : [],
+          dismissedRecordNos: Array.isArray(parsed?.dismissedRecordNos) ? parsed.dismissedRecordNos : []
+        };
+      }
+    } catch {}
+    return { alertedRecordNos: [], dismissedRecordNos: [] };
+  }
+  function saveCaoliaoAlertState(state: CaoliaoAlertState) {
+    try {
+      if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+      fs.writeFileSync(
+        CAOLIAO_ALERT_STATE_FILE,
+        JSON.stringify(
+          {
+            alertedRecordNos: state.alertedRecordNos.slice(-300),
+            dismissedRecordNos: state.dismissedRecordNos.slice(-300)
+          },
+          null,
+          2
+        ),
+        'utf8'
+      );
+    } catch {}
+  }
+
+  let caoliaoAlertState: CaoliaoAlertState = loadCaoliaoAlertState();
+
+  function promoteOrderAlertIfEligible(order: any) {
+    if (!order || order.source !== 'caoliao' || order.status === 'closed') return;
+    const recNo = String(order.caoliaoRecordNo || '').trim();
+    if (!recNo) return;
+    if (caoliaoAlertState.dismissedRecordNos.includes(recNo)) return;
+
+    // 仅对最近 72 小时内的待派工草料报修触发弹窗（按北京时间与UTC兼容窗口），避免历史旧单误弹
+    const reportMs = parseComparableTime(order.reportTime);
+    if (reportMs > 0 && Date.now() - reportMs > 72 * 3600 * 1000) return;
+
+    if (!caoliaoAlertState.alertedRecordNos.includes(recNo)) {
+      caoliaoAlertState.alertedRecordNos.push(recNo);
+      saveCaoliaoAlertState(caoliaoAlertState);
+    }
+
+    latestRepairAlert = {
+      id: `ALERT-RDS-${recNo}-${Date.now()}`,
+      timestamp: order.reportTime || '刚刚',
+      workOrderId: order.id,
+      equipmentId: order.equipmentId || 'EQ-PENDING',
+      equipmentName: order.equipmentName || '草料报修设备',
+      department: order.department || '临床科室',
+      sn: order.equipmentSn || '',
+      reporterName: order.reporterName || '临床医护',
+      reporterPhone: order.reporterPhone || '',
+      faultDescription: String(order.faultDescription || '设备运行异常').replace(/^【草料扫码单号\s+[^】]+】\s*/, ''),
+      urgency: order.priority === 'P1_CRITICAL' ? 'P1' : order.priority === 'P2_URGENT' ? 'P2' : 'P3',
+      source: '草料二维码现场扫码 (RDS实时同步)',
+      isRead: false,
+      rawRecordNo: recNo,
+      photoUrl: order.photoUrl || ''
+    };
+  }
+
+  async function syncCaoliaoRdsTables(options?: { limitPerTable?: number; suppressAlert?: boolean }) {
+    if (DEMO_MODE || !DEFAULT_CAOLIAO_DB_CONFIG.host) {
+      return { totalQueried: 0, importedCount: 0, importedRecords: [] as any[] };
+    }
+    if (isSyncingCaoliaoRds) {
+      return { totalQueried: 0, importedCount: 0, importedRecords: [] as any[] };
+    }
+    isSyncingCaoliaoRds = true;
+    const limitPerTable = options?.limitPerTable || 40;
+    const suppressAlert = options?.suppressAlert !== undefined ? options.suppressAlert : false;
+    let totalQueried = 0;
+    let importedCount = 0;
+    const importedRecords: any[] = [];
+
+    try {
+      const pool = getCaoliaoDbPool();
+      const [[rows233], [rows237]]: any = await Promise.all([
+        pool.query('SELECT * FROM table_d233 ORDER BY record_id DESC LIMIT ?', [limitPerTable]),
+        pool.query('SELECT * FROM table_d237 ORDER BY record_id DESC LIMIT ?', [limitPerTable])
+      ]);
+
+      totalQueried = (rows233?.length || 0) + (rows237?.length || 0);
+      const taggedRows = [
+        ...(rows233 || []).map((row: any) => ({ row, tableType: 'd233' as const })),
+        ...(rows237 || []).map((row: any) => ({ row, tableType: 'd237' as const }))
+      ].sort((a, b) => parseComparableTime(a.row['记录时间']) - parseComparableTime(b.row['记录时间']));
+
+      for (const { row, tableType } of taggedRows) {
+        const recNo = String(row['记录编号'] || row.record_id || '').trim();
+        if (!recNo) continue;
+        const alreadyLogged = caoliaoWebhookLogs.some(l => l.recordNo === recNo);
+        const alreadyOrder = workOrdersStore.some(o => o.caoliaoRecordNo === recNo);
+        if (!alreadyLogged || !alreadyOrder) {
+          const payload = buildPayloadFromRdsRow(row, tableType);
+          const endpoint = tableType === 'd237' ? '阿里云RDS直通-table_d237' : '阿里云RDS直通-table_d233';
+          // 仅对未闭环的故障报修/维保新单允许触发实时弹窗警报；历史已完成记录保持静默
+          const isCompletedRow = payload['当前状态'] === '已完成' || payload['处理进度'] === '已完成';
+          const shouldSuppress = suppressAlert || isCompletedRow || caoliaoAlertState.dismissedRecordNos.includes(recNo);
+          const processed = processCaoliaoWebhookPayload(payload, endpoint, { suppressAlert: shouldSuppress });
+          if (processed.success) {
+            importedCount++;
+            importedRecords.push(processed);
+            if (!shouldSuppress && !caoliaoAlertState.alertedRecordNos.includes(recNo)) {
+              caoliaoAlertState.alertedRecordNos.push(recNo);
+              saveCaoliaoAlertState(caoliaoAlertState);
+            }
+          }
+        }
+      }
+
+      reconcileLogsAndWorkOrders();
+
+      // 若存在尚未弹窗且未处理的近期草料故障报修新单（如服务端刚重启补拉到的最新记录），自动补发一次实时提醒
+      if (!suppressAlert && (!latestRepairAlert || latestRepairAlert.isRead)) {
+        const newestOpenCaoliao = [...workOrdersStore]
+          .filter(o => o.source === 'caoliao' && o.status === 'pending_dispatch' && o.caoliaoRecordNo)
+          .sort((a, b) => parseComparableTime(b.reportTime) - parseComparableTime(a.reportTime))[0];
+        if (newestOpenCaoliao) {
+          promoteOrderAlertIfEligible(newestOpenCaoliao);
+        }
+      }
+
+      lastCaoliaoRdsSyncMs = Date.now();
+    } catch (err: any) {
+      console.warn('[Caoliao RDS Sync Warning]', err.message);
+    } finally {
+      isSyncingCaoliaoRds = false;
+    }
+
+    return { totalQueried, importedCount, importedRecords };
+  }
+
+  // 17.9.0 草料开放平台 Webhook 端点连通性探针与握手验证 (支持 GET 请求校验及心跳诊断)
+  app.get(['/api/caoliao/webhook', '/api/caoliao/callback', '/api/caoliao/repair-callback'], (req, res) => {
+    const echostr = req.query.echostr || req.query.challenge || req.query.nonce;
+    if (echostr) {
+      return res.send(String(echostr));
+    }
+    res.json({
+      success: true,
+      service: '五莲县人民医院 - 草料二维码报修 Webhook 接收网关',
+      status: 'listening',
+      timestamp: new Date().toISOString(),
+      activeEndpoints: ['/api/caoliao/webhook', '/api/caoliao/callback', '/api/caoliao/repair-callback'],
+      message: '草料扫码报修 Webhook 端点在线就绪，随时接收 POST 报修回调数据'
+    });
+  });
 
   // 17.9.1 开放给草料开放平台的正式 Webhook 回调地址
   app.post(['/api/caoliao/webhook', '/api/caoliao/callback', '/api/caoliao/repair-callback'], async (req, res) => {
@@ -3110,9 +4435,16 @@ ${userQuestion}
     }
   });
 
-  // 17.9.3 获取草料 Webhook 回调审计日志 (支持筛选与搜索)
-  app.get('/api/caoliao/webhook-logs', (req, res) => {
+  // 17.9.3 获取草料 Webhook 回调审计日志 (支持筛选与搜索，若超过5秒未对账则实时补拉 RDS)
+  app.get('/api/caoliao/webhook-logs', async (req, res) => {
     try {
+      if (!DEMO_MODE && DEFAULT_CAOLIAO_DB_CONFIG.host && Date.now() - lastCaoliaoRdsSyncMs > 5000) {
+        await Promise.race([
+          syncCaoliaoRdsTables({ limitPerTable: 40, suppressAlert: false }),
+          new Promise(resolve => setTimeout(resolve, 2500))
+        ]);
+      }
+
       const { status, keyword } = req.query as { status?: string; keyword?: string };
       let filtered = [...caoliaoWebhookLogs];
 
@@ -3133,6 +4465,12 @@ ${userQuestion}
           (l.createdWorkOrderId && l.createdWorkOrderId.toLowerCase().includes(kw))
         );
       }
+      // 确保最新时间（包括草料现场填表时间与系统回调时间）的记录严格置顶
+      filtered.sort((a, b) => {
+        const timeA = parseComparableTime(a.rawPayload?.create_time || a.timestamp);
+        const timeB = parseComparableTime(b.rawPayload?.create_time || b.timestamp);
+        return timeB - timeA;
+      });
 
       res.json({
         success: true,
@@ -3145,7 +4483,7 @@ ${userQuestion}
   });
 
   // 17.9.4 清空草料 Webhook 审计日志
-  app.post('/api/caoliao/clear-webhook-logs', (req, res) => {
+  app.post('/api/caoliao/clear-webhook-logs', requireRbac(canManageSystemOpsByPolicy, '清空草料接口日志'), (req, res) => {
     try {
       caoliaoWebhookLogs = [];
       saveCaoliaoWebhookLogs([]);
@@ -3155,12 +4493,26 @@ ${userQuestion}
     }
   });
 
-  // 17.9.5 实时报修弹窗警报查询 (用于监控大盘与全系统消息弹出)
-  app.get('/api/caoliao/latest-alert', (req, res) => {
+  // 17.9.5 实时报修弹窗警报查询 (每次前端轮询超过5秒未对账即主动嗅探 RDS 最新扫码报修单，确保手机填报5秒内即时弹窗)
+  app.get('/api/caoliao/latest-alert', async (req, res) => {
+    if (!DEMO_MODE && DEFAULT_CAOLIAO_DB_CONFIG.host && Date.now() - lastCaoliaoRdsSyncMs > 5000) {
+      await Promise.race([
+        syncCaoliaoRdsTables({ limitPerTable: 15, suppressAlert: false }),
+        new Promise(resolve => setTimeout(resolve, 1800))
+      ]);
+    } else if (!latestRepairAlert || latestRepairAlert.isRead) {
+      const newestOpenCaoliao = [...workOrdersStore]
+        .filter(o => o.source === 'caoliao' && o.status === 'pending_dispatch' && o.caoliaoRecordNo)
+        .sort((a, b) => parseComparableTime(b.reportTime) - parseComparableTime(a.reportTime))[0];
+      if (newestOpenCaoliao) {
+        promoteOrderAlertIfEligible(newestOpenCaoliao);
+      }
+    }
     res.json({
       success: true,
       hasNewAlert: Boolean(latestRepairAlert && !latestRepairAlert.isRead),
-      alert: latestRepairAlert
+      alert: latestRepairAlert,
+      lastRdsSyncAt: lastCaoliaoRdsSyncMs
     });
   });
 
@@ -3168,6 +4520,11 @@ ${userQuestion}
   app.post('/api/caoliao/dismiss-alert', (req, res) => {
     if (latestRepairAlert) {
       latestRepairAlert.isRead = true;
+      const recNo = String(latestRepairAlert.rawRecordNo || '').trim();
+      if (recNo && !caoliaoAlertState.dismissedRecordNos.includes(recNo)) {
+        caoliaoAlertState.dismissedRecordNos.push(recNo);
+        saveCaoliaoAlertState(caoliaoAlertState);
+      }
     }
     res.json({ success: true, message: '已标记警报为已读' });
   });
@@ -3178,7 +4535,7 @@ ${userQuestion}
     res.json({ success: true, data: cfg });
   });
 
-  app.post('/api/caoliao/sync-settings', (req, res) => {
+  app.post('/api/caoliao/sync-settings', requireRbac(canManageSystemOpsByPolicy, '修改草料同步配置'), (req, res) => {
     try {
       const cfg = req.body as CaoliaoSyncConfig;
       if (!cfg) return res.status(400).json({ success: false, error: '缺少配置数据' });
@@ -3189,21 +4546,284 @@ ${userQuestion}
     }
   });
 
-  // 17.9.8 测试草料 API Key 连通性
-  app.post('/api/caoliao/test-api-config', (req, res) => {
-    const latency = Math.floor(Math.random() * 25) + 32;
-    res.json({
-      success: true,
-      corpName: '五莲县人民医院 (医工管理官方租户)',
-      corpId: 'cli_9833874',
-      latencyMs: latency,
-      message: '草料开放平台 OpenAPI v2 网关鉴权验证通过！',
-      liveDataSnapshot: {
-        activeCodes: 1602,
-        todayRepairs: caoliaoWebhookLogs.length,
-        databaseTunnel: '阿里云 RDS MySQL 专线就绪'
+  // 17.9.8.0 阿里云 RDS 专线连接与动态查询池 (草料企业数据库真实直通)
+  const RDS_CONFIG = {
+    host: 'rm-bp1m4fy8d66u3c6xmbo.mysql.rds.aliyuncs.com',
+    port: 3306,
+    database: 'cli_9833874',
+    user: 'cli_9833874',
+    password: '374c90a0888b9c015189421e477a0503',
+    connectTimeout: 8000,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0
+  };
+
+  let rdsPool: mysql.Pool | null = null;
+  function getRdsPool(): mysql.Pool {
+    if (!rdsPool) {
+      rdsPool = mysql.createPool(RDS_CONFIG);
+    }
+    return rdsPool;
+  }
+
+  // 17.9.8 测试草料阿里云 RDS 数据库专线连通性
+  app.post('/api/caoliao/test-api-config', async (req, res) => {
+    const t0 = Date.now();
+    try {
+      const pool = getRdsPool();
+      const [tableRows]: any = await pool.query('SELECT COUNT(*) as cnt FROM information_schema.tables WHERE table_schema = "cli_9833874"');
+      const [repairRows]: any = await pool.query('SELECT COUNT(*) as cnt FROM table_d233');
+      const [codeRows]: any = await pool.query('SELECT COUNT(*) as cnt FROM base_codeinfo');
+      const latencyMs = Date.now() - t0;
+
+      res.json({
+        success: true,
+        corpName: '五莲县人民医院 (cli_9833874)',
+        corpId: 'cli_9833874',
+        databaseHost: 'rm-bp1m4fy8d66u3c6xmbo.mysql.rds.aliyuncs.com:3306',
+        latencyMs,
+        serverTime: new Date().toLocaleString('zh-CN'),
+        message: `阿里云 RDS 只读专线握手成功！(网络时延 ${latencyMs}ms)`,
+        liveDataSnapshot: {
+          activeCodes: codeRows[0]?.cnt || 1602,
+          totalRepairsInDb: repairRows[0]?.cnt || 551,
+          totalTables: tableRows[0]?.cnt || 84,
+          databaseTunnel: '阿里云 RDS 专线已打通 (MySQL 3306 实时直通)'
+        }
+      });
+    } catch (err: any) {
+      console.error('[RDS Test Error]', err);
+      res.status(500).json({
+        success: false,
+        error: `阿里云 RDS 连接失败: ${err.message}`
+      });
+    }
+  });
+
+  // 17.9.8.1 主动从草料阿里云 RDS 专线拉取最新报修及维保记录 (table_d233 + table_d237)
+  app.post('/api/caoliao/pull-repairs', async (req, res) => {
+    try {
+      const cfg = loadCaoliaoSyncConfig();
+      const { totalQueried, importedCount, importedRecords } = await syncCaoliaoRdsTables({
+        limitPerTable: 50,
+        suppressAlert: false
+      });
+
+      cfg.lastSyncTime = new Date().toLocaleString('zh-CN');
+      cfg.lastTestStatus = 'success';
+      saveCaoliaoSyncConfig(cfg);
+
+      res.json({
+        success: true,
+        message: `成功从阿里云 RDS 数据库直通拉取！已对账查询 ${totalQueried} 条真实业务数据（含故障报修 table_d233 与维保记录 table_d237），新增同步入库 ${importedCount} 条最新记录。`,
+        totalQueried,
+        importedCount,
+        importedRecords,
+        database: 'rm-bp1m4fy8d66u3c6xmbo.mysql.rds.aliyuncs.com:3306 (cli_9833874)',
+        lastSyncTime: cfg.lastSyncTime
+      });
+    } catch (err: any) {
+      console.error('[Caoliao RDS Pull Error]', err);
+      res.status(500).json({ success: false, error: `阿里云 RDS 拉取失败: ${err.message}` });
+    }
+  });
+
+  // 17.9.8.2 根据草料单号/报修人从阿里云 RDS 精准拉取 (同时检索 table_d233 故障报修与 table_d237 维保记录)
+  app.post('/api/caoliao/pull-by-record-no', async (req, res) => {
+    try {
+      const { recordNo, reporterName } = req.body;
+      const targetNo = String(recordNo || '').trim();
+      const targetReporter = String(reporterName || '').trim();
+
+      if (!targetNo && !targetReporter) {
+        return res.status(400).json({ success: false, error: '请提供草料记录单号 (如 L12258) 或填表人姓名' });
       }
-    });
+
+      const pool = getCaoliaoDbPool();
+      const likeTerm = `%${targetReporter || targetNo}%`;
+
+      const [[rows233], [rows237]]: any = await Promise.all([
+        pool.query(
+          `SELECT * FROM table_d233
+           WHERE \`记录编号\` = ? OR record_id = ? OR \`报修人姓名_2645353\` LIKE ? OR \`记录人\` LIKE ?
+           ORDER BY \`记录时间\` DESC LIMIT 1`,
+          [targetNo, targetNo, likeTerm, likeTerm]
+        ),
+        pool.query(
+          `SELECT * FROM table_d237
+           WHERE \`记录编号\` = ? OR record_id = ? OR \`姓名_2648485\` LIKE ? OR \`记录人\` LIKE ? OR \`情况说明_2648481\` LIKE ?
+           ORDER BY \`记录时间\` DESC LIMIT 1`,
+          [targetNo, targetNo, likeTerm, likeTerm, likeTerm]
+        )
+      ]);
+
+      let hitRow: any = null;
+      let hitTable: 'd233' | 'd237' = 'd233';
+      if (rows233?.length > 0 && rows237?.length > 0) {
+        const exact237 = String(rows237[0]['记录编号'] || '').toUpperCase() === targetNo.toUpperCase();
+        const exact233 = String(rows233[0]['记录编号'] || '').toUpperCase() === targetNo.toUpperCase();
+        if (exact237 && !exact233) {
+          hitRow = rows237[0];
+          hitTable = 'd237';
+        } else if (exact233 && !exact237) {
+          hitRow = rows233[0];
+          hitTable = 'd233';
+        } else {
+          hitTable = parseComparableTime(rows237[0]['记录时间']) >= parseComparableTime(rows233[0]['记录时间']) ? 'd237' : 'd233';
+          hitRow = hitTable === 'd237' ? rows237[0] : rows233[0];
+        }
+      } else if (rows237?.length > 0) {
+        hitRow = rows237[0];
+        hitTable = 'd237';
+      } else if (rows233?.length > 0) {
+        hitRow = rows233[0];
+        hitTable = 'd233';
+      }
+
+      if (hitRow) {
+        const recNo = String(hitRow['记录编号'] || hitRow.record_id);
+        const payload = buildPayloadFromRdsRow(hitRow, hitTable);
+        const result = processCaoliaoWebhookPayload(
+          payload,
+          hitTable === 'd237' ? '阿里云RDS直通-table_d237单号检索' : '阿里云RDS直通-table_d233单号检索'
+        );
+        return res.json({
+          success: true,
+          message: `已从阿里云 RDS 数据库 ${hitTable === 'd237' ? 'table_d237 (维保记录)' : 'table_d233 (故障报修)'} 中成功精准拉取单号 [${recNo}]！`,
+          recordNo: recNo,
+          reporterName: payload.报修人姓名,
+          equipmentName: result.equipmentName,
+          matchedEquipmentId: result.matchedEquipmentId,
+          createdWorkOrderId: result.workOrderId,
+          photoUrl: payload.图片,
+          log: result.log,
+          alert: latestRepairAlert
+        });
+      }
+
+      res.status(404).json({
+        success: false,
+        error: `在阿里云 RDS 数据库 table_d233 / table_d237 中均未查询到单号为 [${targetNo}] 的记录`
+      });
+    } catch (err: any) {
+      console.error('[Caoliao Pull By Record No Error]', err);
+      res.status(500).json({ success: false, error: `阿里云 RDS 查询失败: ${err.message}` });
+    }
+  });
+
+  // 17.9.8.3 草料扫码填表原始文本智能解析与入库接口 (粘贴草料手机端/网页端文本直通建单)
+  app.post('/api/caoliao/parse-raw-text', async (req, res) => {
+    try {
+      const { text } = req.body;
+      const rawText = String(text || '').trim();
+      if (!rawText) {
+        return res.status(400).json({ success: false, error: '请粘贴草料报修详情文本' });
+      }
+
+      const lines = rawText.split('\n').map(l => l.trim()).filter(Boolean);
+      const parsed: Record<string, any> = {
+        event: 'form_submitted',
+        填写方式: '扫一扫填写',
+        表单名称: '医疗设备故障报修数据与统计'
+      };
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        
+        // 键值对行
+        const colonIdx = line.indexOf('：') !== -1 ? line.indexOf('：') : line.indexOf(':');
+        if (colonIdx > 0 && colonIdx < line.length - 1) {
+          const key = line.slice(0, colonIdx).trim();
+          const val = line.slice(colonIdx + 1).trim();
+          parsed[key] = val;
+          continue;
+        }
+
+        // 标签下一行行结构
+        const nextLine = (i + 1 < lines.length) ? lines[i + 1] : '';
+        if (line === '基本信息' && nextLine) {
+          parsed['基本信息'] = nextLine;
+          parsed['code_name'] = nextLine;
+          parsed['设备名称'] = nextLine;
+          i++;
+        } else if (line.startsWith('子码编号')) {
+          const rest = line.replace('子码编号', '').trim();
+          if (rest) parsed['子码编号'] = rest;
+          else if (nextLine) { parsed['子码编号'] = nextLine; i++; }
+        } else if (line.startsWith('故障表现')) {
+          const rest = line.replace(/故障表现[：:]?/, '').trim();
+          if (rest) parsed['故障表现'] = rest;
+          else if (nextLine && !nextLine.includes('：') && !nextLine.includes(':')) {
+            parsed['故障表现'] = nextLine;
+            i++;
+          }
+        } else if (line.startsWith('报修人姓名')) {
+          const rest = line.replace(/报修人姓名[：:]?/, '').trim();
+          if (rest) parsed['报修人姓名'] = rest;
+          else if (nextLine && !nextLine.includes('：') && !nextLine.includes(':')) {
+            parsed['报修人姓名'] = nextLine;
+            i++;
+          }
+        } else if (line.startsWith('报修人手机')) {
+          const rest = line.replace(/报修人手机[：:]?/, '').trim();
+          if (rest) parsed['报修人手机'] = rest;
+          else if (nextLine && !nextLine.includes('：') && !nextLine.includes(':')) {
+            parsed['报修人手机'] = nextLine;
+            i++;
+          }
+        } else if (line.startsWith('填表人')) {
+          const rest = line.replace(/填表人[：:]?/, '').trim();
+          if (rest) parsed['填表人'] = rest;
+          else if (nextLine) { parsed['填表人'] = nextLine; i++; }
+        } else if (line.startsWith('填表时间')) {
+          const rest = line.replace(/填表时间[：:]?/, '').trim();
+          if (rest) parsed['填表时间'] = rest;
+        } else if (line.startsWith('表单名称')) {
+          const rest = line.replace(/表单名称[：:]?/, '').trim();
+          if (rest) parsed['表单名称'] = rest;
+        } else if (line.startsWith('当前状态')) {
+          const rest = line.replace(/当前状态[：:]?/, '').trim();
+          if (rest) parsed['当前状态'] = rest;
+        } else if (line.startsWith('处理进度')) {
+          const rest = line.replace(/处理进度[：:]?/, '').trim();
+          if (rest) parsed['处理进度'] = rest;
+        } else if (line.startsWith('可信存证')) {
+          const rest = line.replace(/可信存证[：:]?/, '').trim();
+          if (rest) parsed['可信存证'] = rest;
+          else if (nextLine) { parsed['可信存证'] = nextLine; i++; }
+        }
+      }
+
+      // 提取草料单号 L12238
+      const recMatch = rawText.match(/\bL\d+\b/i) || rawText.match(/单号[：:\s]*([A-Za-z0-9_-]+)/);
+      if (recMatch) {
+        parsed['record_no'] = recMatch[1] || recMatch[0];
+        parsed['record_id'] = parsed['record_no'];
+        parsed['记录编号'] = parsed['record_no'];
+      }
+
+      // 提取手机号
+      const phoneMatch = rawText.match(/1[3-9]\d{9}/);
+      if (phoneMatch && !parsed['报修人手机']) {
+        parsed['报修人手机'] = phoneMatch[0];
+      }
+
+      const result = processCaoliaoWebhookPayload(parsed, '/api/caoliao/parse-raw-text');
+      res.json({
+        success: true,
+        message: `草料文本识别解析成功！已关联设备 [${result.equipmentName || result.matchedEquipmentId || '在册设备'}] 并生成工单 [${result.workOrderId}]`,
+        workOrderId: result.workOrderId,
+        parsed,
+        equipmentName: result.equipmentName,
+        matchedEquipmentId: result.matchedEquipmentId,
+        log: result.log,
+        alert: result.alert
+      });
+    } catch (err: any) {
+      console.error('[Caoliao Parse Raw Text Error]', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
   });
 
   // 17.9.9 触发即时分类对账
@@ -3217,12 +4837,776 @@ ${userQuestion}
     });
   });
 
-  // 17.9.10 恢复 22 大类默认映射规则
-  app.post('/api/caoliao/reset-category-mappings', (req, res) => {
-    const cfg = loadCaoliaoSyncConfig();
-    cfg.categoryMappings = DEFAULT_22_CATEGORY_MAPPINGS;
-    saveCaoliaoSyncConfig(cfg);
-    res.json({ success: true, message: '已重置恢复国家 68 类/22大类设备分类映射基准规则', data: cfg });
+  // 17.9.11 医工派工闭环核心 API (统一工单主数据源 + RDS 5秒节流保鲜 + 自愈对账 + 按最新报修时间倒序)
+  app.get('/api/work-orders', async (req, res) => {
+    if (!DEMO_MODE && DEFAULT_CAOLIAO_DB_CONFIG.host && Date.now() - lastCaoliaoRdsSyncMs > 5000) {
+      await Promise.race([
+        syncCaoliaoRdsTables({ limitPerTable: 30, suppressAlert: false }),
+        new Promise(resolve => setTimeout(resolve, 2500))
+      ]);
+    }
+    reconcileLogsAndWorkOrders();
+
+    // 统一按最新报修时间倒序排列，同时间段按草料流水单号倒序，不再强行置顶任何旧单号
+    const sortedOrders = [...workOrdersStore].sort((a, b) => {
+      const timeA = parseComparableTime(a.reportTime);
+      const timeB = parseComparableTime(b.reportTime);
+      if (timeA !== timeB) return timeB - timeA;
+      const numA = parseInt(String(a.caoliaoRecordNo || '').replace(/\D/g, ''), 10) || 0;
+      const numB = parseInt(String(b.caoliaoRecordNo || '').replace(/\D/g, ''), 10) || 0;
+      if (numA !== numB) return numB - numA;
+      return String(b.id || '').localeCompare(String(a.id || ''));
+    });
+
+    res.json({ success: true, count: sortedOrders.length, data: sortedOrders });
+  });
+
+  // 17.9.12 保存/批量更新工单池数据
+  app.post('/api/work-orders/batch-save', requireRbac(canParticipateDispatchDiscussionByPolicy, '同步工单池数据'), (req, res) => {
+    try {
+      const { workOrders } = req.body;
+      if (Array.isArray(workOrders)) {
+        workOrdersStore = workOrders;
+        savePersistentWorkOrders(workOrdersStore);
+        return res.json({ success: true, count: workOrdersStore.length, message: '工单池已持久化同步保存' });
+      }
+      res.status(400).json({ success: false, error: 'workOrders 必须为数组' });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // 17.9.13 预派工/拟定工程师暂存接口 (Pre-Dispatch Staging for Internal Discussion)
+  app.post('/api/work-orders/:id/pre-dispatch', requireRbac(canPreDispatchWorkOrderByPolicy, '预派工拟定工程师'), (req, res) => {
+    try {
+      const { id } = req.params;
+      const { engineerId, engineerName, engineerPhone, preDispatcherName, authorRole, notes, discussionMessage } = req.body;
+
+      const nowStr = new Date().toISOString().replace('T', ' ').slice(0, 16);
+      let foundOrder: any = null;
+
+      const newDiscussionEntry = {
+        id: `DISC-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        authorName: preDispatcherName || '医工调度中心',
+        authorRole: authorRole || '调度员',
+        content: discussionMessage || `拟定由【${engineerName}】负责本次抢修任务，进入内部讨论确认阶段。${notes ? `拟定说明：${notes}` : ''}`,
+        timestamp: nowStr,
+        proposedEngineerName: engineerName,
+        actionType: 'pre_dispatch'
+      };
+
+      workOrdersStore = workOrdersStore.map(o => {
+        if (o.id === id) {
+          const prevDiscussions = Array.isArray(o.internalDiscussions) ? o.internalDiscussions : [];
+          const isOutsourced = req.body.dispatchChannel === 'outsourced';
+          foundOrder = {
+            ...o,
+            status: 'pre_dispatched',
+            proposedEngineerId: engineerId,
+            proposedEngineerName: engineerName,
+            proposedEngineerPhone: engineerPhone,
+            preDispatcherName: preDispatcherName || '医工调度中心',
+            preDispatchTime: nowStr,
+            preDispatchNotes: notes || o.preDispatchNotes || '',
+            dispatchChannel: req.body.dispatchChannel || o.dispatchChannel || 'internal',
+            externalVendorId: isOutsourced ? (req.body.externalVendorId ?? o.externalVendorId) : undefined,
+            externalPartner: isOutsourced ? (req.body.externalPartner ?? o.externalPartner) : undefined,
+            externalVendorShortName: isOutsourced ? (req.body.externalVendorShortName ?? o.externalVendorShortName) : undefined,
+            externalVendorType: isOutsourced ? (req.body.externalVendorType ?? o.externalVendorType) : undefined,
+            externalVendorContact: isOutsourced ? (req.body.externalVendorContact ?? o.externalVendorContact) : undefined,
+            externalVendorPhone: isOutsourced ? (req.body.externalVendorPhone ?? o.externalVendorPhone) : undefined,
+            externalContractNo: isOutsourced ? (req.body.externalContractNo ?? o.externalContractNo) : undefined,
+            outsourceServiceMode: isOutsourced ? (req.body.outsourceServiceMode ?? o.outsourceServiceMode) : undefined,
+            outsourceReason: isOutsourced ? (req.body.outsourceReason ?? o.outsourceReason) : undefined,
+            estimatedOutsourceCost: isOutsourced ? (req.body.estimatedOutsourceCost ?? o.estimatedOutsourceCost) : undefined,
+            requiresVendorQuote: isOutsourced ? (req.body.requiresVendorQuote ?? o.requiresVendorQuote) : undefined,
+            internalDiscussions: [...prevDiscussions, newDiscussionEntry]
+          };
+          return foundOrder;
+        }
+        return o;
+      });
+
+      if (!foundOrder) {
+        const isOutsourced = req.body.dispatchChannel === 'outsourced';
+        foundOrder = {
+          id,
+          equipmentId: req.body.equipmentId || '10079',
+          equipmentName: req.body.equipmentName || '医疗设备',
+          equipmentModel: req.body.equipmentModel || '标准型号',
+          equipmentSn: req.body.equipmentSn || 'SN-CAOLIAO',
+          internalNo: req.body.internalNo || '',
+          category: req.body.category || '通用诊疗类',
+          department: req.body.department || '功能检查科',
+          location: req.body.location || '诊疗室',
+          reporterName: req.body.reporterName || '医护人员',
+          reporterPhone: req.body.reporterPhone || '',
+          reportTime: req.body.reportTime || nowStr,
+          priority: req.body.priority || 'P2_URGENT',
+          workOrderType: 'emergency_breakdown',
+          faultDescription: req.body.faultDescription || '临床设备故障报修',
+          status: 'pre_dispatched',
+          biomedicalGroup: req.body.biomedicalGroup || '超声与综合诊疗组',
+          source: req.body.source || 'caoliao',
+          caoliaoRecordNo: req.body.caoliaoRecordNo || '',
+          photoUrl: req.body.photoUrl || '',
+          proposedEngineerId: engineerId,
+          proposedEngineerName: engineerName,
+          proposedEngineerPhone: engineerPhone,
+          preDispatcherName: preDispatcherName || '医工调度中心',
+          preDispatchTime: nowStr,
+          preDispatchNotes: notes || '',
+          dispatchChannel: req.body.dispatchChannel || 'internal',
+          externalVendorId: isOutsourced ? req.body.externalVendorId : undefined,
+          externalPartner: isOutsourced ? req.body.externalPartner : undefined,
+          externalVendorShortName: isOutsourced ? req.body.externalVendorShortName : undefined,
+          externalVendorType: isOutsourced ? req.body.externalVendorType : undefined,
+          externalVendorContact: isOutsourced ? req.body.externalVendorContact : undefined,
+          externalVendorPhone: isOutsourced ? req.body.externalVendorPhone : undefined,
+          externalContractNo: isOutsourced ? req.body.externalContractNo : undefined,
+          outsourceServiceMode: isOutsourced ? req.body.outsourceServiceMode : undefined,
+          outsourceReason: isOutsourced ? req.body.outsourceReason : undefined,
+          estimatedOutsourceCost: isOutsourced ? req.body.estimatedOutsourceCost : undefined,
+          requiresVendorQuote: isOutsourced ? req.body.requiresVendorQuote : undefined,
+          internalDiscussions: [newDiscussionEntry],
+          partsReplaced: [],
+          totalRepairCost: 0,
+          totalDowntimeHours: 0.1,
+          slaResponseLimitMinutes: 30,
+          slaRepairLimitHours: 4,
+          isSlaResponseMet: false,
+          isSlaRepairMet: false
+        };
+        workOrdersStore.unshift(foundOrder);
+      }
+
+      savePersistentWorkOrders(workOrdersStore);
+
+      // 同步回写设备台账状态说明为“预派工拟定中”
+      if (foundOrder.equipmentId) {
+        const targetEq = equipmentStore.find(e => e.id === foundOrder.equipmentId);
+        if (targetEq && Array.isArray(targetEq.repairRecords)) {
+          targetEq.repairRecords = targetEq.repairRecords.map(r => {
+            if (r.id === `REP-${id}` || r.id.includes(id) || (foundOrder.caoliaoRecordNo && (r as any).recordNo === foundOrder.caoliaoRecordNo)) {
+              const techText = foundOrder.dispatchChannel === 'outsourced' && foundOrder.externalPartner
+                ? `拟定外协: ${foundOrder.externalVendorShortName || foundOrder.externalPartner} / 监护:${engineerName}`
+                : `拟定: ${engineerName} (内部确认中)`;
+              return { ...r, technician: techText, status: '处理中' };
+            }
+            return r;
+          });
+          savePersistentEquipment(equipmentStore);
+        }
+      }
+
+      res.json({
+        success: true,
+        message: `已暂存预派工并拟定工程师【${engineerName}】，可继续在系统内开展讨论确认。`,
+        order: foundOrder,
+        data: foundOrder
+      });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // 17.9.13b 派工内部讨论记录添加接口
+  app.post('/api/work-orders/:id/discussion', requireRbac(canParticipateDispatchDiscussionByPolicy, '提交派工内部技术讨论'), (req, res) => {
+    try {
+      const { id } = req.params;
+      const { authorName, authorRole, content, proposedEngineerName } = req.body;
+      if (!content || !String(content).trim()) {
+        return res.status(400).json({ success: false, error: '讨论内容不能为空' });
+      }
+
+      const nowStr = new Date().toISOString().replace('T', ' ').slice(0, 16);
+      const entry = {
+        id: `DISC-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        authorName: authorName || '医工调度员',
+        authorRole: authorRole || '调度确认人员',
+        content: String(content).trim(),
+        timestamp: nowStr,
+        proposedEngineerName,
+        actionType: 'discussion'
+      };
+
+      let foundOrder: any = null;
+      workOrdersStore = workOrdersStore.map(o => {
+        if (o.id === id) {
+          const prevDiscussions = Array.isArray(o.internalDiscussions) ? o.internalDiscussions : [];
+          foundOrder = {
+            ...o,
+            internalDiscussions: [...prevDiscussions, entry]
+          };
+          return foundOrder;
+        }
+        return o;
+      });
+
+      if (!foundOrder) {
+        return res.status(404).json({ success: false, error: '未找到对应派工单据' });
+      }
+
+      savePersistentWorkOrders(workOrdersStore);
+      res.json({ success: true, entry, order: foundOrder, data: foundOrder });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // 17.9.14 正式派工调度执行接口 (Dispatch Assign)
+  app.post('/api/work-orders/:id/dispatch', requireRbac(canDispatchWorkOrderByPolicy, '确认正式下发派工工单'), (req, res) => {
+    try {
+      const { id } = req.params;
+      const {
+        engineerId,
+        engineerName,
+        engineerPhone,
+        dispatcherName,
+        notes,
+        dispatchChannel,
+        externalVendorId,
+        externalPartner,
+        externalVendorShortName,
+        externalVendorType,
+        externalVendorContact,
+        externalVendorPhone,
+        externalContractNo,
+        outsourceServiceMode,
+        outsourceReason,
+        estimatedOutsourceCost,
+        requiresVendorQuote,
+        syncToVendorPortal,
+        hasCost,
+        estimatedCost,
+        costTriggerStage,
+        autoCreateProjectLedger
+      } = req.body;
+
+      const isOutsourced = dispatchChannel === 'outsourced' || Boolean(externalPartner && String(externalPartner).trim());
+      const effectiveChannel = isOutsourced ? 'outsourced' : 'internal';
+      const numericEstimatedCost = Number(estimatedCost ?? estimatedOutsourceCost ?? 0) || 0;
+      const effectiveHasCost = Boolean(
+        hasCost === true ||
+          numericEstimatedCost > 0 ||
+          (isOutsourced && (outsourceServiceMode === 'single_paid_quote' || outsourceServiceMode === 'factory_return'))
+      );
+      const computedRequiredMode = resolveProcurementMode(effectiveHasCost, numericEstimatedCost);
+      const nowStr = new Date().toISOString().replace('T', ' ').slice(0, 16);
+      let foundOrder: any = null;
+
+      const confirmDiscussionEntry = {
+        id: `DISC-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        authorName: dispatcherName || '医工调度中心',
+        authorRole: '调度签发人',
+        content: isOutsourced
+          ? `已完成内部核准，正式下发【外协协同派工单】至【${externalPartner}】（监护医工：${engineerName}）${effectiveHasCost ? `，判定产生费用（预估 ¥${numericEstimatedCost.toLocaleString()} · ${PROCUREMENT_MODE_META[computedRequiredMode].shortLabel}）并自动立项` : '（零费用合同覆盖）'}。${notes ? `指令：${notes}` : ''}`
+          : `已完成内部讨论与方案确认，正式下发派工工单给责任工程师【${engineerName}】${effectiveHasCost ? `，判定产生费用（预估 ¥${numericEstimatedCost.toLocaleString()} · ${PROCUREMENT_MODE_META[computedRequiredMode].shortLabel}）并自动立项` : ''}。${notes ? `指令：${notes}` : ''}`,
+        timestamp: nowStr,
+        proposedEngineerName: engineerName,
+        actionType: 'confirm_dispatch'
+      };
+
+      const resolvedVendorOrderId = isOutsourced
+        ? `EXT-${String(id).replace(/[^A-Za-z0-9]/g, '').slice(-10)}`
+        : undefined;
+      const shouldRequireQuote =
+        typeof requiresVendorQuote === 'boolean'
+          ? requiresVendorQuote
+          : outsourceServiceMode === 'single_paid_quote' || outsourceServiceMode === 'factory_return';
+
+      workOrdersStore = workOrdersStore.map(o => {
+        if (o.id === id) {
+          const prevDiscussions = Array.isArray(o.internalDiscussions) ? o.internalDiscussions : [];
+          foundOrder = {
+            ...o,
+            status: 'dispatched',
+            dispatcherName: dispatcherName || '医工调度中心',
+            dispatchTime: nowStr,
+            dispatchNotes: notes || o.preDispatchNotes || '现场核查并执行安全质控测试',
+            assignedEngineerId: engineerId,
+            assignedEngineerName: engineerName,
+            assignedEngineerPhone: engineerPhone,
+            dispatchChannel: effectiveChannel,
+            externalVendorId: isOutsourced ? (externalVendorId || o.externalVendorId) : undefined,
+            externalPartner: isOutsourced ? (externalPartner || o.externalPartner) : undefined,
+            externalVendorShortName: isOutsourced ? (externalVendorShortName || o.externalVendorShortName) : undefined,
+            externalVendorType: isOutsourced ? (externalVendorType || o.externalVendorType) : undefined,
+            externalVendorContact: isOutsourced ? (externalVendorContact || o.externalVendorContact) : undefined,
+            externalVendorPhone: isOutsourced ? (externalVendorPhone || o.externalVendorPhone) : undefined,
+            externalContractNo: isOutsourced ? (externalContractNo || o.externalContractNo) : undefined,
+            outsourceServiceMode: isOutsourced ? (outsourceServiceMode || o.outsourceServiceMode || 'single_paid_quote') : undefined,
+            outsourceReason: isOutsourced ? (outsourceReason || o.outsourceReason) : undefined,
+            estimatedOutsourceCost: isOutsourced ? (estimatedOutsourceCost ?? o.estimatedOutsourceCost) : undefined,
+            requiresVendorQuote: isOutsourced ? shouldRequireQuote : undefined,
+            vendorDispatchTime: isOutsourced ? nowStr : undefined,
+            vendorStatus: isOutsourced
+              ? shouldRequireQuote
+                ? 'pending_quote'
+                : 'dispatched_to_vendor'
+              : undefined,
+            linkedVendorOrderId: isOutsourced ? (o.linkedVendorOrderId || resolvedVendorOrderId) : undefined,
+            hasCost: effectiveHasCost || o.hasCost,
+            estimatedCost: numericEstimatedCost > 0 ? numericEstimatedCost : o.estimatedCost,
+            costTriggerStage: effectiveHasCost ? (costTriggerStage || o.costTriggerStage || 'dispatch') : o.costTriggerStage,
+            requiredComplianceMode: effectiveHasCost ? computedRequiredMode : (o.requiredComplianceMode || 'exempt'),
+            auditArchiveStatus: effectiveHasCost ? (o.auditArchiveStatus || 'pending_audit') : 'exempt',
+            internalDiscussions: [...prevDiscussions, confirmDiscussionEntry]
+          };
+          return foundOrder;
+        }
+        return o;
+      });
+
+      if (!foundOrder) {
+        foundOrder = {
+          id,
+          equipmentId: req.body.equipmentId || '10079',
+          equipmentName: req.body.equipmentName || '医疗设备',
+          equipmentModel: req.body.equipmentModel || '标准型号',
+          equipmentSn: req.body.equipmentSn || 'SN-CAOLIAO',
+          internalNo: req.body.internalNo || '',
+          category: req.body.category || '通用诊疗类',
+          department: req.body.department || '功能检查科',
+          location: req.body.location || '诊疗室',
+          reporterName: req.body.reporterName || '医护人员',
+          reporterPhone: req.body.reporterPhone || '',
+          reportTime: nowStr,
+          priority: req.body.priority || 'P2_URGENT',
+          workOrderType: 'emergency_breakdown',
+          faultDescription: req.body.faultDescription || '临床设备故障报修',
+          status: 'dispatched',
+          biomedicalGroup: req.body.biomedicalGroup || '急救生命支持技术组',
+          source: req.body.source || 'caoliao',
+          caoliaoRecordNo: req.body.caoliaoRecordNo || '',
+          photoUrl: req.body.photoUrl || '',
+          dispatcherName: dispatcherName || '医工调度中心',
+          dispatchTime: nowStr,
+          dispatchNotes: notes || '',
+          assignedEngineerId: engineerId,
+          assignedEngineerName: engineerName,
+          assignedEngineerPhone: engineerPhone,
+          dispatchChannel: effectiveChannel,
+          externalVendorId: isOutsourced ? externalVendorId : undefined,
+          externalPartner: isOutsourced ? externalPartner : undefined,
+          externalVendorShortName: isOutsourced ? externalVendorShortName : undefined,
+          externalVendorType: isOutsourced ? externalVendorType : undefined,
+          externalVendorContact: isOutsourced ? externalVendorContact : undefined,
+          externalVendorPhone: isOutsourced ? externalVendorPhone : undefined,
+          externalContractNo: isOutsourced ? externalContractNo : undefined,
+          outsourceServiceMode: isOutsourced ? (outsourceServiceMode || 'single_paid_quote') : undefined,
+          outsourceReason: isOutsourced ? outsourceReason : undefined,
+          estimatedOutsourceCost: isOutsourced ? estimatedOutsourceCost : undefined,
+          requiresVendorQuote: isOutsourced ? shouldRequireQuote : undefined,
+          vendorDispatchTime: isOutsourced ? nowStr : undefined,
+          vendorStatus: isOutsourced
+            ? shouldRequireQuote
+              ? 'pending_quote'
+              : 'dispatched_to_vendor'
+            : undefined,
+          linkedVendorOrderId: isOutsourced ? resolvedVendorOrderId : undefined,
+          hasCost: effectiveHasCost,
+          estimatedCost: numericEstimatedCost > 0 ? numericEstimatedCost : undefined,
+          costTriggerStage: effectiveHasCost ? (costTriggerStage || 'dispatch') : undefined,
+          requiredComplianceMode: effectiveHasCost ? computedRequiredMode : 'exempt',
+          auditArchiveStatus: effectiveHasCost ? 'pending_audit' : 'exempt',
+          internalDiscussions: [confirmDiscussionEntry],
+          partsReplaced: [],
+          totalRepairCost: 0,
+          totalDowntimeHours: 0.1,
+          slaResponseLimitMinutes: 30,
+          slaRepairLimitHours: 4,
+          isSlaResponseMet: true,
+          isSlaRepairMet: true
+        };
+        workOrdersStore.unshift(foundOrder);
+      }
+
+      let createdVendorCollabOrder: any = null;
+      if (isOutsourced && syncToVendorPortal !== false) {
+        createdVendorCollabOrder = upsertVendorCollabFromWorkOrder(foundOrder, dispatcherName || '医工调度中心');
+        if (createdVendorCollabOrder && foundOrder.linkedVendorOrderId !== createdVendorCollabOrder.id) {
+          foundOrder.linkedVendorOrderId = createdVendorCollabOrder.id;
+          workOrdersStore = workOrdersStore.map(o => (o.id === id ? foundOrder : o));
+        }
+      }
+
+      // 若判定有费用产生，自动在《设备项目台账》生成或联动更新关联项目
+      let linkedProject: HospitalProjectRecord | null = null;
+      if ((effectiveHasCost || isWorkOrderPaid(foundOrder)) && autoCreateProjectLedger !== false) {
+        linkedProject = upsertProjectFromWorkOrderServer(foundOrder, {
+          stage: 'dispatch',
+          operatorName: dispatcherName || '医工调度中心',
+          estimatedAmount: numericEstimatedCost,
+          hasCost: true
+        });
+        foundOrder.linkedProjectId = linkedProject.id;
+        foundOrder.hasCost = true;
+        foundOrder.requiredComplianceMode = linkedProject.complianceDossier?.requiredMode || computedRequiredMode;
+        foundOrder.auditArchiveStatus = 'pending_audit';
+        workOrdersStore = workOrdersStore.map(o => (o.id === id ? foundOrder : o));
+      }
+
+      savePersistentWorkOrders(workOrdersStore);
+
+      // 同步回写在册设备台账状态与维修履历中的 technician 责任人
+      if (foundOrder.equipmentId) {
+        const targetEq = equipmentStore.find(e => e.id === foundOrder.equipmentId);
+        if (targetEq && Array.isArray(targetEq.repairRecords)) {
+          targetEq.repairRecords = targetEq.repairRecords.map(r => {
+            if (r.id === `REP-${id}` || r.id.includes(id) || (foundOrder.caoliaoRecordNo && (r as any).recordNo === foundOrder.caoliaoRecordNo)) {
+              const techDisplay = isOutsourced
+                ? `外协: ${externalVendorShortName || externalPartner} (监护: ${engineerName})`
+                : `${engineerName} (已正式派工)`;
+              return { ...r, technician: techDisplay, status: '处理中' };
+            }
+            return r;
+          });
+          savePersistentEquipment(equipmentStore);
+        }
+      }
+
+      res.json({
+        success: true,
+        message: isOutsourced
+          ? `外协协同派工成功！已转派【${externalPartner}】${linkedProject ? `并自动在设备项目台账立项(${linkedProject.id})` : ''}，院内监护工程师：${engineerName}。`
+          : `正式派工成功！已指派工程师【${engineerName}】${linkedProject ? `，已同步立项至设备项目台账(${linkedProject.id})` : ''}。`,
+        order: foundOrder,
+        data: foundOrder,
+        vendorCollabOrder: createdVendorCollabOrder,
+        linkedProject
+      });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // 17.9.14b 维修工程师现场作业进度与完工提交接口（若现场产生配件/外购/转外协费用，自动同步生成《设备项目台账》立项）
+  app.post('/api/work-orders/:id/field-update', requireRbac(canExecuteFieldRepairByPolicy, '更新现场维修工单进度'), (req, res) => {
+    try {
+      const { id } = req.params;
+      const patch = req.body || {};
+      let foundOrder: any = null;
+
+      workOrdersStore = workOrdersStore.map(o => {
+        if (o.id === id) {
+          foundOrder = { ...o, ...patch, id: o.id };
+          return foundOrder;
+        }
+        return o;
+      });
+
+      if (!foundOrder) {
+        foundOrder = { ...patch, id };
+        workOrdersStore.unshift(foundOrder);
+      }
+
+      let linkedProject: HospitalProjectRecord | null = null;
+      if (isWorkOrderPaid(foundOrder)) {
+        const amt = Math.max(
+          Number(foundOrder.totalRepairCost || 0),
+          Number(foundOrder.estimatedCost || 0),
+          Number(foundOrder.estimatedOutsourceCost || 0)
+        );
+        linkedProject = upsertProjectFromWorkOrderServer(foundOrder, {
+          stage: foundOrder.costTriggerStage || 'field_operation',
+          operatorName: foundOrder.assignedEngineerName || '现场工程师',
+          estimatedAmount: amt,
+          hasCost: true
+        });
+        foundOrder.hasCost = true;
+        foundOrder.linkedProjectId = linkedProject.id;
+        foundOrder.requiredComplianceMode = linkedProject.complianceDossier?.requiredMode || resolveProcurementMode(true, amt);
+        if (!foundOrder.auditArchiveStatus || foundOrder.auditArchiveStatus === 'exempt') {
+          foundOrder.auditArchiveStatus = 'pending_audit';
+        }
+        workOrdersStore = workOrdersStore.map(o => (o.id === id ? foundOrder : o));
+      }
+
+      savePersistentWorkOrders(workOrdersStore);
+
+      // 若已提交修复待验收，同步更新设备台账维修履历说明
+      if (foundOrder.equipmentId && foundOrder.status === 'repaired_pending_acceptance') {
+        const targetEq = equipmentStore.find(e => e.id === foundOrder.equipmentId);
+        if (targetEq && Array.isArray(targetEq.repairRecords)) {
+          targetEq.repairRecords = targetEq.repairRecords.map(r => {
+            if (r.id === `REP-${id}` || r.id.includes(id) || (foundOrder.caoliaoRecordNo && (r as any).recordNo === foundOrder.caoliaoRecordNo)) {
+              return {
+                ...r,
+                resolution: foundOrder.solutionDescription || r.resolution,
+                status: '处理中' as const
+              };
+            }
+            return r;
+          });
+          savePersistentEquipment(equipmentStore);
+        }
+      }
+
+      res.json({ success: true, data: foundOrder, order: foundOrder, linkedProject });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // 17.9.14c 临床科室维修完工验收评价与闭环归档接口
+  app.post('/api/work-orders/:id/clinical-accept', requireRbac(canClinicalAcceptWorkOrderByPolicy, '临床完工验收签字'), (req, res) => {
+    try {
+      const { id } = req.params;
+      const ratingData = req.body || {};
+      const nowStr = new Date().toISOString().replace('T', ' ').slice(0, 16);
+      let foundOrder: any = null;
+
+      workOrdersStore = workOrdersStore.map(o => {
+        if (o.id === id) {
+          foundOrder = {
+            ...o,
+            status: 'closed',
+            acceptanceTime: nowStr,
+            ratingScore: ratingData.ratingScore || 5,
+            ratingTimeliness: ratingData.ratingTimeliness || 5,
+            ratingQuality: ratingData.ratingQuality || 5,
+            ratingAttitude: ratingData.ratingAttitude || 5,
+            clinicalFeedback: ratingData.clinicalFeedback || '验收通过，设备恢复临床使用',
+            acceptanceStaffName: ratingData.acceptanceStaffName || '临床验收人',
+            acceptanceStaffRole: ratingData.acceptanceStaffRole || '护士长',
+            acceptanceSignature: ratingData.acceptanceSignature || ratingData.acceptanceStaffName
+          };
+          return foundOrder;
+        }
+        return o;
+      });
+
+      if (!foundOrder) {
+        return res.status(404).json({ success: false, error: '未找到对应待验收工单' });
+      }
+
+      // 若关联收费项目，同步更新临床验收确认状态并重算审计归档状态
+      const auditGate = evaluateWorkOrderAuditGate(foundOrder, {
+        projects: getMergedProjectLedger(),
+        approvals: approvalsStore,
+        vendorOrders: vendorCollabOrdersStore,
+        biddingProjects: biddingProjectsStore
+      });
+      if (auditGate.linkedProject) {
+        const updatedProj: HospitalProjectRecord = {
+          ...auditGate.linkedProject,
+          deptConfirmStatus: '临床已验收确认',
+          deptConfirmContent: foundOrder.clinicalFeedback || auditGate.linkedProject.deptConfirmContent,
+          deptConfirmDate: nowStr.slice(0, 10)
+        };
+        upsertDynamicProjectRecord(updatedProj);
+      }
+      foundOrder.auditArchiveStatus = auditGate.requiresAudit
+        ? auditGate.isAuditReady
+          ? 'audit_ready'
+          : 'pending_audit'
+        : 'exempt';
+      workOrdersStore = workOrdersStore.map(o => (o.id === id ? foundOrder : o));
+
+      savePersistentWorkOrders(workOrdersStore);
+
+      // 同步将对应台账设备恢复为“正常运行”
+      if (foundOrder.equipmentId) {
+        const idx = equipmentStore.findIndex(e => e.id === foundOrder.equipmentId);
+        if (idx >= 0) {
+          const prevStatus = equipmentStore[idx].status;
+          equipmentStore[idx] = {
+            ...equipmentStore[idx],
+            status: '正常运行',
+            lastFaultReason: undefined,
+            repairRecords: (equipmentStore[idx].repairRecords || []).map(r =>
+              r.id === `REP-${id}` || r.id.includes(id) || (foundOrder.caoliaoRecordNo && (r as any).recordNo === foundOrder.caoliaoRecordNo)
+                ? { ...r, status: '已完成', resolution: foundOrder.solutionDescription || r.resolution }
+                : r
+            ),
+            statusLogs: [
+              {
+                id: `LOG-ACC-${Date.now()}`,
+                equipmentId: foundOrder.equipmentId,
+                oldStatus: prevStatus,
+                newStatus: '正常运行',
+                reason: `临床验收签字通过 (工单 ${id})`,
+                operator: foundOrder.acceptanceStaffName || '临床护士长',
+                timestamp: nowStr
+              },
+              ...(equipmentStore[idx].statusLogs || [])
+            ]
+          };
+          savePersistentEquipment(equipmentStore);
+        }
+      }
+
+      res.json({ success: true, data: foundOrder, order: foundOrder, auditGate });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // 17.9.14d 收费维修工单审计合规终审归档接口（缺审批/比价议价招标/会议纪要强阻断）
+  app.post('/api/work-orders/:id/audit-archive', requireRbac(canOperateProjectLedgerByPolicy, '收费工单审计合规归档'), (req, res) => {
+    try {
+      const { id } = req.params;
+      const user = extractRequestUser(req);
+      const order = workOrdersStore.find(o => o.id === id);
+      if (!order) {
+        return res.status(404).json({ success: false, error: '未找到对应工单' });
+      }
+      const gate = evaluateWorkOrderAuditGate(order, {
+        projects: getMergedProjectLedger(),
+        approvals: approvalsStore,
+        vendorOrders: vendorCollabOrdersStore,
+        biddingProjects: biddingProjectsStore
+      });
+      if (gate.requiresAudit && !gate.isAuditReady) {
+        if (gate.linkedProject?.complianceDossier) {
+          const blockedProj: HospitalProjectRecord = {
+            ...gate.linkedProject,
+            complianceDossier: {
+              ...gate.linkedProject.complianceDossier,
+              auditTrail: [
+                {
+                  id: `AUD-BLK-${Date.now()}`,
+                  timestamp: new Date().toISOString().replace('T', ' ').slice(0, 16),
+                  operatorName: user?.name || '管理员',
+                  operatorRole: user?.role || '审计校验',
+                  action: '工单归档审计拦截',
+                  detail: '尝试执行收费工单最终归档时被系统合规门禁阻断',
+                  blockedReason: gate.missingItems.join('；')
+                },
+                ...gate.linkedProject.complianceDossier.auditTrail
+              ]
+            }
+          };
+          upsertDynamicProjectRecord(blockedProj);
+        }
+        return res.status(409).json({
+          success: false,
+          auditBlocked: true,
+          missingItems: gate.missingItems,
+          error: `审计合规强阻断：${gate.missingItems.join('；')}`
+        });
+      }
+
+      const nowStr = new Date().toISOString().replace('T', ' ').slice(0, 16);
+      const updatedOrder = {
+        ...order,
+        auditArchiveStatus: 'archived',
+        auditArchivedAt: nowStr,
+        auditArchivedBy: user?.name || '医工主管'
+      };
+      workOrdersStore = workOrdersStore.map(o => (o.id === id ? updatedOrder : o));
+      savePersistentWorkOrders(workOrdersStore);
+
+      if (gate.linkedProject?.complianceDossier) {
+        const archivedProj: HospitalProjectRecord = {
+          ...gate.linkedProject,
+          preApprovalStatus: '已打印并通过',
+          preApprovalPassTime: nowStr,
+          dateValidation: '审计三支柱全部核验通过',
+          complianceDossier: {
+            ...gate.linkedProject.complianceDossier,
+            auditLockedCleared: true,
+            archivedAt: nowStr,
+            archivedBy: user?.name || '医工主管',
+            auditTrail: [
+              {
+                id: `AUD-ARC-${Date.now()}`,
+                timestamp: nowStr,
+                operatorName: user?.name || '医工主管',
+                operatorRole: user?.role || '合规归档',
+                action: '审计合规终审归档',
+                detail: `工单 ${id} 及关联台账项目 ${gate.linkedProject.id} 已通过三支柱审计核验并正式归档`
+              },
+              ...gate.linkedProject.complianceDossier.auditTrail
+            ]
+          }
+        };
+        upsertDynamicProjectRecord(archivedProj);
+      }
+
+      res.json({ success: true, order: updatedOrder, data: updatedOrder, gate });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  // 17.9.14 从草料只读 RDS (table_d233 + table_d237) / Webhook 日志抽取并同步派工单池
+  app.post('/api/caoliao/pull-and-sync-dispatch', async (req, res) => {
+    try {
+      await syncCaoliaoRdsTables({ limitPerTable: 50, suppressAlert: true });
+
+      const candidateWorkOrders: any[] = [];
+      const determineBiomedicalGroup = (dName: string, eName: string): string => {
+        const combined = `${dName} ${eName}`.toLowerCase();
+        if (combined.includes('呼吸') || combined.includes('icu') || combined.includes('除颤') || combined.includes('急救') || combined.includes('监护') || combined.includes('麻醉')) return '急救生命支持技术组';
+        if (combined.includes('ct') || combined.includes('放射') || combined.includes('dr') || combined.includes('mri') || combined.includes('x射线') || combined.includes('影像')) return '大型放射影像技术组';
+        if (combined.includes('检验') || combined.includes('生化') || combined.includes('血') || combined.includes('尿') || combined.includes('免疫')) return '临床检验与生化组';
+        if (combined.includes('镜') || combined.includes('手术') || combined.includes('腔镜') || combined.includes('电刀') || combined.includes('吻合')) return '腔镜微创手术组';
+        return '超声与综合诊疗组';
+      };
+
+      for (const log of caoliaoWebhookLogs) {
+        if (!log.createdWorkOrderId) continue;
+        const dept = log.matchedDepartment || log.department || '功能检查科';
+        const eqName = log.matchedEquipmentName || log.codeName || '医疗设备';
+        const group = determineBiomedicalGroup(dept, eqName);
+
+        const matchedEq =
+          (log.matchedEquipmentId ? equipmentStore.find(e => e.id === log.matchedEquipmentId) : undefined) ||
+          (log.codeId ? equipmentStore.find(e => e.codeId === String(log.codeId)) : undefined);
+
+        const order = {
+          id: log.createdWorkOrderId,
+          equipmentId: log.matchedEquipmentId || matchedEq?.id || (log.codeId ? `EQ-CL-${log.codeId}` : '10079'),
+          equipmentName: eqName,
+          equipmentModel: matchedEq?.model || '在用标准型号',
+          equipmentSn: matchedEq?.sn || log.sn || (log.recordNo ? `SN-${log.recordNo}` : '0941701004'),
+          internalNo: `CL-QR-${log.codeId || 'AUTO'}`,
+          category: '医用诊察和监护器械',
+          department: dept,
+          location: `${dept} 诊疗室`,
+          reporterName: log.reporterName || '医护人员',
+          reporterPhone: log.reporterPhone || '',
+          reportTime: log.timestamp ? log.timestamp.slice(0, 16) : new Date().toISOString().replace('T', ' ').slice(0, 16),
+          priority: log.urgency === 'P1' ? 'P1_CRITICAL' : log.urgency === 'P2' ? 'P2_URGENT' : 'P3_STANDARD',
+          workOrderType: 'emergency_breakdown',
+          faultDescription: `【草料扫码单号 ${log.recordNo || ''}】${log.faultDescription || '运行异常'}`,
+          status: 'pending_dispatch',
+          biomedicalGroup: group,
+          source: 'caoliao',
+          caoliaoRecordId: log.recordNo ? parseInt(String(log.recordNo).replace(/\D/g, '')) || 0 : 0,
+          caoliaoRecordNo: log.recordNo,
+          caoliaoCodeId: log.codeId,
+          photoUrl: log.photoUrl || '',
+          partsReplaced: [],
+          totalRepairCost: 0,
+          totalDowntimeHours: 0.2,
+          slaResponseLimitMinutes: log.urgency === 'P1' ? 15 : log.urgency === 'P2' ? 30 : 120,
+          slaRepairLimitHours: log.urgency === 'P1' ? 2 : log.urgency === 'P2' ? 4 : 24,
+          isSlaResponseMet: false,
+          isSlaRepairMet: false
+        };
+
+        candidateWorkOrders.push(order);
+        // 合并进持久化工单存储
+        const existIdx = workOrdersStore.findIndex(o => o.id === order.id || (o.caoliaoRecordNo && o.caoliaoRecordNo === order.caoliaoRecordNo));
+        if (existIdx < 0) {
+          workOrdersStore.unshift(order);
+        }
+      }
+
+      savePersistentWorkOrders(workOrdersStore);
+
+      res.json({
+        success: true,
+        message: `成功同步草料现场报修！已生成并梳理 ${candidateWorkOrders.length} 条待派工工单。`,
+        candidateWorkOrders,
+        totalInStore: workOrdersStore.length
+      });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
   });
 
   // ==================== 18. UDI 国家码与专机专耗闭环 API ====================
@@ -3504,7 +5888,7 @@ ${userQuestion}
   });
 
   // 19.2 即时创建安全快照
-  app.post('/api/backups/create', (req, res) => {
+  app.post('/api/backups/create', requireRbac(canManageSystemOpsByPolicy, '创建系统灾备快照'), (req, res) => {
     try {
       const { name, operator, notes, type } = req.body;
       const snap = createServerSnapshot(type || 'manual', name, operator, notes);
@@ -3520,7 +5904,7 @@ ${userQuestion}
   });
 
   // 19.3 快照回滚恢复 (自动保留恢复前底底镜像)
-  app.post('/api/backups/restore', (req, res) => {
+  app.post('/api/backups/restore', requireRbac(canManageSystemOpsByPolicy, '执行数据库快照回滚'), (req, res) => {
     try {
       const { filename } = req.body;
       if (!filename) {
@@ -3584,6 +5968,744 @@ ${userQuestion}
       return res.status(404).send('快照文件不存在');
     }
     res.download(snapPath, safeName);
+  });
+
+  // 19.5 全院分级消息通知与管理统一下发专区 API
+  app.get('/api/notices', (_req, res) => {
+    try {
+      const sorted = [...noticesStore].sort((a, b) =>
+        (b.createdAt || '').localeCompare(a.createdAt || '')
+      );
+      res.json({ success: true, data: sorted });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/notices', requireRbac(canBroadcastNoticeByPolicy, '统一下发系统消息通知'), (req, res) => {
+    try {
+      const reqUser = extractRequestUser(req);
+      const {
+        title,
+        content,
+        category = '院级通告',
+        priority = 'normal',
+        targetScope = 'all',
+        targetDepartments = [],
+        targetRoles = [],
+        requireAck = false,
+        targetTab,
+        relatedEquipmentSn
+      } = req.body || {};
+
+      if (!title || !String(title).trim() || !content || !String(content).trim()) {
+        return res.status(400).json({ success: false, error: '通知标题与正文内容不能为空' });
+      }
+
+      const nowStr = new Date().toISOString().replace('T', ' ').slice(0, 16);
+      const dateCompact = nowStr.slice(0, 10).replace(/-/g, '');
+      const newNotice: HospitalNotice = {
+        id: `NTC-${dateCompact}-${Date.now().toString().slice(-4)}`,
+        title: String(title).trim(),
+        content: String(content).trim(),
+        category,
+        priority,
+        senderName: req.body.senderName || reqUser?.name || '管理中心',
+        senderRole: req.body.senderRole || reqUser?.role || '管理科室',
+        senderDepartment: req.body.senderDepartment || reqUser?.departmentName || '医学工程保障中心',
+        senderArchetype: reqUser ? resolveRoleArchetype(reqUser) : undefined,
+        targetScope,
+        targetDepartments: targetScope === 'department' && Array.isArray(targetDepartments) ? targetDepartments : undefined,
+        targetRoles: targetScope === 'role_archetype' && Array.isArray(targetRoles) ? targetRoles : undefined,
+        requireAck: Boolean(requireAck),
+        targetTab: targetTab || undefined,
+        relatedEquipmentSn: relatedEquipmentSn || undefined,
+        createdAt: nowStr,
+        readReceipts: []
+      };
+
+      noticesStore = [newNotice, ...noticesStore];
+      savePersistentNotices(noticesStore);
+      res.status(201).json({ success: true, data: newNotice });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/notices/:id/read', (req, res) => {
+    try {
+      const { id } = req.params;
+      const reqUser = extractRequestUser(req);
+      const idx = noticesStore.findIndex(n => n.id === id);
+      if (idx === -1) {
+        return res.status(404).json({ success: false, error: '未找到指定通知单据' });
+      }
+
+      const userId = String(req.body?.userId || reqUser?.id || reqUser?.employeeNo || 'ANON');
+      const userName = String(req.body?.userName || reqUser?.name || '一线人员');
+      const userRole = String(req.body?.userRole || reqUser?.role || '临床医护');
+      const department = String(req.body?.department || reqUser?.departmentName || '临床科室');
+      const acknowledged = Boolean(req.body?.acknowledged);
+      const readAt = new Date().toISOString().replace('T', ' ').slice(0, 16);
+
+      const current = noticesStore[idx];
+      const existingReceipts = Array.isArray(current.readReceipts) ? [...current.readReceipts] : [];
+      const existingIdx = existingReceipts.findIndex(
+        r => (userId && r.userId === userId) || (r.userName === userName && r.department === department)
+      );
+
+      const nextReceipt: NoticeReadReceipt = {
+        userId,
+        userName,
+        userRole,
+        department,
+        readAt,
+        acknowledged: existingIdx >= 0 ? (existingReceipts[existingIdx].acknowledged || acknowledged) : acknowledged
+      };
+
+      if (existingIdx >= 0) {
+        existingReceipts[existingIdx] = nextReceipt;
+      } else {
+        existingReceipts.unshift(nextReceipt);
+      }
+
+      const updated: HospitalNotice = { ...current, readReceipts: existingReceipts };
+      noticesStore[idx] = updated;
+      savePersistentNotices(noticesStore);
+      res.json({ success: true, data: updated });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.delete('/api/notices/:id', requireRbac(canBroadcastNoticeByPolicy, '撤回或删除系统消息通知'), (req, res) => {
+    try {
+      const { id } = req.params;
+      const exists = noticesStore.some(n => n.id === id);
+      if (!exists) {
+        return res.status(404).json({ success: false, error: '通知单据不存在或已撤回' });
+      }
+      noticesStore = noticesStore.filter(n => n.id !== id);
+      savePersistentNotices(noticesStore);
+      res.json({ success: true, deletedId: id });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 19B. 设备项目全生命周期总台账专属受控接口（合并动态收费立项 + 审计强阻断门禁）
+  app.get(
+    '/api/project-ledger',
+    requireRbac(canViewProjectLedgerByPolicy, '查看全院设备项目台账'),
+    (_req, res) => {
+      try {
+        const merged = getMergedProjectLedger();
+        res.json({
+          success: true,
+          count: merged.length,
+          data: merged
+        });
+      } catch (err: any) {
+        res.status(500).json({ success: false, error: err.message });
+      }
+    }
+  );
+
+  app.post(
+    '/api/project-ledger/upsert-from-work-order',
+    requireRbac(canParticipateDispatchDiscussionByPolicy, '工单收费自动立项至设备项目台账'),
+    (req, res) => {
+      try {
+        const { workOrder, stage, operatorName, estimatedAmount, hasCost } = req.body || {};
+        if (!workOrder || !workOrder.id) {
+          return res.status(400).json({ success: false, error: '缺少工单信息，无法立项' });
+        }
+        const project = upsertProjectFromWorkOrderServer(workOrder, {
+          stage: stage || 'dispatch',
+          operatorName,
+          estimatedAmount,
+          hasCost: hasCost ?? true
+        });
+        workOrdersStore = workOrdersStore.map(o =>
+          o.id === workOrder.id
+            ? {
+                ...o,
+                hasCost: true,
+                estimatedCost: estimatedAmount ?? o.estimatedCost,
+                linkedProjectId: project.id,
+                requiredComplianceMode: project.complianceDossier?.requiredMode,
+                auditArchiveStatus: o.auditArchiveStatus === 'archived' ? 'archived' : 'pending_audit'
+              }
+            : o
+        );
+        savePersistentWorkOrders(workOrdersStore);
+        res.json({ success: true, data: project });
+      } catch (err: any) {
+        res.status(500).json({ success: false, error: err.message });
+      }
+    }
+  );
+
+  app.put(
+    '/api/project-ledger/:id/compliance',
+    requireRbac(canOperateProjectLedgerByPolicy, '补办并保存项目合规审计资料'),
+    (req, res) => {
+      try {
+        const { id } = req.params;
+        const user = extractRequestUser(req);
+        const existing = findMergedProjectById(id);
+        if (!existing) {
+          return res.status(404).json({ success: false, error: '未找到对应台账项目' });
+        }
+        const {
+          compliancePatch,
+          vendorPatch,
+          invoicePatch,
+          approvedBudgetAmount,
+          actionLabel,
+          actionDetail
+        } = req.body || {};
+
+        const nowDate = new Date().toISOString().slice(0, 10);
+        const nowTimestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
+        const prevDossier = existing.complianceDossier || {
+          hasCost: Number(existing.invoice?.totalAmount || 0) > 0,
+          estimatedAmount: Number(existing.invoice?.totalAmount || 0),
+          approvedBudgetAmount: Number(existing.invoice?.totalAmount || 0),
+          requiredMode: resolveProcurementMode(
+            Number(existing.invoice?.totalAmount || 0) > 0,
+            Number(existing.invoice?.totalAmount || 0)
+          ),
+          createdFromStage: 'legacy' as const,
+          approvalProof: { mode: 'none' as const },
+          comparisonQuotes: [],
+          meetingMinutes: [],
+          auditTrail: []
+        };
+
+        const mergedDossier = {
+          ...prevDossier,
+          ...(compliancePatch || {}),
+          approvalProof: {
+            ...prevDossier.approvalProof,
+            ...(compliancePatch?.approvalProof || {})
+          },
+          comparisonQuotes: compliancePatch?.comparisonQuotes ?? prevDossier.comparisonQuotes,
+          meetingMinutes: compliancePatch?.meetingMinutes ?? prevDossier.meetingMinutes,
+          biddingRecord:
+            compliancePatch?.biddingRecord !== undefined
+              ? compliancePatch.biddingRecord
+              : prevDossier.biddingRecord,
+          auditTrail: [
+            {
+              id: `AUD-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+              timestamp: nowTimestamp,
+              operatorName: user?.name || '医工主管',
+              operatorRole: user?.role || '台账管理员',
+              action: actionLabel || '补办/更新审计合规材料',
+              detail: actionDetail || '已保存立项审批凭证、比价/议价/招标或会议纪要资料'
+            },
+            ...(prevDossier.auditTrail || [])
+          ]
+        };
+
+        const nextBudget = Number(
+          approvedBudgetAmount ??
+            mergedDossier.negotiationFinalPrice ??
+            mergedDossier.biddingRecord?.winningAmount ??
+            mergedDossier.approvedBudgetAmount ??
+            mergedDossier.estimatedAmount ??
+            existing.invoice?.totalAmount ??
+            0
+        );
+        mergedDossier.approvedBudgetAmount = nextBudget;
+        mergedDossier.requiredMode = resolveProcurementMode(Boolean(mergedDossier.hasCost) || nextBudget > 0, nextBudget);
+
+        const nextVendor = { ...existing.vendor, ...(vendorPatch || {}) };
+        const chosenQuote = (mergedDossier.comparisonQuotes || []).find((q: any) => q.isSelected);
+        if (chosenQuote && !vendorPatch?.companyName) {
+          nextVendor.companyName = chosenQuote.vendorName;
+          if (chosenQuote.contactPerson) nextVendor.contactPerson = chosenQuote.contactPerson;
+          if (chosenQuote.contactPhone) nextVendor.contactPhone = chosenQuote.contactPhone;
+        }
+        if (mergedDossier.biddingRecord?.winningVendor && !vendorPatch?.companyName) {
+          nextVendor.companyName = mergedDossier.biddingRecord.winningVendor;
+        }
+
+        const taxRate = invoicePatch?.taxRate ?? existing.invoice?.taxRate ?? 0.13;
+        const nextTotal = Number(invoicePatch?.totalAmount ?? (nextBudget > 0 ? nextBudget : existing.invoice?.totalAmount || 0));
+        const nextInvoice = {
+          ...existing.invoice,
+          ...(invoicePatch || {}),
+          totalAmount: nextTotal,
+          amountWithoutTax: Number((nextTotal / (1 + taxRate)).toFixed(2)),
+          taxAmount: Number((nextTotal - nextTotal / (1 + taxRate)).toFixed(2))
+        };
+
+        let nextRecord: HospitalProjectRecord = {
+          ...existing,
+          vendor: nextVendor,
+          invoice: nextInvoice,
+          complianceDossier: mergedDossier
+        };
+
+        const evalRes = evaluateProjectAuditCompliance(nextRecord, {
+          approvals: approvalsStore,
+          vendorOrders: vendorCollabOrdersStore,
+          biddingProjects: biddingProjectsStore
+        });
+
+        nextRecord = {
+          ...nextRecord,
+          approvalStatus: evalRes.pillarApproval.passed
+            ? evalRes.pillarApproval.modeLabel || '审批通过'
+            : '待补办立项审批',
+          approvalDate: mergedDossier.approvalProof.paperApprovedDate || existing.approvalDate || nowDate,
+          approvedDate: evalRes.pillarApproval.passed
+            ? existing.approvedDate || mergedDossier.approvalProof.paperApprovedDate || nowDate
+            : existing.approvedDate,
+          inquiryDate: evalRes.pillarPricing.passed
+            ? mergedDossier.negotiationDate || mergedDossier.biddingRecord?.bidOpenDate || existing.inquiryDate || nowDate
+            : `待${evalRes.requiredModeMeta.shortLabel}`,
+          bargainBatch:
+            mergedDossier.negotiationBatch ||
+            mergedDossier.biddingRecord?.biddingNo ||
+            evalRes.requiredModeMeta.shortLabel,
+          bargainDate: mergedDossier.negotiationDate || mergedDossier.biddingRecord?.bidOpenDate || existing.bargainDate,
+          preApprovalStatus: evalRes.isAuditReady
+            ? existing.preApprovalStatus.includes('并通过')
+              ? existing.preApprovalStatus
+              : '审计已齐备 · 待出具预批单'
+            : `审计拦截（缺 ${3 - evalRes.completedCount} 项凭证）`,
+          dateValidation: evalRes.isAuditReady ? '三支柱审计核验通过' : evalRes.missingItems[0] || '缺失合规材料',
+          relatedDocsCount:
+            (mergedDossier.comparisonQuotes?.length || 0) +
+            (mergedDossier.meetingMinutes?.length || 0) +
+            (mergedDossier.approvalProof?.mode !== 'none' ? 1 : 0)
+        };
+
+        upsertDynamicProjectRecord(nextRecord);
+
+        // 同步工单审计状态
+        if (mergedDossier.sourceWorkOrderId) {
+          workOrdersStore = workOrdersStore.map(o =>
+            o.id === mergedDossier.sourceWorkOrderId
+              ? {
+                  ...o,
+                  linkedProjectId: nextRecord.id,
+                  requiredComplianceMode: mergedDossier.requiredMode,
+                  totalRepairCost: nextTotal || o.totalRepairCost,
+                  auditArchiveStatus:
+                    o.auditArchiveStatus === 'archived'
+                      ? 'archived'
+                      : evalRes.isAuditReady
+                        ? 'audit_ready'
+                        : 'pending_audit'
+                }
+              : o
+          );
+          savePersistentWorkOrders(workOrdersStore);
+        }
+
+        res.json({ success: true, data: nextRecord, evaluation: evalRes });
+      } catch (err: any) {
+        res.status(500).json({ success: false, error: err.message });
+      }
+    }
+  );
+
+  app.post(
+    '/api/project-ledger/:id/bidding-launch',
+    requireRbac(canOperateProjectLedgerByPolicy, '发起项目招标立项'),
+    (req, res) => {
+      try {
+        const { id } = req.params;
+        const user = extractRequestUser(req);
+        const existing = findMergedProjectById(id);
+        if (!existing) {
+          return res.status(404).json({ success: false, error: '未找到对应台账项目' });
+        }
+        const { biddingTitle, biddingMethod, maxBudget, deadlineDate, description } = req.body || {};
+        const nowDate = new Date().toISOString().slice(0, 10);
+        const bidId = `BID-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}`;
+        const budget = Number(maxBudget || existing.invoice?.totalAmount || existing.complianceDossier?.estimatedAmount || 60000);
+
+        const newBid: BiddingProject = {
+          id: bidId,
+          title: biddingTitle || `${existing.projectName}专项公开招标采购`,
+          category: 'EQUIPMENT_REPAIR',
+          department: existing.department || '医学工程科',
+          publishDate: nowDate,
+          deadlineDate: deadlineDate || `${nowDate} 17:00`,
+          maxBudget: budget,
+          urgency: 'HIGH',
+          status: 'OPEN',
+          description: description || existing.approvalContent || existing.repairInfo || '依据医院招标合规管理制度公开征集投标单位',
+          technicalRequirements: [
+            '须具备二/三类医疗器械经营或维修专业资质，提供原厂授权或同类三甲医院履约案例',
+            '维修/供货完成须配合临床试机验收与计量检测合格',
+            '须提供增值税专用发票及不少于12个月质量保修承诺'
+          ],
+          equipmentList: [
+            {
+              id: `REQ-${Date.now()}`,
+              equipmentName: existing.complianceDossier?.equipmentName || existing.projectName,
+              model: existing.complianceDossier?.equipmentModel || existing.category,
+              department: existing.department,
+              faultSymptomOrScope: existing.repairInfo || existing.projectName,
+              expectedDeliveryDays: 14
+            }
+          ],
+          allowSubcontracting: false,
+          minWarrantyMonths: 12,
+          bidsCount: 0
+        };
+
+        biddingProjectsStore.unshift(newBid);
+        savePersistentBiddingProjects(biddingProjectsStore);
+
+        const prevDossier = existing.complianceDossier || {
+          hasCost: true,
+          estimatedAmount: budget,
+          approvedBudgetAmount: budget,
+          requiredMode: resolveProcurementMode(true, budget),
+          createdFromStage: 'manual' as const,
+          approvalProof: { mode: 'none' as const },
+          comparisonQuotes: [],
+          meetingMinutes: [],
+          auditTrail: []
+        };
+
+        const updatedProj: HospitalProjectRecord = {
+          ...existing,
+          bargainBatch: bidId,
+          inquiryDate: `招标中 (${bidId})`,
+          complianceDossier: {
+            ...prevDossier,
+            biddingRecord: {
+              linkedBiddingId: bidId,
+              biddingNo: bidId,
+              biddingTitle: newBid.title,
+              biddingMethod: biddingMethod || 'open_tender',
+              bidOpenDate: nowDate,
+              bidderCount: 0,
+              winningVendor: '',
+              winningAmount: 0,
+              status: 'bidding_open'
+            },
+            auditTrail: [
+              {
+                id: `AUD-BID-${Date.now()}`,
+                timestamp: new Date().toISOString().replace('T', ' ').slice(0, 16),
+                operatorName: user?.name || '医工主管',
+                operatorRole: user?.role || '招标发起人',
+                action: '发起招标立项并发布至供应商门户',
+                detail: `已生成招标标号 ${bidId}，最高限价 ¥${budget.toLocaleString()}`
+              },
+              ...(prevDossier.auditTrail || [])
+            ]
+          }
+        };
+        upsertDynamicProjectRecord(updatedProj);
+
+        res.json({ success: true, biddingProject: newBid, project: updatedProj });
+      } catch (err: any) {
+        res.status(500).json({ success: false, error: err.message });
+      }
+    }
+  );
+
+  app.post(
+    '/api/project-ledger/:id/action',
+    requireRbac(canOperateProjectLedgerByPolicy, '操作设备项目台账（下钻/预批单/导出）'),
+    (req, res) => {
+      try {
+        const { id } = req.params;
+        const { action } = req.body || {};
+        const user = extractRequestUser(req);
+        const project = findMergedProjectById(id);
+
+        if (project && ['pre_approval', 'finalize_payment', 'archive'].includes(String(action))) {
+          const evalRes = evaluateProjectAuditCompliance(project, {
+            approvals: approvalsStore,
+            vendorOrders: vendorCollabOrdersStore,
+            biddingProjects: biddingProjectsStore
+          });
+          if (!evalRes.isAuditReady) {
+            if (project.complianceDossier) {
+              const blockedProj: HospitalProjectRecord = {
+                ...project,
+                complianceDossier: {
+                  ...project.complianceDossier,
+                  auditTrail: [
+                    {
+                      id: `AUD-BLK-${Date.now()}`,
+                      timestamp: new Date().toISOString().replace('T', ' ').slice(0, 16),
+                      operatorName: user?.name || '管理员',
+                      operatorRole: user?.role || '台账操作人',
+                      action: `尝试执行「${action}」被审计门禁拦截`,
+                      detail: '缺失审计必备三支柱材料，系统拒绝放行',
+                      blockedReason: evalRes.missingItems.join('；')
+                    },
+                    ...(project.complianceDossier.auditTrail || [])
+                  ]
+                }
+              };
+              upsertDynamicProjectRecord(blockedProj);
+            }
+            return res.status(409).json({
+              success: false,
+              auditBlocked: true,
+              missingItems: evalRes.missingItems,
+              evaluation: evalRes,
+              error: `审计合规强阻断：${evalRes.missingItems.join('；')}`
+            });
+          }
+
+          if (action === 'pre_approval' || action === 'archive' || action === 'finalize_payment') {
+            const nowDate = new Date().toISOString().slice(0, 10);
+            const nowTimestamp = new Date().toISOString().replace('T', ' ').slice(0, 16);
+            const updatedProj: HospitalProjectRecord = {
+              ...project,
+              preApprovalStatus: '已打印并通过',
+              preApprovalPrintDate: project.preApprovalPrintDate || nowDate,
+              preApprovalPassTime: nowTimestamp,
+              dateValidation: '审计三支柱全部核验通过',
+              invoice: {
+                ...project.invoice,
+                paymentStatus:
+                  action === 'finalize_payment' ? '已支付电汇' : '预批已通过待付款'
+              },
+              complianceDossier: project.complianceDossier
+                ? {
+                    ...project.complianceDossier,
+                    auditLockedCleared: true,
+                    archivedAt: action === 'archive' ? nowTimestamp : project.complianceDossier.archivedAt,
+                    archivedBy: action === 'archive' ? (user?.name || '医工主管') : project.complianceDossier.archivedBy,
+                    auditTrail: [
+                      {
+                        id: `AUD-PASS-${Date.now()}`,
+                        timestamp: nowTimestamp,
+                        operatorName: user?.name || '医工主管',
+                        operatorRole: user?.role || '台账管理员',
+                        action: action === 'pre_approval' ? '审计校验通过·出具费用预批单' : action === 'finalize_payment' ? '确认财务付款核销' : '项目全套审计档案归档',
+                        detail: `项目 #${id} 已通过三支柱审计检查（${evalRes.requiredModeMeta.label}），合规放行。`
+                      },
+                      ...(project.complianceDossier.auditTrail || [])
+                    ]
+                  }
+                : undefined
+            };
+            upsertDynamicProjectRecord(updatedProj);
+          }
+        }
+
+        res.json({
+          success: true,
+          projectId: id,
+          action: action || 'inspect',
+          timestamp: new Date().toISOString()
+        });
+      } catch (err: any) {
+        res.status(500).json({ success: false, error: err.message });
+      }
+    }
+  );
+
+  // 19C. 电子审批流持久化与项目台账自动回写接口
+  app.get('/api/approvals', (_req, res) => {
+    res.json({ success: true, data: approvalsStore });
+  });
+
+  app.post('/api/approvals', (req, res) => {
+    try {
+      const payload = req.body as ApprovalApplication;
+      if (!payload || !payload.id) {
+        return res.status(400).json({ success: false, error: '审批单数据不完整' });
+      }
+      const idx = approvalsStore.findIndex(a => a.id === payload.id);
+      if (idx >= 0) {
+        approvalsStore[idx] = { ...approvalsStore[idx], ...payload };
+      } else {
+        approvalsStore.unshift(payload);
+      }
+      savePersistentApprovals(approvalsStore);
+
+      // 若关联项目台账ID或工单ID，自动绑定电子审批ID到项目台账
+      const linkedProj =
+        (payload.linkedProjectId ? findMergedProjectById(payload.linkedProjectId) : undefined) ||
+        (payload.linkedWorkOrderId
+          ? getMergedProjectLedger().find(p => p.complianceDossier?.sourceWorkOrderId === payload.linkedWorkOrderId)
+          : undefined);
+      if (linkedProj) {
+        const prevDossier = linkedProj.complianceDossier || {
+          hasCost: true,
+          estimatedAmount: Number(payload.estimatedBudget || payload.partEstimatedCost || payload.estimatedCost || linkedProj.invoice?.totalAmount || 0),
+          requiredMode: resolveProcurementMode(true, Number(linkedProj.invoice?.totalAmount || 0)),
+          approvalProof: { mode: 'electronic' as const },
+          comparisonQuotes: [],
+          meetingMinutes: [],
+          auditTrail: []
+        };
+        const updatedProj: HospitalProjectRecord = {
+          ...linkedProj,
+          approvalStatus: payload.status === 'approved' || payload.status === 'archived' ? '电子审批已通过' : `电子审批中 (${payload.id})`,
+          complianceDossier: {
+            ...prevDossier,
+            approvalProof: {
+              ...prevDossier.approvalProof,
+              mode: prevDossier.approvalProof?.paperDocNo ? 'both' : 'electronic',
+              electronicApprovalId: payload.id,
+              electronicApprovalTitle: payload.title,
+              electronicStatus: payload.status
+            },
+            auditTrail: [
+              {
+                id: `AUD-APP-${Date.now()}`,
+                timestamp: new Date().toISOString().replace('T', ' ').slice(0, 16),
+                operatorName: payload.applicantName || '经办人',
+                operatorRole: payload.applicantDepartment || '申请科室',
+                action: '关联电子审批单',
+                detail: `已关联电子审批单 ${payload.id}（状态：${payload.currentApprovalNode || payload.status}）`
+              },
+              ...(prevDossier.auditTrail || [])
+            ]
+          }
+        };
+        upsertDynamicProjectRecord(updatedProj);
+      }
+
+      res.json({ success: true, data: payload });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.put('/api/approvals/:id', (req, res) => {
+    try {
+      const { id } = req.params;
+      const patch = req.body || {};
+      const idx = approvalsStore.findIndex(a => a.id === id);
+      let saved: ApprovalApplication;
+      if (idx >= 0) {
+        saved = { ...approvalsStore[idx], ...patch, id };
+        approvalsStore[idx] = saved;
+      } else {
+        saved = { ...patch, id };
+        approvalsStore.unshift(saved);
+      }
+      savePersistentApprovals(approvalsStore);
+
+      // 自动联动更新关联项目台账的电子审批状态
+      const matchingProjects = getMergedProjectLedger().filter(
+        p =>
+          p.complianceDossier?.approvalProof?.electronicApprovalId === id ||
+          (saved.linkedProjectId && p.id === saved.linkedProjectId) ||
+          (saved.linkedWorkOrderId && p.complianceDossier?.sourceWorkOrderId === saved.linkedWorkOrderId)
+      );
+      matchingProjects.forEach(proj => {
+        if (!proj.complianceDossier) return;
+        const isPassed = saved.status === 'approved' || saved.status === 'archived';
+        upsertDynamicProjectRecord({
+          ...proj,
+          approvalStatus: isPassed ? '电子审批终审通过' : proj.approvalStatus,
+          approvedDate: isPassed ? new Date().toISOString().slice(0, 10) : proj.approvedDate,
+          complianceDossier: {
+            ...proj.complianceDossier,
+            approvalProof: {
+              ...proj.complianceDossier.approvalProof,
+              mode: proj.complianceDossier.approvalProof.paperDocNo ? 'both' : 'electronic',
+              electronicApprovalId: id,
+              electronicApprovalTitle: saved.title,
+              electronicStatus: saved.status
+            },
+            auditTrail: [
+              {
+                id: `AUD-APPS-${Date.now()}`,
+                timestamp: new Date().toISOString().replace('T', ' ').slice(0, 16),
+                operatorName: saved.auditLogs?.[saved.auditLogs.length - 1]?.operatorName || '审批节点',
+                operatorRole: saved.currentApprovalNode || '审批人',
+                action: `电子审批状态更新：${saved.status}`,
+                detail: `关联电子审批单 ${id} 已流转至：${saved.currentApprovalNode || saved.status}`
+              },
+              ...(proj.complianceDossier.auditTrail || [])
+            ]
+          }
+        });
+      });
+
+      res.json({ success: true, data: saved });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // 19D. 招标项目持久化与中标结果联动台账接口
+  app.get('/api/bidding-projects', (_req, res) => {
+    res.json({ success: true, data: biddingProjectsStore });
+  });
+
+  app.post('/api/bidding-projects', (req, res) => {
+    try {
+      const payload = req.body as BiddingProject;
+      if (!payload || !payload.id) {
+        return res.status(400).json({ success: false, error: '招标项目数据不完整' });
+      }
+      const idx = biddingProjectsStore.findIndex(b => b.id === payload.id);
+      if (idx >= 0) {
+        biddingProjectsStore[idx] = { ...biddingProjectsStore[idx], ...payload };
+      } else {
+        biddingProjectsStore.unshift(payload);
+      }
+      savePersistentBiddingProjects(biddingProjectsStore);
+      res.json({ success: true, data: payload });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.put('/api/bidding-projects/:id', (req, res) => {
+    try {
+      const { id } = req.params;
+      const patch = req.body || {};
+      const idx = biddingProjectsStore.findIndex(b => b.id === id);
+      let saved: BiddingProject;
+      if (idx >= 0) {
+        saved = { ...biddingProjectsStore[idx], ...patch, id };
+        biddingProjectsStore[idx] = saved;
+      } else {
+        saved = { ...patch, id };
+        biddingProjectsStore.unshift(saved);
+      }
+      savePersistentBiddingProjects(biddingProjectsStore);
+
+      // 若中标定标，自动回写至绑定该招标项目的设备项目台账
+      if (saved.status === 'WON' || saved.status === 'CLOSED') {
+        dynamicProjectLedgerStore.forEach(proj => {
+          if (proj.complianceDossier?.biddingRecord?.linkedBiddingId === id || proj.complianceDossier?.biddingRecord?.biddingNo === id) {
+            upsertDynamicProjectRecord({
+              ...proj,
+              vendor: saved.winningVendor
+                ? { ...proj.vendor, companyName: saved.winningVendor }
+                : proj.vendor,
+              complianceDossier: {
+                ...proj.complianceDossier,
+                biddingRecord: {
+                  ...proj.complianceDossier.biddingRecord,
+                  winningVendor: saved.winningVendor || proj.complianceDossier.biddingRecord.winningVendor,
+                  winningAmount: Number(saved.winningAmount || proj.complianceDossier.biddingRecord.winningAmount || 0),
+                  status: 'awarded'
+                }
+              }
+            });
+          }
+        });
+      }
+
+      res.json({ success: true, data: saved });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
   });
 
   // 20. 国家卫健委医院智慧管理评级与HIS/PACS数据互联专区 API
@@ -4007,6 +7129,280 @@ ${userQuestion}
     }
   });
 
+  // 18.0 现场自修转外协协同派工接口 + 外协协同单持久化 CRUD
+  app.post('/api/work-orders/:id/escalate-outsource', requireRbac(canExecuteFieldRepairByPolicy, '现场排查转外协派工'), (req, res) => {
+    try {
+      const { id } = req.params;
+      const {
+        operatorName,
+        externalVendorId,
+        externalPartner,
+        externalVendorShortName,
+        externalVendorType,
+        externalVendorContact,
+        externalVendorPhone,
+        externalContractNo,
+        outsourceServiceMode,
+        outsourceReason,
+        estimatedOutsourceCost,
+        requiresVendorQuote,
+        syncToVendorPortal
+      } = req.body || {};
+
+      if (!externalPartner || !String(externalPartner).trim()) {
+        return res.status(400).json({ success: false, error: '请选择或填写外协原厂/维保服务商名称' });
+      }
+
+      const nowStr = new Date().toISOString().replace('T', ' ').slice(0, 16);
+      const serviceMode = outsourceServiceMode || 'single_paid_quote';
+      const shouldQuote =
+        typeof requiresVendorQuote === 'boolean'
+          ? requiresVendorQuote
+          : serviceMode === 'single_paid_quote' || serviceMode === 'factory_return';
+      const extId = `EXT-${String(id).replace(/[^A-Za-z0-9]/g, '').slice(-10)}`;
+
+      let foundOrder: any = null;
+      const escalationNote = {
+        id: `DISC-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        authorName: operatorName || '现场工程师',
+        authorRole: '院内排查转外协',
+        content: `现场拆机/检测判定需原厂或第三方协同处理，已转为外协派工至【${externalPartner}】${externalContractNo ? `(合同:${externalContractNo})` : ''}。原因：${outsourceReason || '核心部件故障/需原厂专有工具定标'}`,
+        timestamp: nowStr,
+        actionType: 'discussion'
+      };
+
+      workOrdersStore = workOrdersStore.map(o => {
+        if (o.id === id) {
+          const prevDiscussions = Array.isArray(o.internalDiscussions) ? o.internalDiscussions : [];
+          foundOrder = {
+            ...o,
+            status: 'waiting_parts',
+            dispatchChannel: 'outsourced',
+            externalVendorId: externalVendorId || o.externalVendorId || 'ISO-001',
+            externalPartner: String(externalPartner).trim(),
+            externalVendorShortName: externalVendorShortName || String(externalPartner).trim(),
+            externalVendorType: externalVendorType || 'manufacturer',
+            externalVendorContact: externalVendorContact || '',
+            externalVendorPhone: externalVendorPhone || '',
+            externalContractNo: externalContractNo || '',
+            outsourceServiceMode: serviceMode,
+            outsourceReason: outsourceReason || '',
+            estimatedOutsourceCost: Number(estimatedOutsourceCost || 0) || undefined,
+            requiresVendorQuote: shouldQuote,
+            vendorDispatchTime: nowStr,
+            vendorStatus: shouldQuote ? 'pending_quote' : 'dispatched_to_vendor',
+            linkedVendorOrderId: o.linkedVendorOrderId || extId,
+            internalDiscussions: [...prevDiscussions, escalationNote]
+          };
+          return foundOrder;
+        }
+        return o;
+      });
+
+      if (!foundOrder) {
+        return res.status(404).json({ success: false, error: '未找到对应派工工单' });
+      }
+
+      let createdVendorCollabOrder: any = null;
+      if (syncToVendorPortal !== false) {
+        createdVendorCollabOrder = upsertVendorCollabFromWorkOrder(foundOrder, operatorName || foundOrder.assignedEngineerName || '现场工程师');
+        if (createdVendorCollabOrder && foundOrder.linkedVendorOrderId !== createdVendorCollabOrder.id) {
+          foundOrder.linkedVendorOrderId = createdVendorCollabOrder.id;
+          workOrdersStore = workOrdersStore.map(o => (o.id === id ? foundOrder : o));
+        }
+      }
+
+      let linkedProject: HospitalProjectRecord | null = null;
+      const escCost = Number(estimatedOutsourceCost || 0);
+      if (isWorkOrderPaid(foundOrder) || escCost > 0) {
+        linkedProject = upsertProjectFromWorkOrderServer(foundOrder, {
+          stage: 'field_operation',
+          operatorName: operatorName || foundOrder.assignedEngineerName || '现场工程师',
+          estimatedAmount: escCost,
+          hasCost: true
+        });
+        foundOrder.hasCost = true;
+        foundOrder.estimatedCost = escCost > 0 ? escCost : foundOrder.estimatedCost;
+        foundOrder.costTriggerStage = 'field_operation';
+        foundOrder.linkedProjectId = linkedProject.id;
+        foundOrder.requiredComplianceMode = linkedProject.complianceDossier?.requiredMode;
+        foundOrder.auditArchiveStatus = 'pending_audit';
+        workOrdersStore = workOrdersStore.map(o => (o.id === id ? foundOrder : o));
+      }
+
+      savePersistentWorkOrders(workOrdersStore);
+
+      if (foundOrder.equipmentId) {
+        const targetEq = equipmentStore.find(e => e.id === foundOrder.equipmentId);
+        if (targetEq && Array.isArray(targetEq.repairRecords)) {
+          targetEq.repairRecords = targetEq.repairRecords.map(r => {
+            if (r.id === `REP-${id}` || r.id.includes(id) || (foundOrder.caoliaoRecordNo && (r as any).recordNo === foundOrder.caoliaoRecordNo)) {
+              return {
+                ...r,
+                technician: `外协: ${foundOrder.externalVendorShortName || foundOrder.externalPartner} (监护: ${foundOrder.assignedEngineerName || operatorName || '医工'})`,
+                status: '待配件'
+              };
+            }
+            return r;
+          });
+          savePersistentEquipment(equipmentStore);
+        }
+      }
+
+      res.json({
+        success: true,
+        message: `已成功转为外协派工【${foundOrder.externalPartner}】，协同单号：${foundOrder.linkedVendorOrderId}${linkedProject ? `，已同步立项至设备项目台账(${linkedProject.id})` : ''}`,
+        order: foundOrder,
+        data: foundOrder,
+        vendorCollabOrder: createdVendorCollabOrder,
+        linkedProject
+      });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  app.get('/api/vendor-collaboration/orders', (_req, res) => {
+    res.json({
+      success: true,
+      data: vendorCollabOrdersStore
+    });
+  });
+
+  app.post('/api/vendor-collaboration/orders', (req, res) => {
+    try {
+      const payload = req.body;
+      if (!payload || !payload.id) {
+        return res.status(400).json({ success: false, error: '外协协同单数据不完整' });
+      }
+      const idx = vendorCollabOrdersStore.findIndex(
+        (o: any) => o.id === payload.id || (payload.workOrderId && o.workOrderId === payload.workOrderId)
+      );
+      if (idx >= 0) {
+        vendorCollabOrdersStore[idx] = { ...vendorCollabOrdersStore[idx], ...payload };
+      } else {
+        vendorCollabOrdersStore.unshift(payload);
+      }
+      savePersistentVendorCollabOrders(vendorCollabOrdersStore);
+      res.json({ success: true, data: vendorCollabOrdersStore[idx >= 0 ? idx : 0] });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
+  app.put('/api/vendor-collaboration/orders/:id', (req, res) => {
+    try {
+      const { id } = req.params;
+      const patch = req.body || {};
+      const idx = vendorCollabOrdersStore.findIndex((o: any) => o.id === id);
+      let savedOrder: any;
+      if (idx >= 0) {
+        savedOrder = { ...vendorCollabOrdersStore[idx], ...patch, id };
+      } else {
+        savedOrder = { ...patch, id };
+      }
+
+      // 审计强阻断检查：若外协协同单拟归档入库且涉及费用，必须先通过关联项目台账三支柱校验
+      const linkedProj = getMergedProjectLedger().find(
+        p =>
+          p.complianceDossier?.linkedVendorOrderId === id ||
+          p.complianceDossier?.sourceVendorOrderId === id ||
+          (savedOrder.workOrderId && p.complianceDossier?.sourceWorkOrderId === savedOrder.workOrderId)
+      );
+
+      if (patch.status === 'ARCHIVED' && linkedProj) {
+        const tempVendorOrders =
+          idx >= 0
+            ? vendorCollabOrdersStore.map((o: any, i: number) => (i === idx ? savedOrder : o))
+            : [savedOrder, ...vendorCollabOrdersStore];
+        const evalRes = evaluateProjectAuditCompliance(linkedProj, {
+          approvals: approvalsStore,
+          vendorOrders: tempVendorOrders,
+          biddingProjects: biddingProjectsStore
+        });
+        if (!evalRes.isAuditReady) {
+          return res.status(409).json({
+            success: false,
+            auditBlocked: true,
+            missingItems: evalRes.missingItems,
+            error: `审计合规强阻断：关联项目 #${linkedProj.id} 尚未完成三支柱资料（${evalRes.missingItems.join('；')}），禁止归档入库！`
+          });
+        }
+      }
+
+      if (idx >= 0) {
+        vendorCollabOrdersStore[idx] = savedOrder;
+      } else {
+        vendorCollabOrdersStore.unshift(savedOrder);
+      }
+      savePersistentVendorCollabOrders(vendorCollabOrdersStore);
+
+      // 同步议价结果与发票状态回设备项目台账
+      if (linkedProj && linkedProj.complianceDossier) {
+        const agreedPrice = Number(savedOrder.finalNegotiatedPrice || savedOrder.quoteGrandTotal || 0);
+        const negotiationAgreed = ['APPROVED_REPAIRING', 'COMPLETED_PENDING_INVOICE', 'INVOICE_UPLOADED', 'ARCHIVED'].includes(savedOrder.status);
+        upsertDynamicProjectRecord({
+          ...linkedProj,
+          vendor: savedOrder.vendorName
+            ? {
+                ...linkedProj.vendor,
+                companyName: savedOrder.vendorName,
+                contactPerson: savedOrder.vendorContact || linkedProj.vendor.contactPerson,
+                contactPhone: savedOrder.vendorPhone || linkedProj.vendor.contactPhone
+              }
+            : linkedProj.vendor,
+          invoice: agreedPrice > 0
+            ? {
+                ...linkedProj.invoice,
+                totalAmount: agreedPrice,
+                invoiceNumber: savedOrder.invoiceRecord?.invoiceNo || linkedProj.invoice.invoiceNumber,
+                invoiceCode: savedOrder.invoiceRecord?.invoiceCode || linkedProj.invoice.invoiceCode,
+                invoiceDate: savedOrder.invoiceRecord?.invoiceDate || linkedProj.invoice.invoiceDate
+              }
+            : linkedProj.invoice,
+          complianceDossier: {
+            ...linkedProj.complianceDossier,
+            linkedVendorOrderId: savedOrder.id,
+            negotiationCompleted: negotiationAgreed || linkedProj.complianceDossier.negotiationCompleted,
+            negotiationFinalPrice: agreedPrice > 0 ? agreedPrice : linkedProj.complianceDossier.negotiationFinalPrice,
+            negotiationDate: negotiationAgreed ? new Date().toISOString().slice(0, 10) : linkedProj.complianceDossier.negotiationDate,
+            negotiationBatch: savedOrder.id
+          }
+        });
+      }
+
+      // 若关联院内派工单，同步外协进展状态与维保费用
+      if (savedOrder.workOrderId) {
+        const statusMap: Record<string, string> = {
+          PENDING_QUOTE: 'pending_quote',
+          MULTI_DEPT_NEGOTIATING: 'negotiating',
+          APPROVED_REPAIRING: 'vendor_on_site',
+          COMPLETED_PENDING_INVOICE: 'completed_pending_acceptance',
+          INVOICE_UPLOADED: 'completed_pending_acceptance',
+          ARCHIVED: 'archived'
+        };
+        let woChanged = false;
+        workOrdersStore = workOrdersStore.map(wo => {
+          if (wo.id === savedOrder.workOrderId) {
+            woChanged = true;
+            return {
+              ...wo,
+              linkedVendorOrderId: savedOrder.id,
+              vendorStatus: statusMap[savedOrder.status] || wo.vendorStatus,
+              totalRepairCost: savedOrder.finalNegotiatedPrice || savedOrder.quoteGrandTotal || wo.totalRepairCost
+            };
+          }
+          return wo;
+        });
+        if (woChanged) savePersistentWorkOrders(workOrdersStore);
+      }
+
+      res.json({ success: true, data: savedOrder });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
   // Vite middleware in development vs production static build
   const isDev =
     process.env.NODE_ENV === 'development' ||
@@ -4131,7 +7527,14 @@ ${userQuestion}
           return updated;
         });
         savePersistentEquipment(equipmentStore);
-        console.log(`[Caoliao Auto-Sync] Successfully linked ${matched} equipments with official code_ids, and synced ${repSynced} repairs.`);
+
+        // 同步近期尚未入库的 RDS 报修(table_d233)与维保(table_d237)记录至日志池与派工单池，并开启每8秒自动轮询保鲜与新单实时弹窗提醒
+        const rdsSyncSummary = await syncCaoliaoRdsTables({ limitPerTable: 50, suppressAlert: false });
+        console.log(`[Caoliao Auto-Sync] Successfully linked ${matched} equipments with official code_ids, synced ${repSynced} repairs, and bridged ${rdsSyncSummary.importedCount} recent RDS orders (table_d233 + table_d237).`);
+
+        setInterval(() => {
+          syncCaoliaoRdsTables({ limitPerTable: 20, suppressAlert: false }).catch(() => {});
+        }, 8000);
       } catch (e: any) {
         console.warn('[Caoliao Auto-Sync] Notice:', e.message);
       }

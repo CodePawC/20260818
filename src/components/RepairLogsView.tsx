@@ -32,11 +32,20 @@ import {
   FileText,
   QrCode,
   Eye,
-  BookOpen
+  BookOpen,
+  MessageSquare
 } from 'lucide-react';
 import { CaoliaoRepairIntegrationOverview } from './CaoliaoRepairIntegrationOverview';
 import { ActiveTab } from '../types';
-import { isHeadNurse, isClinicalStaff, isDepartmentRestricted, getUserDepartment, canAccessTab } from '../utils/authUtils';
+import {
+  isHeadNurse,
+  isClinicalStaff,
+  isDepartmentRestricted,
+  getUserDepartment,
+  canAccessTab,
+  canDispatchWorkOrder,
+  canParticipateDispatchDiscussion
+} from '../utils/authUtils';
 import { ApprovalApplication } from '../types/approvalTypes';
 import { Pagination } from './Pagination';
 import { MonthlyFinanceReportModal } from './MonthlyFinanceReportModal';
@@ -49,13 +58,26 @@ import { getVendorCollaborationOrders, saveVendorCollaborationOrders } from '../
 import { VendorCollaborationRepairTracker } from './VendorCollaborationRepairTracker';
 import { RepairReportDetailModal, RepairReportDetailData } from './RepairReportDetailModal';
 import { standardizeRepairRecordCode, StandardWorkOrderInfo } from '../utils/workOrderCodeGenerator';
+import { EngineeringWorkOrder, BiomedicalEngineerProfile, OutsourcedDispatchMeta } from '../types/dispatchTypes';
+import { DispatchAssignModal } from './DispatchAssignModal';
+import { WorkOrderStepBar } from './WorkOrderStepBar';
+import { DEFAULT_BIOMEDICAL_ENGINEERS, parseWorkOrderComparableTime, sortWorkOrdersNewestFirst, buildVendorOrderFromWorkOrder, upsertVendorCollaborationOrder } from '../utils/dispatchData';
 
 export interface UnifiedRepairLog {
   id: string; // 规范全码工单号，例如 WO-REP-2026-0546
   originalRawId?: string; // 原始系统流水号或旧版编号（便于历史审计追溯）
   standardWorkOrderCode: string; // 标准规范全码
+  recordNo?: string; // 草料单号 (如 L12252)
+  caoliaoRecordNo?: string;
+  workOrderId?: string;
+  faultTimestamp?: string; // 精确报修时间戳用于毫秒级倒序排序
+  reporterName?: string;
+  reporterPhone?: string;
+  photoUrl?: string;
+  source?: string;
   category: 'standard' | 'framework_sporadic'; // standard = 设备台账故障报修, framework_sporadic = 零修工单 (月度框架零星维保)
   equipmentId?: string;
+  codeId?: string;
   equipmentName: string;
   equipmentSn: string;
   equipmentModel?: string;
@@ -92,6 +114,7 @@ interface RepairLogsViewProps {
   onViewEquipmentDetails?: (item: any, initialTab?: string) => void;
   onNavigateToTab?: (tab: ActiveTab) => void;
   onOpenRegulation?: (regulationId: string) => void;
+  onDirectDispatch?: (order: EngineeringWorkOrder | any) => void;
 }
 
 export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
@@ -104,9 +127,14 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
   onOpenStatusChange,
   onViewEquipmentDetails,
   onNavigateToTab,
-  onOpenRegulation
+  onOpenRegulation,
+  onDirectDispatch
 }) => {
   const [showCaoliaoOverview, setShowCaoliaoOverview] = useState<boolean>(false);
+  const [directAssignOrder, setDirectAssignOrder] = useState<EngineeringWorkOrder | null>(null);
+  const allowDispatch = canDispatchWorkOrder(currentUser);
+  const allowDiscuss = canParticipateDispatchDiscussion(currentUser);
+  const canViewDispatchTab = canAccessTab(currentUser, 'dispatch');
   const [searchKey, setSearchKey] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<'ALL' | '处理中' | '待配件' | '已完成' | 'PENDING_SIGN'>('ALL');
   const [selectedCategory, setSelectedCategory] = useState<'ALL' | 'framework_sporadic' | 'standard'>('ALL');
@@ -137,6 +165,102 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
     }
   });
 
+  // 现场派工实时单据池（统一由后端 /api/work-orders 主数据源供给，按最新时间倒序）
+  const [liveWorkOrders, setLiveWorkOrders] = useState<EngineeringWorkOrder[]>([]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchLiveOrders = async () => {
+      try {
+        const res = await fetch('/api/work-orders');
+        const json = await res.json();
+        if (json.success && Array.isArray(json.data) && isMounted) {
+          setLiveWorkOrders(sortWorkOrdersNewestFirst(json.data));
+        }
+      } catch (err) {
+        console.warn('Failed to fetch live work orders in RepairLogsView:', err);
+      }
+    };
+    fetchLiveOrders();
+    const timer = setInterval(fetchLiveOrders, 8000);
+    const handleOrdersUpdated = () => {
+      fetchLiveOrders();
+    };
+    window.addEventListener('work_orders_updated', handleOrdersUpdated);
+    window.addEventListener('caoliao_repair_received', handleOrdersUpdated);
+    window.addEventListener('medical_equipment_updated', handleOrdersUpdated);
+    return () => {
+      isMounted = false;
+      clearInterval(timer);
+      window.removeEventListener('work_orders_updated', handleOrdersUpdated);
+      window.removeEventListener('caoliao_repair_received', handleOrdersUpdated);
+      window.removeEventListener('medical_equipment_updated', handleOrdersUpdated);
+    };
+  }, []);
+
+  const handleLocalPreDispatch = async (
+    orderId: string,
+    engineer: BiomedicalEngineerProfile,
+    notes: string,
+    discussionContent?: string,
+    dispatchMeta?: OutsourcedDispatchMeta
+  ) => {
+    try {
+      const res = await fetch(`/api/work-orders/${encodeURIComponent(orderId)}/pre-dispatch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          engineerId: engineer.id,
+          engineerName: engineer.name,
+          engineerPhone: engineer.phone,
+          preDispatcherName: currentUser?.name || '医工调度中心',
+          authorRole: currentUser?.role || '设备科调度员',
+          notes,
+          discussionMessage: discussionContent,
+          ...(dispatchMeta || {})
+        })
+      });
+      const json = await res.json();
+      if (json.success && json.data) {
+        setLiveWorkOrders(prev => prev.map(o => o.id === orderId ? json.data : o));
+        setDirectAssignOrder(prev => prev && prev.id === orderId ? json.data : prev);
+        window.dispatchEvent(new CustomEvent('work_orders_updated'));
+        return json.data;
+      }
+    } catch (e) {
+      console.error('Failed to pre-dispatch in RepairLogsView:', e);
+    }
+  };
+
+  const handleLocalAddDiscussion = async (
+    orderId: string,
+    content: string,
+    proposedEngineer?: string | BiomedicalEngineerProfile | null
+  ) => {
+    try {
+      const engName = typeof proposedEngineer === 'string' ? proposedEngineer : proposedEngineer?.name;
+      const res = await fetch(`/api/work-orders/${encodeURIComponent(orderId)}/discussion`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          authorName: currentUser?.name || '医工调度中心',
+          authorRole: currentUser?.role || '设备科调度员',
+          content,
+          proposedEngineerName: engName
+        })
+      });
+      const json = await res.json();
+      if (json.success && json.data) {
+        setLiveWorkOrders(prev => prev.map(o => o.id === orderId ? json.data : o));
+        setDirectAssignOrder(prev => prev && prev.id === orderId ? json.data : prev);
+        window.dispatchEvent(new CustomEvent('work_orders_updated'));
+        return json.data;
+      }
+    } catch (e) {
+      console.error('Failed to add discussion in RepairLogsView:', e);
+    }
+  };
+
   // 严格依据当前登录用户角色及科室确定视角：护士长、一线临床医护及受限于科室人员
   const isNurse = isHeadNurse(currentUser) || isClinicalStaff(currentUser) || isDepartmentRestricted(currentUser);
   const userDept = getUserDepartment(currentUser);
@@ -162,9 +286,25 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
     return Array.from(set).sort((a, b) => a.localeCompare(b, 'zh-CN'));
   }, [equipmentList, frameworkBatches]);
 
-  // 将【设备报修记录】与【月度框架零修工单】深度融合为统一维保跟踪台账
+  // 将【设备报修记录】、【月度框架零修工单】与【现场派工中心实时工单】深度融合为统一维保跟踪台账
   const allRepairs: UnifiedRepairLog[] = useMemo(() => {
     const list: UnifiedRepairLog[] = [];
+
+    const woStatusMap: Record<string, '处理中' | '已完成' | '待配件'> = {
+      pending_dispatch: '处理中',
+      pre_dispatched: '处理中',
+      dispatched: '处理中',
+      accepted: '处理中',
+      arrived_inspecting: '处理中',
+      waiting_parts: '待配件',
+      repaired_pending_acceptance: '处理中',
+      closed: '已完成',
+      dispatched_assigned: '处理中',
+      arrived_repairing: '处理中',
+      pending_acceptance: '处理中',
+      completed_closed: '已完成',
+      suspended_parts: '待配件'
+    };
 
     // 1. 提取院内设备故障报修与常规维保台账 (standard)
     equipmentList.forEach((e, eqIdx) => {
@@ -172,25 +312,50 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
         const isSporadic = r.repairType?.includes('零修') || r.repairType?.includes('零星');
         const standardInfo = standardizeRepairRecordCode(r.id, r.repairType, r.equipmentName || e.name, (eqIdx * 10) + rIdx + 1);
         const standardCode = standardInfo.fullCode;
+        const recNo = (r as any).recordNo || (r as any).caoliaoRecordNo;
+        const woId = (r as any).workOrderId;
+        const matchedWo = liveWorkOrders.find(
+          wo =>
+            (woId && wo.id === woId) ||
+            (recNo && wo.caoliaoRecordNo === recNo) ||
+            (r.id && (wo.id === r.id || `REP-${wo.id}` === r.id))
+        );
+        const repName = (r as any).reporterName || (r as any).reporter || matchedWo?.reporterName;
+        const repPhone = (r as any).reporterPhone || (r as any).phone || matchedWo?.reporterPhone;
+        const pUrl = (r as any).photoUrl || (r as any).imageUrl || matchedWo?.photoUrl;
+        const src = (r as any).source || matchedWo?.source || (recNo ? 'caoliao' : 'hospital');
+        const rawTs = matchedWo?.reportTime || (r as any).reportTime || (r as any).timestamp || r.faultDate || '';
+
         list.push({
           id: standardCode,
           originalRawId: r.id,
           standardWorkOrderCode: standardCode,
+          recordNo: recNo || matchedWo?.caoliaoRecordNo,
+          caoliaoRecordNo: recNo || matchedWo?.caoliaoRecordNo,
+          workOrderId: woId || matchedWo?.id,
+          faultTimestamp: rawTs,
+          reporterName: repName,
+          reporterPhone: repPhone,
+          photoUrl: pUrl,
+          source: src,
           category: isSporadic ? 'framework_sporadic' : 'standard',
           equipmentId: e.id,
+          codeId: (r as any).codeId || e.codeId || matchedWo?.caoliaoCodeId,
           equipmentName: r.equipmentName || e.name,
           equipmentSn: r.equipmentSn || e.sn,
           equipmentModel: e.model,
           department: r.department || e.department || '临床科室',
-          repairType: r.repairType || '紧急故障维修',
-          faultDate: r.faultDate || '',
+          repairType: r.repairType || (recNo ? '草料扫码急修' : '紧急故障维修'),
+          faultDate: (r.faultDate || (rawTs ? String(rawTs).slice(0, 10) : '')),
           faultDescription: r.faultDescription || '',
-          technician: r.technician || '临床工程师',
-          cost: r.cost || 0,
+          technician: matchedWo?.assignedEngineerName
+            ? `${matchedWo.assignedEngineerName} (${matchedWo.biomedicalGroup || '生物医学工程科'})`
+            : r.technician || '临床工程师',
+          cost: matchedWo?.totalRepairCost ?? r.cost ?? 0,
           partsReplaced: r.partsReplaced,
-          resolution: r.resolution || '',
-          status: (r.status as any) || '已完成',
-          completionDate: r.completionDate,
+          resolution: matchedWo?.repairAction || r.resolution || '',
+          status: matchedWo ? (woStatusMap[matchedWo.status] || (r.status as any) || '处理中') : ((r.status as any) || '已完成'),
+          completionDate: r.completionDate || (matchedWo?.status === 'closed' ? (matchedWo.acceptanceTime || matchedWo.repairFinishedTime || '').slice(0, 10) : undefined),
           equipmentOriginal: e,
         });
       });
@@ -264,7 +429,58 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
       });
     });
 
-    // 3. 临床科室/护士长视角严格隔离：仅限于查看本科室名下的全部单据（含零修单与设备报修单）
+    // 3. 提取现场派工中心与草料接入的实时工单 (统一主数据源直通展示，如 L12252 / 临床手动报修)
+    liveWorkOrders.forEach((wo) => {
+      const isAlreadyIncluded = list.some(item =>
+        (wo.caoliaoRecordNo && (item.recordNo === wo.caoliaoRecordNo || item.caoliaoRecordNo === wo.caoliaoRecordNo)) ||
+        item.id === wo.id ||
+        (wo.id && (item.workOrderId === wo.id || item.originalRawId === wo.id || item.originalRawId === `REP-${wo.id}`))
+      );
+
+      if (!isAlreadyIncluded) {
+        const matchedEquip = equipmentList.find(e => e.id === wo.equipmentId) ||
+          equipmentList.find(e => e.sn && wo.equipmentSn && e.sn === wo.equipmentSn);
+
+        const techLabel = wo.assignedEngineerName
+          ? `${wo.assignedEngineerName} (${wo.biomedicalGroup || '生物医学工程科'})`
+          : wo.status === 'pre_dispatched' && wo.proposedEngineerName
+          ? `拟定: ${wo.proposedEngineerName} (预派工·内部确认中)`
+          : '待调度指派工程师';
+
+        list.push({
+          id: wo.id,
+          originalRawId: wo.caoliaoRecordNo || wo.id,
+          standardWorkOrderCode: wo.id,
+          recordNo: wo.caoliaoRecordNo,
+          caoliaoRecordNo: wo.caoliaoRecordNo,
+          workOrderId: wo.id,
+          faultTimestamp: wo.reportTime || '',
+          reporterName: wo.reporterName,
+          reporterPhone: wo.reporterPhone,
+          photoUrl: wo.photoUrl,
+          source: wo.source || 'caoliao',
+          category: 'standard',
+          equipmentId: wo.equipmentId || matchedEquip?.id,
+          codeId: wo.caoliaoCodeId || matchedEquip?.codeId,
+          equipmentName: wo.equipmentName || matchedEquip?.name || '报修设备',
+          equipmentSn: wo.equipmentSn || matchedEquip?.sn || '',
+          equipmentModel: wo.equipmentModel || matchedEquip?.model,
+          department: wo.department || matchedEquip?.department || '临床科室',
+          repairType: wo.source === 'caoliao' ? '草料扫码急修' : '临床报修',
+          faultDate: wo.reportTime ? String(wo.reportTime).slice(0, 10) : '',
+          faultDescription: wo.faultDescription || '临床设备故障',
+          technician: techLabel,
+          cost: wo.totalRepairCost || 0,
+          partsReplaced: Array.isArray(wo.partsReplaced) ? wo.partsReplaced.map(p => p.partName).join('、') : '',
+          resolution: wo.repairAction || wo.preDispatchNotes || '已受理报修，工单已流转至现场调度指挥中心。',
+          status: woStatusMap[wo.status] || '处理中',
+          completionDate: wo.status === 'closed' ? (wo.acceptanceTime || wo.repairFinishedTime || '').slice(0, 10) : undefined,
+          equipmentOriginal: matchedEquip
+        });
+      }
+    });
+
+    // 4. 临床科室/护士长视角严格隔离：仅限于查看本科室名下的全部单据（含零修单与设备报修单）
     const scopedList = list.filter(r => {
       if (isNurse && userDept) {
         return matchesDepartment(r.department, userDept);
@@ -272,13 +488,17 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
       return true;
     });
 
-    // 按报修或维保服务日期倒序排列（最新发生排在最前）
+    // 取消固定置顶任何旧单号，严格按最新报修发生时间倒序排列
     return scopedList.sort((a, b) => {
-      const dateA = a.faultDate || '';
-      const dateB = b.faultDate || '';
-      return dateB.localeCompare(dateA);
+      const timeA = parseWorkOrderComparableTime(a.faultTimestamp || a.faultDate);
+      const timeB = parseWorkOrderComparableTime(b.faultTimestamp || b.faultDate);
+      if (timeA !== timeB) return timeB - timeA;
+      const numA = parseInt(String(a.recordNo || '').replace(/\D/g, ''), 10) || 0;
+      const numB = parseInt(String(b.recordNo || '').replace(/\D/g, ''), 10) || 0;
+      if (numA !== numB) return numB - numA;
+      return String(b.id || '').localeCompare(String(a.id || ''));
     });
-  }, [equipmentList, frameworkBatches, isNurse, userDept]);
+  }, [equipmentList, frameworkBatches, liveWorkOrders, isNurse, userDept]);
 
   // 匹配选定记录的外协协同订单数据 (用于5阶段横向时序进度展示)
   const trackingMatchedOrder = useMemo((): VendorCollaborationOrder | null => {
@@ -457,13 +677,18 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
         return false;
       }
 
-      // 6. 关键词检索（支持规范工单全码、原系统流水号、设备名、零修项目、SN、工程师、处理方案、科室、签名人）
+      // 6. 关键词检索（支持规范工单全码、草料单号、派工单号、报修人、联系电话、原系统流水号、设备名、零修项目、SN、工程师、处理方案、科室、签名人）
       const query = searchKey.trim().toLowerCase();
       if (query) {
         const matchesQuery = 
           (r.id || '').toLowerCase().includes(query) ||
           (r.standardWorkOrderCode || '').toLowerCase().includes(query) ||
           (r.originalRawId || '').toLowerCase().includes(query) ||
+          (r.recordNo || '').toLowerCase().includes(query) ||
+          (r.caoliaoRecordNo || '').toLowerCase().includes(query) ||
+          (r.workOrderId || '').toLowerCase().includes(query) ||
+          (r.reporterName || '').toLowerCase().includes(query) ||
+          (r.reporterPhone || '').toLowerCase().includes(query) ||
           (r.equipmentName || '').toLowerCase().includes(query) ||
           (r.equipmentSn || '').toLowerCase().includes(query) ||
           (r.faultDescription || '').toLowerCase().includes(query) ||
@@ -717,6 +942,217 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
           </button>
         )}
       </div>
+
+      {/* 最新报修与现场派工一体化实时贯通导引条 (动态展示权限范围内最新未闭环报修单据) */}
+      {(() => {
+        const scopedOrders = isNurse && userDept
+          ? liveWorkOrders.filter(o => matchesDepartment(o.department, userDept))
+          : liveWorkOrders;
+        const bannerOrder =
+          scopedOrders.find(o => o.status !== 'closed' && (o.source === 'caoliao' || Boolean(o.caoliaoRecordNo))) ||
+          scopedOrders.find(o => o.status !== 'closed') ||
+          scopedOrders[0];
+        if (!bannerOrder) return null;
+
+        const bStatus = bannerOrder.status || 'pending_dispatch';
+        const isBannerPre = bStatus === 'pre_dispatched';
+        const isBannerPending = bStatus === 'pending_dispatch';
+        const bDiscCount = bannerOrder.internalDiscussions?.length || 0;
+        const isCaoliao = bannerOrder.source === 'caoliao' || Boolean(bannerOrder.caoliaoRecordNo);
+        const bannerCode = bannerOrder.caoliaoRecordNo || bannerOrder.id;
+        return (
+          <div className="mx-3 my-2 p-3 bg-gradient-to-r from-emerald-50 via-teal-50/70 to-blue-50/60 border border-emerald-300/90 rounded-lg shadow-2xs flex flex-col gap-2.5">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div className="flex items-start sm:items-center gap-2.5 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-2xs">
+                  <QrCode className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-1.5 py-0.2 bg-emerald-700 text-white text-[11px] font-bold rounded">
+                      {isCaoliao ? '最新草料报修·派工直通' : '最新临床报修·派工直通'}
+                    </span>
+                    {bannerOrder.caoliaoRecordNo && (
+                      <>
+                        <span className="font-mono text-xs font-bold text-emerald-950">
+                          草料单号: {bannerOrder.caoliaoRecordNo}
+                        </span>
+                        <span className="text-slate-400 text-xs">➔</span>
+                      </>
+                    )}
+                    <span className="font-mono text-xs font-bold text-blue-900 bg-blue-100/80 px-2 py-0.5 rounded border border-blue-200">
+                      派工单号: {bannerOrder.id}
+                    </span>
+                    <span className="font-mono text-[11px] text-slate-500 tabular-nums">
+                      {bannerOrder.reportTime}
+                    </span>
+                    {isBannerPre ? (
+                      <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-violet-100 text-violet-800 border border-violet-300 flex items-center gap-1">
+                        <MessageSquare className="w-3 h-3 text-violet-600" />
+                        预派工 · 拟定 {bannerOrder.proposedEngineerName || '工程师'} (内部确认中)
+                      </span>
+                    ) : isBannerPending ? (
+                      <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300 flex items-center gap-1">
+                        <Clock className="w-3 h-3 text-amber-600" />
+                        状态: 待分配调度 (已入派工调度池)
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-blue-100 text-blue-800 border border-blue-300 flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3 text-blue-600" />
+                        {bStatus === 'closed' ? '已完成闭环' : `已正式派工 · ${bannerOrder.assignedEngineerName || '工程师'}`}
+                      </span>
+                    )}
+                    {bDiscCount > 0 && (
+                      <span className="px-2 py-0.5 rounded text-[11px] font-semibold bg-violet-50 text-violet-700 border border-violet-200 flex items-center gap-1">
+                        <MessageSquare className="w-3 h-3" />
+                        {bDiscCount}条内部讨论
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-600 mt-1 flex items-center gap-2 flex-wrap">
+                    <span>
+                      <strong>设备：</strong>
+                      {bannerOrder.equipmentName}
+                      {bannerOrder.equipmentModel ? ` (${bannerOrder.equipmentModel})` : ''}
+                      {bannerOrder.internalNo ? ` · ${bannerOrder.internalNo}` : ''}
+                    </span>
+                    <span className="text-slate-300">|</span>
+                    <span><strong>科室：</strong>{bannerOrder.department}</span>
+                    <span className="text-slate-300">|</span>
+                    <span>
+                      <strong>报修人：</strong>{bannerOrder.reporterName || '临床医护'}
+                      {bannerOrder.reporterPhone ? ` (${bannerOrder.reporterPhone})` : ''}
+                    </span>
+                    <span className="text-slate-300">|</span>
+                    <span className="text-rose-700 font-medium"><strong>故障现象：</strong>{bannerOrder.faultDescription}</span>
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedRepairDetail({
+                      id: bannerOrder.id,
+                      workOrderId: bannerOrder.id,
+                      recordNo: bannerCode,
+                      recordId: String(bannerOrder.caoliaoRecordId || bannerOrder.id),
+                      timestamp: bannerOrder.reportTime,
+                      faultDate: String(bannerOrder.reportTime || '').slice(0, 10),
+                      equipmentId: bannerOrder.equipmentId,
+                      codeId: bannerOrder.caoliaoCodeId,
+                      equipmentName: bannerOrder.equipmentName,
+                      equipmentSn: bannerOrder.equipmentSn,
+                      model: bannerOrder.equipmentModel,
+                      category: bannerOrder.category,
+                      department: bannerOrder.department,
+                      location: bannerOrder.location,
+                      reporterName: bannerOrder.reporterName,
+                      reporterPhone: bannerOrder.reporterPhone,
+                      faultDescription: bannerOrder.faultDescription,
+                      photoUrl: bannerOrder.photoUrl,
+                      videoUrl: bannerOrder.videoUrl,
+                      urgency: bannerOrder.priority === 'P1_CRITICAL' ? 'P1' : 'P2',
+                      source: bannerOrder.source || 'caoliao',
+                      status: bStatus === 'closed' ? '已完成' : '处理中',
+                      technician: bannerOrder.assignedEngineerName || (bannerOrder.proposedEngineerName ? `拟定: ${bannerOrder.proposedEngineerName}` : '待调度指派工程师'),
+                      cost: bannerOrder.totalRepairCost || 0,
+                      resolution: bannerOrder.repairAction || '已接入全院现场派工指挥中心，待工程师进场核查处置'
+                    });
+                  }}
+                  className="px-2.5 py-1.5 bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 rounded text-xs font-semibold flex items-center gap-1 shadow-2xs transition cursor-pointer"
+                >
+                  <Eye className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>查看报修凭证详情</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = allRepairs.find(r => r.workOrderId === bannerOrder.id || (bannerOrder.caoliaoRecordNo && r.recordNo === bannerOrder.caoliaoRecordNo) || r.id === bannerOrder.id);
+                    if (target) {
+                      setSelectedTrackingRecord(target);
+                    } else {
+                      setSelectedTrackingRecord({
+                        id: bannerOrder.id,
+                        standardWorkOrderCode: bannerOrder.id,
+                        recordNo: bannerOrder.caoliaoRecordNo,
+                        workOrderId: bannerOrder.id,
+                        category: 'standard',
+                        equipmentId: bannerOrder.equipmentId,
+                        equipmentName: bannerOrder.equipmentName,
+                        equipmentSn: bannerOrder.equipmentSn,
+                        department: bannerOrder.department,
+                        repairType: isCaoliao ? '草料扫码急修' : '临床报修',
+                        faultDate: String(bannerOrder.reportTime || '').slice(0, 10),
+                        faultTimestamp: bannerOrder.reportTime,
+                        faultDescription: bannerOrder.faultDescription,
+                        technician: bannerOrder.assignedEngineerName || (bannerOrder.proposedEngineerName ? `拟定: ${bannerOrder.proposedEngineerName}` : '调度指派中'),
+                        cost: bannerOrder.totalRepairCost || 0,
+                        status: bStatus === 'closed' ? '已完成' : '处理中'
+                      });
+                    }
+                  }}
+                  className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded text-xs font-semibold flex items-center gap-1 shadow-2xs transition cursor-pointer"
+                >
+                  <Clock className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>5阶段流转跟踪</span>
+                </button>
+
+                {(allowDispatch || allowDiscuss) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onDirectDispatch) {
+                        onDirectDispatch(bannerOrder);
+                      } else {
+                        setDirectAssignOrder(bannerOrder);
+                      }
+                    }}
+                    className={`px-3 py-1.5 text-white rounded text-xs font-bold flex items-center gap-1 shadow-md transition cursor-pointer active:scale-95 ${
+                      isBannerPre
+                        ? 'bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500'
+                        : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500'
+                    }`}
+                    title={allowDispatch ? (isBannerPre ? "打开预派工讨论与正式确认派工弹窗" : "打开预派工拟定与正式派工确认弹窗（可内部讨论暂存）") : "参与派前内部技术讨论与协同"}
+                  >
+                    <Wrench className="w-3.5 h-3.5 text-white" />
+                    <span>
+                      {allowDispatch
+                        ? (isBannerPre ? '讨论/确认派工' : isBannerPending ? '预派/派工' : '派工详情')
+                        : (isBannerPre || isBannerPending ? '技术讨论' : '工单详情')}
+                    </span>
+                  </button>
+                )}
+
+                {onNavigateToTab && canViewDispatchTab && (
+                  <button
+                    type="button"
+                    onClick={() => onNavigateToTab('dispatch')}
+                    className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-700 border border-slate-300 rounded text-xs font-semibold flex items-center gap-1 shadow-2xs transition cursor-pointer"
+                  >
+                    <span>前往调度台</span>
+                    <ChevronRight className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* 5阶段状态流转进度条 */}
+            <div className="bg-white/95 rounded-lg px-2.5 py-2 border border-emerald-200/80">
+              <WorkOrderStepBar
+                status={bStatus}
+                size="sm"
+                showSubStatus={true}
+                proposedEngineerName={bannerOrder.proposedEngineerName}
+                assignedEngineerName={bannerOrder.assignedEngineerName}
+                discussionCount={bDiscCount}
+              />
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Filter Ribbon */}
       <div className="p-2.5 bg-slate-50/80 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs flex-none">
@@ -991,6 +1427,7 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
                                 timestamp: record.faultDate,
                                 faultDate: record.faultDate,
                                 equipmentId: record.equipmentId,
+                                codeId: record.codeId || record.equipmentOriginal?.codeId,
                                 equipmentName: record.equipmentName,
                                 equipmentSn: record.equipmentSn,
                                 model: record.equipmentModel || record.equipmentOriginal?.model,
@@ -1021,6 +1458,12 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
                             <span>{record.standardWorkOrderCode || record.id}</span>
                             <Eye className="w-2.5 h-2.5 opacity-60" />
                           </button>
+                          {record.recordNo && (
+                            <span className="px-1.5 py-0.2 rounded text-[10.5px] font-mono font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 inline-flex items-center gap-0.5 shrink-0" title={`草料二维码单号: ${record.recordNo}`}>
+                              <QrCode className="w-2.5 h-2.5 text-emerald-700" />
+                              草料: {record.recordNo}
+                            </span>
+                          )}
                           {isSporadic && (
                             <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-100 text-amber-800 shrink-0">
                               ⚡ 零修
@@ -1061,6 +1504,11 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
                             <span>SN: {record.equipmentSn || '--'}</span>
                             {record.equipmentOriginal?.model && (
                               <span className="text-slate-500">| 型号: {record.equipmentOriginal.model}</span>
+                            )}
+                            {record.reporterName && (
+                              <span className="text-emerald-700 font-sans font-medium">
+                                | 报修人: {record.reporterName}
+                              </span>
                             )}
                           </>
                         )}
@@ -1201,6 +1649,7 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
                               timestamp: record.faultDate,
                               faultDate: record.faultDate,
                               equipmentId: record.equipmentId,
+                              codeId: record.codeId || record.equipmentOriginal?.codeId,
                               equipmentName: record.equipmentName,
                               equipmentSn: record.equipmentSn,
                               model: record.equipmentModel || record.equipmentOriginal?.model,
@@ -1238,6 +1687,52 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
                           <Clock className="w-3 h-3 text-indigo-600" />
                           <span>报修跟踪</span>
                         </button>
+
+                        {/* 立即派工指派 / 技术讨论 (无需来回跳转) */}
+                        {!isSporadic && (record.workOrderId || record.source === 'caoliao' || record.repairType?.includes('草料') || record.status !== '已完成') && (allowDispatch || allowDiscuss) && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const found = liveWorkOrders.find(o => o.id === record.workOrderId || (record.recordNo && o.caoliaoRecordNo === record.recordNo) || o.id === record.id) || {
+                                id: record.workOrderId || record.standardWorkOrderCode,
+                                equipmentId: record.equipmentId || '',
+                                equipmentName: record.equipmentName,
+                                equipmentModel: record.equipmentModel || record.equipmentOriginal?.model || '',
+                                equipmentSn: record.equipmentSn,
+                                department: record.department,
+                                location: record.equipmentOriginal?.location || `${record.department} 诊疗区`,
+                                reporterName: record.reporterName || '临床医护',
+                                reporterPhone: record.reporterPhone || '',
+                                reportTime: record.faultTimestamp || record.faultDate || '',
+                                priority: (record.repairType?.includes('急') ? 'P1_CRITICAL' : 'P2_URGENT') as any,
+                                workOrderType: 'emergency_breakdown' as const,
+                                faultDescription: record.faultDescription,
+                                status: (record.status === '已完成' ? 'closed' : 'pending_dispatch') as any,
+                                biomedicalGroup: '超声与综合诊疗组' as const,
+                                source: (record.source === 'caoliao' ? 'caoliao' : 'hospital') as any,
+                                caoliaoRecordNo: record.recordNo,
+                                photoUrl: record.photoUrl,
+                                partsReplaced: [],
+                                totalRepairCost: record.cost || 0,
+                                totalDowntimeHours: 0.2,
+                                slaResponseLimitMinutes: 30,
+                                slaRepairLimitHours: 4,
+                                isSlaResponseMet: false,
+                                isSlaRepairMet: false
+                              };
+                              if (onDirectDispatch) {
+                                onDirectDispatch(found);
+                              } else {
+                                setDirectAssignOrder(found as any);
+                              }
+                            }}
+                            className="px-2 py-0.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded text-[11px] font-bold transition cursor-pointer flex items-center gap-1 shadow-2xs active:scale-95"
+                            title={allowDispatch ? "立即弹出指派单指派负责工程师并启动SLA计时" : "参与派前内部技术讨论与协同"}
+                          >
+                            <Wrench className="w-3 h-3" />
+                            <span>{allowDispatch ? '立即派工' : '技术讨论'}</span>
+                          </button>
+                        )}
 
                         {/* 零修工单专属操作：验签凭证 / 电子签章 */}
                         {isSporadic && record.frameworkItem && (
@@ -1670,13 +2165,123 @@ export const RepairLogsView: React.FC<RepairLogsViewProps> = ({
         onClose={() => setSelectedRepairDetail(null)}
         data={selectedRepairDetail}
         equipmentList={equipmentList}
-        onFastDispatch={(device) => {
+        currentUser={currentUser}
+        onFastDispatch={(device, detailData) => {
           setSelectedRepairDetail(null);
-          onOpenRepairModal?.(device);
+          const targetOrder = liveWorkOrders.find(o => o.id === detailData?.workOrderId || (detailData?.recordNo && o.caoliaoRecordNo === detailData?.recordNo)) || {
+            id: detailData?.workOrderId || detailData?.id || `WO-${Date.now().toString().slice(-6)}`,
+            equipmentId: device?.id || detailData?.equipmentId || '',
+            equipmentName: device?.name || detailData?.equipmentName || '报修设备',
+            equipmentModel: device?.model || detailData?.model || '',
+            equipmentSn: device?.sn || detailData?.equipmentSn || '',
+            department: device?.department || detailData?.department || '临床科室',
+            location: device?.location || detailData?.location || '诊疗室现场',
+            reporterName: detailData?.reporterName || '临床医护',
+            reporterPhone: detailData?.reporterPhone || '',
+            reportTime: detailData?.timestamp || detailData?.faultDate || '',
+            priority: (detailData?.urgency === 'P1' ? 'P1_CRITICAL' : 'P2_URGENT') as any,
+            workOrderType: 'emergency_breakdown' as const,
+            faultDescription: detailData?.faultDescription || '临床设备故障现场报修',
+            status: 'pending_dispatch' as const,
+            biomedicalGroup: '超声与综合诊疗组' as const,
+            source: (detailData?.source === 'caoliao' ? 'caoliao' : 'hospital') as any,
+            caoliaoRecordNo: detailData?.recordNo,
+            photoUrl: detailData?.photoUrl,
+            partsReplaced: [],
+            totalRepairCost: 0,
+            totalDowntimeHours: 0.2,
+            slaResponseLimitMinutes: 30,
+            slaRepairLimitHours: 4,
+            isSlaResponseMet: false,
+            isSlaRepairMet: false
+          };
+          if (onDirectDispatch) {
+            onDirectDispatch(targetOrder);
+          } else {
+            setDirectAssignOrder(targetOrder as any);
+          }
         }}
         onViewEquipmentDetail={(device) => {
           setSelectedRepairDetail(null);
           onViewEquipmentDetails?.(device);
+        }}
+      />
+
+      {/* 现场即时智能派工指派弹窗 (在当前报修处置页面支持预派工、内部讨论与正式派工) */}
+      <DispatchAssignModal
+        isOpen={Boolean(directAssignOrder)}
+        workOrder={directAssignOrder}
+        engineers={DEFAULT_BIOMEDICAL_ENGINEERS}
+        currentUserName={currentUser?.name || '医工调度中心'}
+        currentUserRole={currentUser?.role || '设备科调度员'}
+        canDispatch={allowDispatch}
+        onClose={() => setDirectAssignOrder(null)}
+        onPreDispatch={handleLocalPreDispatch}
+        onAddDiscussion={handleLocalAddDiscussion}
+        onConfirmDispatch={async (orderId, engineer, notes, dispatchMeta) => {
+          try {
+            const res = await fetch(`/api/work-orders/${encodeURIComponent(orderId)}/dispatch`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                engineerId: engineer.id,
+                engineerName: engineer.name,
+                engineerPhone: engineer.phone,
+                dispatcherName: currentUser?.name || '医工调度中心',
+                authorRole: currentUser?.role || '设备科调度员',
+                notes,
+                ...(dispatchMeta || {})
+              })
+            });
+            const json = await res.json();
+            if (json.vendorCollabOrder) {
+              upsertVendorCollaborationOrder(json.vendorCollabOrder);
+            }
+            if (json.linkedProject || json.data?.linkedProjectId) {
+              window.dispatchEvent(
+                new CustomEvent('medtech:project-ledger-updated', {
+                  detail: { project: json.linkedProject, projectId: json.data?.linkedProjectId }
+                })
+              );
+            }
+            const updatedOrder = (json.success && json.data)
+              ? json.data
+              : directAssignOrder
+                ? {
+                    ...directAssignOrder,
+                    status: 'dispatched' as const,
+                    assignedEngineerId: engineer.id,
+                    assignedEngineerName: engineer.name,
+                    assignedEngineerPhone: engineer.phone,
+                    dispatchNotes: notes,
+                    dispatchTime: new Date().toISOString().replace('T', ' ').slice(0, 16),
+                    ...(dispatchMeta || {})
+                  }
+                : null;
+            if (updatedOrder) {
+              if (!json.vendorCollabOrder && dispatchMeta?.dispatchChannel === 'outsourced' && dispatchMeta.syncToVendorPortal !== false) {
+                upsertVendorCollaborationOrder(buildVendorOrderFromWorkOrder(updatedOrder, currentUser?.name || '医工调度中心'));
+              }
+              setLiveWorkOrders(prev => prev.map(o => o.id === orderId ? updatedOrder : o));
+              setDirectAssignOrder(prev => prev && prev.id === orderId ? updatedOrder : prev);
+              window.dispatchEvent(new CustomEvent('work_orders_updated'));
+              return updatedOrder;
+            }
+          } catch (e) {
+            console.error('Failed to dispatch in RepairLogsView:', e);
+          }
+        }}
+        onNavigateToDispatchTab={(orderId) => {
+          setDirectAssignOrder(null);
+          if (onNavigateToTab) onNavigateToTab('dispatch');
+        }}
+        onNavigateToVendorCollab={(vendorOrderId) => {
+          setDirectAssignOrder(null);
+          window.dispatchEvent(new CustomEvent('medtech:focus-vendor-order', { detail: { vendorOrderId } }));
+        }}
+        onNavigateToProjectLedger={(projectId) => {
+          setDirectAssignOrder(null);
+          window.dispatchEvent(new CustomEvent('medtech:focus-project-ledger', { detail: { projectId } }));
         }}
       />
     </div>

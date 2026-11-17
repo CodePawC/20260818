@@ -6,8 +6,16 @@ import {
   WorkOrderStatus,
   BiomedicalGroup,
   FaultCategory,
-  MttrKpiStats
+  MttrKpiStats,
+  OutsourceServiceMode
 } from '../types/dispatchTypes';
+import { VendorCollaborationOrder } from '../types/vendorCollaborationTypes';
+import {
+  VENDOR_ACCOUNTS,
+  getPartnersList,
+  getVendorCollaborationOrders,
+  saveVendorCollaborationOrders
+} from './vendorCollaborationData';
 
 export const SLA_RESPONSE_LIMITS: Record<PriorityLevel, number> = {
   P1_CRITICAL: 15,   // 15 分钟
@@ -779,19 +787,47 @@ export const INITIAL_WORK_ORDERS: EngineeringWorkOrder[] = [
 
 export const WORK_ORDER_STORAGE_KEY = 'hospital-medtech-workorders';
 
+export function parseWorkOrderComparableTime(val?: string | null): number {
+  if (!val) return 0;
+  const s = String(val).trim();
+  const normalized = s
+    .replace(/\//g, '-')
+    .replace('T', ' ')
+    .replace(/(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}(?::\d{2})?)/, '$1T$2');
+  const parsed = Date.parse(normalized);
+  if (!Number.isNaN(parsed)) return parsed;
+  const digits = s.replace(/\D/g, '');
+  if (digits.length >= 8) {
+    return Number(digits.slice(0, 14).padEnd(14, '0')) || 0;
+  }
+  return 0;
+}
+
+export function sortWorkOrdersNewestFirst(orders: EngineeringWorkOrder[]): EngineeringWorkOrder[] {
+  return [...orders].sort((a, b) => {
+    const timeA = parseWorkOrderComparableTime(a.reportTime);
+    const timeB = parseWorkOrderComparableTime(b.reportTime);
+    if (timeA !== timeB) return timeB - timeA;
+    const numA = parseInt(String(a.caoliaoRecordNo || '').replace(/\D/g, ''), 10) || 0;
+    const numB = parseInt(String(b.caoliaoRecordNo || '').replace(/\D/g, ''), 10) || 0;
+    if (numA !== numB) return numB - numA;
+    return String(b.id || '').localeCompare(String(a.id || ''));
+  });
+}
+
 export function loadStoredWorkOrders(): EngineeringWorkOrder[] {
   try {
     const raw = localStorage.getItem(WORK_ORDER_STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+        return sortWorkOrdersNewestFirst(parsed);
       }
     }
   } catch (err) {
     console.warn('[Storage] Error loading stored work orders:', err);
   }
-  return INITIAL_WORK_ORDERS;
+  return [];
 }
 
 export function saveStoredWorkOrders(data: EngineeringWorkOrder[]) {
@@ -808,6 +844,7 @@ export function saveStoredWorkOrders(data: EngineeringWorkOrder[]) {
 export function calculateMttrKpiStats(orders: EngineeringWorkOrder[]): MttrKpiStats {
   const totalCount = orders.length;
   const pendingDispatchCount = orders.filter(o => o.status === 'pending_dispatch').length;
+  const preDispatchedCount = orders.filter(o => o.status === 'pre_dispatched').length;
   const inProgressCount = orders.filter(o => ['dispatched', 'accepted', 'arrived_inspecting', 'waiting_parts'].includes(o.status)).length;
   const pendingAcceptanceCount = orders.filter(o => o.status === 'repaired_pending_acceptance').length;
   const closedCount = orders.filter(o => o.status === 'closed').length;
@@ -854,6 +891,7 @@ export function calculateMttrKpiStats(orders: EngineeringWorkOrder[]): MttrKpiSt
   return {
     totalCount,
     pendingDispatchCount,
+    preDispatchedCount,
     inProgressCount,
     pendingAcceptanceCount,
     closedCount,
@@ -888,3 +926,239 @@ export function recommendEngineerForOrder(
     return b.avgSatisfactionScore - a.avgSatisfactionScore;
   })[0];
 }
+
+export const OUTSOURCE_SERVICE_MODE_LABELS: Record<
+  OutsourceServiceMode,
+  { label: string; shortLabel: string; hint: string; requiresQuote: boolean }
+> = {
+  annual_contract: {
+    label: '年度全保/技术保覆盖',
+    shortLabel: '年度全保',
+    hint: '按年度维保框架协议直接派驻原厂/维保工程师进场，免单次人工报价审批',
+    requiresQuote: false
+  },
+  warranty_free: {
+    label: '质保期内原厂免费保修',
+    shortLabel: '质保免费',
+    hint: '设备尚在整机或核心部件质保期内，由原厂免费负责检测与备件更换',
+    requiresQuote: false
+  },
+  single_paid_quote: {
+    label: '单次付费外协 · 需报价议价',
+    shortLabel: '单次报价议价',
+    hint: '生成外协协同单并进入「供应商上传报价 → 多科室联合议价审价 → 授权施工」流程',
+    requiresQuote: true
+  },
+  factory_return: {
+    label: '返厂深度检修 / 探头周转',
+    shortLabel: '返厂/周转',
+    hint: '适用探头晶体损坏、主板返厂检测等场景，需登记交接并联动备机周转',
+    requiresQuote: true
+  }
+};
+
+export interface OutsourcedVendorOption {
+  id: string;
+  name: string;
+  shortName: string;
+  type: 'manufacturer' | 'third_party_repair' | 'maintenance_vendor';
+  typeLabel: string;
+  contactPerson: string;
+  contactPhone: string;
+  hotline?: string;
+  email?: string;
+  contractNo: string;
+  contractStatus: string;
+  emergencyResponse: string;
+  serviceScope: string[];
+  rating: number;
+  hasVendorPortal: boolean;
+}
+
+/**
+ * 合并合作单位台账（原厂/第三方驻场维保）与供应商云门户账号，生成可用的外协服务商下拉列表
+ */
+export function getAvailableOutsourcedVendors(): OutsourcedVendorOption[] {
+  const partners = getPartnersList();
+  const list: OutsourcedVendorOption[] = [];
+  const seenNames = new Set<string>();
+
+  partners
+    .filter(p => p.type === 'manufacturer' || p.type === 'third_party_repair')
+    .forEach(p => {
+      seenNames.add(p.name);
+      const hasPortal = VENDOR_ACCOUNTS.some(
+        a =>
+          a.vendorId.toLowerCase() === p.id.toLowerCase() ||
+          p.name.includes(a.vendorName.slice(0, 4)) ||
+          a.vendorName.includes(p.name.slice(0, 4))
+      );
+      list.push({
+        id: p.id,
+        name: p.name,
+        shortName: p.shortName || p.name,
+        type: p.type as 'manufacturer' | 'third_party_repair' | 'maintenance_vendor',
+        typeLabel: p.type === 'manufacturer' ? '原厂认证售后' : '第三方驻场/维保',
+        contactPerson: p.contactPerson || '值班技术经理',
+        contactPhone: p.contactPhone || p.hotline || '',
+        hotline: p.hotline || '',
+        email: p.email || '',
+        contractNo: p.contractNo || '暂无框架合同号',
+        contractStatus: p.contractStatus || '履约中',
+        emergencyResponse: p.emergencyResponse || p.turnaroundTime || '2小时响应',
+        serviceScope: Array.isArray(p.serviceScope) ? p.serviceScope : [],
+        rating: p.cooperationRating || 4.8,
+        hasVendorPortal: hasPortal
+      });
+    });
+
+  // 补充在 VENDOR_ACCOUNTS 中有独立账号但合作单位目录未覆盖的原厂（如 GE、联影）
+  VENDOR_ACCOUNTS.forEach(acc => {
+    const already = list.some(
+      item =>
+        item.id.toLowerCase() === acc.vendorId.toLowerCase() ||
+        item.name.includes(acc.vendorName.slice(0, 4)) ||
+        acc.vendorName.includes(item.name.slice(0, 4))
+    );
+    if (!already && !seenNames.has(acc.vendorName)) {
+      seenNames.add(acc.vendorName);
+      list.push({
+        id: acc.vendorId,
+        name: acc.vendorName,
+        shortName: acc.vendorName.slice(0, 8),
+        type: acc.category.includes('第三方') ? 'third_party_repair' : 'manufacturer',
+        typeLabel: acc.category.includes('第三方') ? '第三方驻场/维保' : '原厂认证售后',
+        contactPerson: acc.contactPerson,
+        contactPhone: acc.phone,
+        hotline: acc.phone,
+        contractNo: acc.contractNo,
+        contractStatus: '履约中',
+        emergencyResponse: '2小时原厂线上响应 / 4小时到场',
+        serviceScope: [acc.frameworkScope],
+        rating: 4.9,
+        hasVendorPortal: true
+      });
+    }
+  });
+
+  return list;
+}
+
+/**
+ * 智能推荐最匹配的外协服务商（按设备名称/型号/品牌关键词命中原厂，未命中则推荐驻院第三方兜底）
+ */
+export function recommendVendorForOrder(
+  order: EngineeringWorkOrder | null | undefined,
+  vendors: OutsourcedVendorOption[]
+): OutsourcedVendorOption | undefined {
+  if (!vendors || vendors.length === 0) return undefined;
+  if (!order) return vendors[0];
+
+  const text = `${order.equipmentName || ''} ${order.equipmentModel || ''} ${order.category || ''} ${order.faultDescription || ''}`.toLowerCase();
+  const brandRules: { keywords: string[]; targetKeywords: string[] }[] = [
+    { keywords: ['ge', '通用电气', 'signa', 'voluson', 'vivid', 'revolution', 'optima'], targetKeywords: ['通用电气', 'ge'] },
+    { keywords: ['迈瑞', 'mindray', 'benevision', 'beneheart', 'resona', 'wato', 'sv300', 'sv600'], targetKeywords: ['迈瑞', 'mindray'] },
+    { keywords: ['西门子', 'siemens', 'acuson', 'somatom', 'artis', 'luminos', 'magnetom'], targetKeywords: ['西门子', 'siemens'] },
+    { keywords: ['飞利浦', 'philips', 'epiq', 'cx50', 'affiniti', 'intellivue', 'v60'], targetKeywords: ['飞利浦', 'philips'] },
+    { keywords: ['联影', 'uih', 'united', 'uct', 'umr'], targetKeywords: ['联影'] },
+    { keywords: ['东软', 'neusoft', 'neuviz'], targetKeywords: ['东软', 'neusoft'] },
+    { keywords: ['智影', 'pa12'], targetKeywords: ['智影'] },
+    { keywords: ['迈柯唯', 'maquet', 'getinge', 'servo'], targetKeywords: ['迈柯唯', 'maquet'] }
+  ];
+
+  for (const rule of brandRules) {
+    if (rule.keywords.some(k => text.includes(k))) {
+      const matched = vendors.find(v =>
+        rule.targetKeywords.some(tk => `${v.name} ${v.shortName}`.toLowerCase().includes(tk))
+      );
+      if (matched) return matched;
+    }
+  }
+
+  // 未直接识别到原厂品牌时，若属影像类推荐柯渡医学，否则推荐国药医工驻点兜底
+  if (text.includes('ct') || text.includes('dr') || text.includes('超声') || text.includes('影像')) {
+    const kedu = vendors.find(v => v.id === 'ISO-002' || v.name.includes('柯渡'));
+    if (kedu) return kedu;
+  }
+  return vendors.find(v => v.id === 'ISO-001' || v.name.includes('国药')) || vendors[0];
+}
+
+/**
+ * 将医院工单转为外协协同中心标准单据结构，并在本地外协台账中创建或更新
+ */
+export function buildVendorOrderFromWorkOrder(
+  order: EngineeringWorkOrder,
+  operatorName = '医工调度中心'
+): VendorCollaborationOrder {
+  const nowStr = new Date().toISOString().replace('T', ' ').slice(0, 16);
+  const serviceMode: OutsourceServiceMode = order.outsourceServiceMode || 'single_paid_quote';
+  const requiresQuote =
+    typeof order.requiresVendorQuote === 'boolean'
+      ? order.requiresVendorQuote
+      : OUTSOURCE_SERVICE_MODE_LABELS[serviceMode].requiresQuote;
+
+  const estTotal = Number(order.estimatedOutsourceCost || 0);
+  const vendorOrderId = order.linkedVendorOrderId || `EXT-${order.id.replace(/[^A-Za-z0-9]/g, '').slice(-10)}`;
+
+  const status: VendorCollaborationOrder['status'] = requiresQuote ? 'PENDING_QUOTE' : 'APPROVED_REPAIRING';
+  const modeInfo = OUTSOURCE_SERVICE_MODE_LABELS[serviceMode];
+
+  return {
+    id: vendorOrderId,
+    workOrderId: order.id,
+    equipmentId: order.equipmentId,
+    equipmentName: order.equipmentName,
+    equipmentModel: order.equipmentModel || '标准型号',
+    equipmentSerialNo: order.equipmentSn || 'SN-UNSPECIFIED',
+    equipmentDept: order.department || '临床科室',
+    faultDescription: `[外协方式：${modeInfo.label}${order.externalContractNo ? ` / 合同号:${order.externalContractNo}` : ''}] ${order.outsourceReason ? `转外协原因：${order.outsourceReason}。` : ''}${order.faultDescription}`,
+    faultImages: order.photoUrl ? [order.photoUrl] : [],
+    urgencyLevel: order.priority === 'P1_CRITICAL' || order.priority === 'P2_URGENT' ? 'HIGH' : 'NORMAL',
+    vendorId: order.externalVendorId || 'ISO-001',
+    vendorName: order.externalPartner || '外协指定技术服务商',
+    vendorContact: order.externalVendorContact || '外协技术联系人',
+    vendorPhone: order.externalVendorPhone || order.reporterPhone || '400-880-9911',
+    createdAt: order.vendorDispatchTime || order.dispatchTime || nowStr,
+    status,
+    quoteLaborCost: 0,
+    quoteTravelCost: 0,
+    quotePartsTotal: 0,
+    quoteGrandTotal: requiresQuote ? (estTotal > 0 ? estTotal : 0) : 0,
+    quoteParts: [],
+    multiDeptOpinions: [],
+    negotiationRounds: [],
+    finalNegotiatedPrice: requiresQuote ? (estTotal > 0 ? estTotal : 0) : 0,
+    savingsAmount: 0,
+    savingsRate: 0,
+    messages: [
+      {
+        id: `msg-${Date.now()}`,
+        senderType: 'HOSPITAL',
+        senderName: `${operatorName} (院内监护: ${order.assignedEngineerName || order.proposedEngineerName || '待定'})`,
+        senderDept: '医学工程科',
+        timestamp: nowStr,
+        content: `已通过外协派工单下发至【${order.externalPartner || '指定服务商'}】（${modeInfo.label}）。${order.dispatchNotes || '请尽快响应并在门户协同处置。'}`
+      }
+    ],
+    isDossierArchived: false
+  };
+}
+
+export function upsertVendorCollaborationOrder(
+  order: VendorCollaborationOrder
+): VendorCollaborationOrder[] {
+  const existing = getVendorCollaborationOrders();
+  const idx = existing.findIndex(o => o.id === order.id || (order.workOrderId && o.workOrderId === order.workOrderId));
+  let next: VendorCollaborationOrder[];
+  if (idx >= 0) {
+    next = existing.map((o, i) => (i === idx ? { ...o, ...order, id: o.id } : o));
+  } else {
+    next = [order, ...existing];
+  }
+  saveVendorCollaborationOrders(next);
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('vendor_orders_updated', { detail: next }));
+  }
+  return next;
+}
+

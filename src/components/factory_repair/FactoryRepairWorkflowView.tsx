@@ -23,6 +23,7 @@ import { JointNegotiationWorkspace } from './JointNegotiationWorkspace';
 import { ContractSigningModal } from './ContractSigningModal';
 import { EndoscopeAcceptanceModal } from './EndoscopeAcceptanceModal';
 import { InvoicePaymentModal } from './InvoicePaymentModal';
+import { ExpensePreApprovalModal } from '../payment/ExpensePreApprovalModal';
 import { 
   Wrench, 
   FileText, 
@@ -44,7 +45,8 @@ import {
   Search,
   ExternalLink,
   ChevronRight,
-  AlertTriangle
+  AlertTriangle,
+  Printer
 } from 'lucide-react';
 import { AuthUser } from '../../types';
 
@@ -90,6 +92,7 @@ export const FactoryRepairWorkflowView: React.FC<FactoryRepairWorkflowViewProps>
   const [isContractModalOpen, setIsContractModalOpen] = useState(false);
   const [isAcceptanceModalOpen, setIsAcceptanceModalOpen] = useState(false);
   const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
+  const [isPreApprovalModalOpen, setIsPreApprovalModalOpen] = useState(false);
 
   // 监听工单更新事件
   useEffect(() => {
@@ -1069,13 +1072,51 @@ export const FactoryRepairWorkflowView: React.FC<FactoryRepairWorkflowViewProps>
                   </p>
                 </div>
               </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsInvoiceModalOpen(true)}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Receipt className="w-4 h-4" />
+                  <span>打开完整发票与付款流水看板</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsPreApprovalModalOpen(true)}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>开具费用预批单 (双联)</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 收到发票后生成费用预批单横幅卡片 */}
+            <div className="p-3.5 bg-red-50/80 rounded-xl border border-red-200 flex items-center justify-between gap-3 shadow-2xs">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-lg bg-red-600 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-xs">
+                  <Receipt className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="font-bold text-red-950 text-xs flex items-center gap-2">
+                    <span>收到发票后依规生成《五莲县人民医院 费用预批单》</span>
+                    <span className="text-3xs font-mono px-1.5 py-0.2 rounded bg-red-200 text-red-900 font-bold">
+                      一式两联 · 正本+存根
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-red-800 mt-0.5">
+                    完全符合五莲县人民医院标准公文格式，支持纸质版 A4 沿虚线裁切打印与电子版防伪验签流转。
+                  </div>
+                </div>
+              </div>
               <button
                 type="button"
-                onClick={() => setIsInvoiceModalOpen(true)}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition shadow-xs flex items-center gap-1.5"
+                onClick={() => setIsPreApprovalModalOpen(true)}
+                className="px-3.5 py-1.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg text-xs transition shadow-xs flex items-center gap-1.5 cursor-pointer shrink-0"
               >
-                <Receipt className="w-4 h-4" />
-                <span>打开完整发票与付款流水看板</span>
+                <Printer className="w-3.5 h-3.5" />
+                <span>生成费用预批单 (纸质/电子版)</span>
               </button>
             </div>
 
@@ -1188,6 +1229,36 @@ export const FactoryRepairWorkflowView: React.FC<FactoryRepairWorkflowViewProps>
         currentRole={currentRole}
         onUploadInvoice={handleUploadInvoice}
         onAdvancePaymentNode={(nodeId) => {}}
+      />
+
+      {/* 费用预批单及存根（支持纸质版与电子版一式两联） */}
+      <ExpensePreApprovalModal
+        isOpen={isPreApprovalModalOpen}
+        onClose={() => setIsPreApprovalModalOpen(false)}
+        initialData={{
+          id: '629', // 输尿管镜返厂大修项目台账固定对应 ID: 629
+          docNo: '629',
+          hospitalName: '五莲县人民医院',
+          department: '医疗设备科',
+          items: [
+            {
+              name: '医用电子内窥镜（输尿管镜）返厂物镜与光束精密置换',
+              model: activeOrder.initialFault?.equipmentModel || 'Richard Wolf 8703.534 (URF-V / 330mm)',
+              supplier: activeOrder.repairContract?.contractPartyB || '上海成运医疗器械技术服务有限公司',
+              quantity: 1,
+              price: activeOrder.invoicePayment.invoiceRecord?.amount || 14200,
+              remarks: `已收发票 ${activeOrder.invoicePayment.invoiceRecord?.invoiceNumber || '9928172635'} 完工合格`
+            }
+          ],
+          totalAmount: activeOrder.invoicePayment.invoiceRecord?.amount || 14200,
+          invoiceInfo: activeOrder.invoicePayment.invoiceRecord ? {
+            code: activeOrder.invoicePayment.invoiceRecord.invoiceCode,
+            number: activeOrder.invoicePayment.invoiceRecord.invoiceNumber,
+            type: activeOrder.invoicePayment.invoiceRecord.invoiceType,
+            amount: activeOrder.invoicePayment.invoiceRecord.amount,
+            date: activeOrder.invoicePayment.invoiceRecord.issuedDate
+          } : undefined
+        }}
       />
     </div>
   );

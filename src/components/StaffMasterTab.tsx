@@ -52,12 +52,15 @@ interface StaffMasterTabProps {
   staff: StaffPersonMaster[];
   departments: DepartmentMaster[];
   onUpdateStaff: (staff: StaffPersonMaster[]) => void;
+  onResetDefaults?: () => void;
+  readOnly?: boolean;
 }
 
 export const StaffMasterTab: React.FC<StaffMasterTabProps> = ({
   staff,
   departments,
-  onUpdateStaff
+  onUpdateStaff,
+  readOnly = false
 }) => {
   // 1. Roles Definition state (stored in localStorage)
   const [roles, setRoles] = useState<StaffRoleDefinition[]>(() => {
@@ -350,15 +353,19 @@ export const StaffMasterTab: React.FC<StaffMasterTabProps> = ({
             <span className="text-slate-500 font-medium">L1急救一线响应: <strong className="text-rose-600 font-mono font-bold">{stats.l1Count}</strong> 人</span>
             <span className="text-slate-300">|</span>
             <span className="text-slate-500 font-medium">在职率: <strong className="text-emerald-600 font-mono font-bold">{stats.total > 0 ? Math.round((stats.active / stats.total) * 100) : 0}%</strong></span>
-            <span className="text-slate-300">|</span>
-            <button
-              onClick={() => setIsClusterModalOpen(true)}
-              className="text-xs text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 cursor-pointer hover:underline"
-              title="配置干系人群体分类、新增自定义部门分类"
-            >
-              <Settings2 className="w-3 h-3" />
-              <span>管理矩阵分类</span>
-            </button>
+            {!readOnly && (
+              <>
+                <span className="text-slate-300">|</span>
+                <button
+                  onClick={() => setIsClusterModalOpen(true)}
+                  className="text-xs text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-1 cursor-pointer hover:underline"
+                  title="配置干系人群体分类、新增自定义部门分类"
+                >
+                  <Settings2 className="w-3 h-3" />
+                  <span>管理矩阵分类</span>
+                </button>
+              </>
+            )}
           </div>
         </div>
 
@@ -525,14 +532,16 @@ export const StaffMasterTab: React.FC<StaffMasterTabProps> = ({
 
         {/* Right: Master Action Toolbar */}
         <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            onClick={() => setIsImportModalOpen(true)}
-            className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold flex items-center gap-1 shadow-2xs cursor-pointer transition text-xs"
-            title="支持批量复制粘贴 TSV/CSV 或上传 Excel 数据"
-          >
-            <Upload className="w-3.5 h-3.5" />
-            <span>批量导入</span>
-          </button>
+          {!readOnly && (
+            <button
+              onClick={() => setIsImportModalOpen(true)}
+              className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold flex items-center gap-1 shadow-2xs cursor-pointer transition text-xs"
+              title="支持批量复制粘贴 TSV/CSV 或上传 Excel 数据"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              <span>批量导入</span>
+            </button>
+          )}
 
           <button
             onClick={handleExportSelected}
@@ -543,56 +552,60 @@ export const StaffMasterTab: React.FC<StaffMasterTabProps> = ({
             <span>导出名册</span>
           </button>
 
-          <button
-            onClick={() => setIsClusterModalOpen(true)}
-            className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg font-medium flex items-center gap-1 cursor-pointer transition text-xs"
-            title="配置与新增干系人群体分类 (医工/临床/行政/原厂/三方/计量/自定义)"
-          >
-            <Layers className="w-3.5 h-3.5 text-indigo-600" />
-            <span>群体分类</span>
-          </button>
+          {!readOnly && (
+            <>
+              <button
+                onClick={() => setIsClusterModalOpen(true)}
+                className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg font-medium flex items-center gap-1 cursor-pointer transition text-xs"
+                title="配置与新增干系人群体分类 (医工/临床/行政/原厂/三方/计量/自定义)"
+              >
+                <Layers className="w-3.5 h-3.5 text-indigo-600" />
+                <span>群体分类</span>
+              </button>
 
-          <button
-            onClick={() => setIsRoleModalOpen(true)}
-            className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg font-medium flex items-center gap-1 cursor-pointer transition text-xs"
-            title="设定角色定义、职责说明与权限"
-          >
-            <Settings2 className="w-3.5 h-3.5" />
-            <span>角色字典</span>
-          </button>
+              <button
+                onClick={() => setIsRoleModalOpen(true)}
+                className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg font-medium flex items-center gap-1 cursor-pointer transition text-xs"
+                title="设定角色定义、职责说明与权限"
+              >
+                <Settings2 className="w-3.5 h-3.5" />
+                <span>角色字典</span>
+              </button>
 
-          <button
-            onClick={() => {
-              setEditingStaff({
-                id: `STAFF-${Date.now().toString().slice(-4)}`,
-                employeeNo: `EMP-${7000 + staff.length + 1}`,
-                name: '',
-                stakeholderCategory: 'hospital_engineering',
-                organization: '五莲县人民医院',
-                departmentId: departments[0]?.id || '303',
-                departmentName: departments[0]?.name || '医疗设备科',
-                role: '维修工程师',
-                phone: '',
-                title: '',
-                email: '',
-                emergencyTier: 'L2',
-                isPrimaryContact: false,
-                specialties: [],
-                status: 'active'
-              });
-              setIsSingleModalOpen(true);
-            }}
-            className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold flex items-center gap-1 shadow-xs cursor-pointer transition text-xs"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>新增干系人</span>
-          </button>
+              <button
+                onClick={() => {
+                  setEditingStaff({
+                    id: `STAFF-${Date.now().toString().slice(-4)}`,
+                    employeeNo: `EMP-${7000 + staff.length + 1}`,
+                    name: '',
+                    stakeholderCategory: 'hospital_engineering',
+                    organization: '五莲县人民医院',
+                    departmentId: departments[0]?.id || '303',
+                    departmentName: departments[0]?.name || '医疗设备科',
+                    role: '维修工程师',
+                    phone: '',
+                    title: '',
+                    email: '',
+                    emergencyTier: 'L2',
+                    isPrimaryContact: false,
+                    specialties: [],
+                    status: 'active'
+                  });
+                  setIsSingleModalOpen(true);
+                }}
+                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold flex items-center gap-1 shadow-xs cursor-pointer transition text-xs"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>新增干系人</span>
+              </button>
+            </>
+          )}
         </div>
 
       </div>
 
       {/* 3. Batch Action Bar (Visible when rows selected) */}
-      {selectedStaffIds.length > 0 && (
+      {!readOnly && selectedStaffIds.length > 0 && (
         <div className="px-4 py-2 bg-indigo-900 text-white flex items-center justify-between text-xs animate-in slide-in-from-top-2 duration-150 shrink-0">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
@@ -666,13 +679,15 @@ export const StaffMasterTab: React.FC<StaffMasterTabProps> = ({
               >
                 清空所有筛选
               </button>
-              <button
-                onClick={() => setIsImportModalOpen(true)}
-                className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
-              >
-                <Upload className="w-3.5 h-3.5" />
-                <span>批量导入人员名册</span>
-              </button>
+              {!readOnly && (
+                <button
+                  onClick={() => setIsImportModalOpen(true)}
+                  className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold flex items-center gap-1 cursor-pointer"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>批量导入人员名册</span>
+                </button>
+              )}
             </div>
           </div>
         ) : (
@@ -694,14 +709,16 @@ export const StaffMasterTab: React.FC<StaffMasterTabProps> = ({
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 font-bold text-[11px] select-none">
-                    <th className="py-2.5 px-3 w-10 text-center">
-                      <input
-                        type="checkbox"
-                        checked={selectedStaffIds.length === paginatedStaff.length && paginatedStaff.length > 0}
-                        onChange={handleSelectAll}
-                        className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-                      />
-                    </th>
+                    {!readOnly && (
+                      <th className="py-2.5 px-3 w-10 text-center">
+                        <input
+                          type="checkbox"
+                          checked={selectedStaffIds.length === paginatedStaff.length && paginatedStaff.length > 0}
+                          onChange={handleSelectAll}
+                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                        />
+                      </th>
+                    )}
                     <th className="py-2.5 px-3">人员 / 专家姓名</th>
                     <th className="py-2.5 px-3">干系人群体 / 所属机构</th>
                     <th className="py-2.5 px-3">角色职责 / 科室</th>
@@ -710,7 +727,7 @@ export const StaffMasterTab: React.FC<StaffMasterTabProps> = ({
                     <th className="py-2.5 px-3">联系方式 / 24H热线</th>
                     <th className="py-2.5 px-3">资质证书 / 授权</th>
                     <th className="py-2.5 px-3 text-center">状态</th>
-                    <th className="py-2.5 px-3 text-right">操作</th>
+                    {!readOnly && <th className="py-2.5 px-3 text-right">操作</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-sans">
@@ -729,14 +746,16 @@ export const StaffMasterTab: React.FC<StaffMasterTabProps> = ({
                         }`}
                       >
                         {/* Checkbox */}
-                        <td className="py-3 px-3 text-center">
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => toggleSelectStaff(member.id)}
-                            className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-                          />
-                        </td>
+                        {!readOnly && (
+                          <td className="py-3 px-3 text-center">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={() => toggleSelectStaff(member.id)}
+                              className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                            />
+                          </td>
+                        )}
 
                         {/* Name & ID */}
                         <td className="py-3 px-3">
@@ -892,26 +911,28 @@ export const StaffMasterTab: React.FC<StaffMasterTabProps> = ({
                         </td>
 
                         {/* Actions */}
-                        <td className="py-3 px-3 text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            <button
-                              onClick={() => {
-                                setEditingStaff(member);
-                                setIsSingleModalOpen(true);
-                              }}
-                              className="px-2 py-1 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded font-bold text-xs cursor-pointer transition"
-                            >
-                              编辑
-                            </button>
-                            <button
-                              onClick={() => handleDeleteSingleStaff(member.id, member.name)}
-                              className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded cursor-pointer transition"
-                              title="删除此档案"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </td>
+                        {!readOnly && (
+                          <td className="py-3 px-3 text-right">
+                            <div className="flex items-center justify-end gap-1">
+                              <button
+                                onClick={() => {
+                                  setEditingStaff(member);
+                                  setIsSingleModalOpen(true);
+                                }}
+                                className="px-2 py-1 text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded font-bold text-xs cursor-pointer transition"
+                              >
+                                编辑
+                              </button>
+                              <button
+                                onClick={() => handleDeleteSingleStaff(member.id, member.name)}
+                                className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded cursor-pointer transition"
+                                title="删除此档案"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -935,51 +956,55 @@ export const StaffMasterTab: React.FC<StaffMasterTabProps> = ({
       </div>
 
       {/* 5. Stakeholder Cluster Config Modal */}
-      <StakeholderClusterConfigModal
-        isOpen={isClusterModalOpen}
-        onClose={() => setIsClusterModalOpen(false)}
-        clusters={clusters}
-        onUpdateClusters={handleUpdateClusters}
-      />
+      {!readOnly && (
+        <>
+          <StakeholderClusterConfigModal
+            isOpen={isClusterModalOpen}
+            onClose={() => setIsClusterModalOpen(false)}
+            clusters={clusters}
+            onUpdateClusters={handleUpdateClusters}
+          />
 
-      {/* 6. Batch Import Modal */}
-      <StaffBatchImportModal
-        isOpen={isImportModalOpen}
-        onClose={() => setIsImportModalOpen(false)}
-        departments={departments}
-        existingStaff={staff}
-        onImportSuccess={(newStaffList, mode) => {
-          onUpdateStaff(newStaffList);
-          alert(`成功${mode === 'overwrite' ? '全量覆盖导入' : '增量合并导入'}干系人名册，共 ${newStaffList.length} 条记录！`);
-        }}
-      />
+          {/* 6. Batch Import Modal */}
+          <StaffBatchImportModal
+            isOpen={isImportModalOpen}
+            onClose={() => setIsImportModalOpen(false)}
+            departments={departments}
+            existingStaff={staff}
+            onImportSuccess={(newStaffList, mode) => {
+              onUpdateStaff(newStaffList);
+              alert(`成功${mode === 'overwrite' ? '全量覆盖导入' : '增量合并导入'}干系人名册，共 ${newStaffList.length} 条记录！`);
+            }}
+          />
 
-      {/* 7. Role Definition Config Modal */}
-      <StaffRoleConfigModal
-        isOpen={isRoleModalOpen}
-        onClose={() => setIsRoleModalOpen(false)}
-        roles={roles}
-        onUpdateRoles={handleUpdateRoles}
-      />
+          {/* 7. Role Definition Config Modal */}
+          <StaffRoleConfigModal
+            isOpen={isRoleModalOpen}
+            onClose={() => setIsRoleModalOpen(false)}
+            roles={roles}
+            onUpdateRoles={handleUpdateRoles}
+          />
 
-      {/* 8. Batch Edit Modal */}
-      <StaffBatchEditModal
-        isOpen={isBatchEditModalOpen}
-        onClose={() => setIsBatchEditModalOpen(false)}
-        selectedStaffIds={selectedStaffIds}
-        allStaff={staff}
-        departments={departments}
-        roles={roles}
-        clusters={clusters}
-        onBatchUpdate={(updatedList) => {
-          onUpdateStaff(updatedList);
-          setSelectedStaffIds([]);
-          alert('批量修改成功！');
-        }}
-      />
+          {/* 8. Batch Edit Modal */}
+          <StaffBatchEditModal
+            isOpen={isBatchEditModalOpen}
+            onClose={() => setIsBatchEditModalOpen(false)}
+            selectedStaffIds={selectedStaffIds}
+            allStaff={staff}
+            departments={departments}
+            roles={roles}
+            clusters={clusters}
+            onBatchUpdate={(updatedList) => {
+              onUpdateStaff(updatedList);
+              setSelectedStaffIds([]);
+              alert('批量修改成功！');
+            }}
+          />
+        </>
+      )}
 
       {/* 9. Single Staff Edit/Create Modal */}
-      {isSingleModalOpen && editingStaff && (
+      {!readOnly && isSingleModalOpen && editingStaff && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl overflow-hidden flex flex-col max-h-[92vh]">
             <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between">

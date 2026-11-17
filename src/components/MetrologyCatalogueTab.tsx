@@ -40,6 +40,7 @@ interface MetrologyCatalogueTabProps {
   onUpdateCatalogue: (catalogue: MetrologyCatalogueItem[]) => void;
   onUpdateEquipmentList?: (list: MedicalEquipment[]) => void;
   onResetCatalogueToDefault: () => void;
+  readOnly?: boolean;
 }
 
 export const MetrologyCatalogueTab: React.FC<MetrologyCatalogueTabProps> = ({
@@ -48,6 +49,7 @@ export const MetrologyCatalogueTab: React.FC<MetrologyCatalogueTabProps> = ({
   onUpdateCatalogue,
   onUpdateEquipmentList,
   onResetCatalogueToDefault,
+  readOnly = false,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'mandatory' | 'periodic_calibration' | 'active'>('all');
@@ -309,14 +311,16 @@ export const MetrologyCatalogueTab: React.FC<MetrologyCatalogueTabProps> = ({
               <span>政策法规库 {showPolicyDrawer ? '▲' : '▼'}</span>
             </button>
 
-            <button
-              onClick={handleReclassifyAllEquipment}
-              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs flex items-center gap-1.5 cursor-pointer transition whitespace-nowrap active:scale-98"
-              title="按当前国家目录规则重新智能扫描全院设备台账并修正分类属性"
-            >
-              <Zap className="w-3.5 h-3.5 text-amber-300 shrink-0" />
-              <span>一键对齐全院设备</span>
-            </button>
+            {!readOnly && (
+              <button
+                onClick={handleReclassifyAllEquipment}
+                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-xs flex items-center gap-1.5 cursor-pointer transition whitespace-nowrap active:scale-98"
+                title="按当前国家目录规则重新智能扫描全院设备台账并修正分类属性"
+              >
+                <Zap className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                <span>一键对齐全院设备</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -480,29 +484,31 @@ export const MetrologyCatalogueTab: React.FC<MetrologyCatalogueTabProps> = ({
         </div>
 
         {/* 右侧动作按钮 */}
-        <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-          <button
-            onClick={() => {
-              if (window.confirm('确定将国家强检及校准目录重置为国家市场监督管理总局标准字典规范吗？')) {
-                onResetCatalogueToDefault();
-                showToast('已恢复国家法定强检标准目录字典');
-              }
-            }}
-            className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-semibold flex items-center gap-1 cursor-pointer transition whitespace-nowrap"
-            title="恢复国家法定标准字典模板"
-          >
-            <RotateCcw className="w-3.5 h-3.5 text-slate-500 shrink-0" />
-            <span>恢复标准字典</span>
-          </button>
+        {!readOnly && (
+          <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+            <button
+              onClick={() => {
+                if (window.confirm('确定将国家强检及校准目录重置为国家市场监督管理总局标准字典规范吗？')) {
+                  onResetCatalogueToDefault();
+                  showToast('已恢复国家法定强检标准目录字典');
+                }
+              }}
+              className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600 text-xs font-semibold flex items-center gap-1 cursor-pointer transition whitespace-nowrap"
+              title="恢复国家法定标准字典模板"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+              <span>恢复标准字典</span>
+            </button>
 
-          <button
-            onClick={handleOpenAdd}
-            className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer transition whitespace-nowrap"
-          >
-            <Plus className="w-3.5 h-3.5 shrink-0" />
-            <span>新增条目</span>
-          </button>
-        </div>
+            <button
+              onClick={handleOpenAdd}
+              className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer transition whitespace-nowrap"
+            >
+              <Plus className="w-3.5 h-3.5 shrink-0" />
+              <span>新增条目</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* 4. 目录条目表格清单 */}
@@ -532,13 +538,13 @@ export const MetrologyCatalogueTab: React.FC<MetrologyCatalogueTabProps> = ({
                 <th className="py-2.5 px-4 min-w-[200px]">自动分类匹配关键词</th>
                 <th className="py-2.5 px-4 min-w-[220px]">法规与规程依据</th>
                 <th className="py-2.5 px-3 w-20 text-center">状态</th>
-                <th className="py-2.5 px-3 w-28 text-center">操作</th>
+                {!readOnly && <th className="py-2.5 px-3 w-28 text-center">操作</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-800 font-medium">
               {paginatedCatalogue.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="py-12 text-center text-slate-400">
+                  <td colSpan={readOnly ? 8 : 9} className="py-12 text-center text-slate-400">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <Scale className="w-8 h-8 text-slate-300" />
                       <p className="text-sm font-semibold">未找到匹配的国家强检或校准目录条目</p>
@@ -643,41 +649,55 @@ export const MetrologyCatalogueTab: React.FC<MetrologyCatalogueTabProps> = ({
 
                       {/* 状态 */}
                       <td className="py-3 px-3 text-center">
-                        <button
-                          type="button"
-                          onClick={() => handleToggleStatus(item)}
-                          className={`px-2 py-0.5 rounded text-[11px] font-bold border transition cursor-pointer ${
-                            item.status === 'active'
-                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
-                              : 'bg-slate-100 text-slate-500 border-slate-300 hover:bg-slate-200'
-                          }`}
-                          title="点击切换启用/停用状态"
-                        >
-                          {item.status === 'active' ? '启用中' : '已停用'}
-                        </button>
+                        {readOnly ? (
+                          <span
+                            className={`px-2 py-0.5 rounded text-[11px] font-bold border inline-block ${
+                              item.status === 'active'
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                : 'bg-slate-100 text-slate-500 border-slate-300'
+                            }`}
+                          >
+                            {item.status === 'active' ? '启用中' : '已停用'}
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleStatus(item)}
+                            className={`px-2 py-0.5 rounded text-[11px] font-bold border transition cursor-pointer ${
+                              item.status === 'active'
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+                                : 'bg-slate-100 text-slate-500 border-slate-300 hover:bg-slate-200'
+                            }`}
+                            title="点击切换启用/停用状态"
+                          >
+                            {item.status === 'active' ? '启用中' : '已停用'}
+                          </button>
+                        )}
                       </td>
 
                       {/* 操作 */}
-                      <td className="py-3 px-3 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handleOpenEdit(item)}
-                            className="p-1 rounded hover:bg-slate-100 text-blue-600 hover:text-blue-800 transition cursor-pointer"
-                            title="编辑目录属性与规则"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteItem(item.id, item.name)}
-                            className="p-1 rounded hover:bg-rose-50 text-rose-500 hover:text-rose-700 transition cursor-pointer"
-                            title="删除目录项"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
+                      {!readOnly && (
+                        <td className="py-3 px-3 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEdit(item)}
+                              className="p-1 rounded hover:bg-slate-100 text-blue-600 hover:text-blue-800 transition cursor-pointer"
+                              title="编辑目录属性与规则"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteItem(item.id, item.name)}
+                              className="p-1 rounded hover:bg-rose-50 text-rose-500 hover:text-rose-700 transition cursor-pointer"
+                              title="删除目录项"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   );
                 })
@@ -700,7 +720,7 @@ export const MetrologyCatalogueTab: React.FC<MetrologyCatalogueTabProps> = ({
       </div>
 
       {/* 5. 新增/编辑目录模态弹窗 */}
-      {isModalOpen && (
+      {!readOnly && isModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col border border-slate-200 overflow-hidden animate-scaleIn">
             <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between">

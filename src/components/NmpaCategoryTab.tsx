@@ -31,13 +31,15 @@ interface NmpaCategoryTabProps {
   equipmentList: MedicalEquipment[];
   onUpdateCategoryMaster: (categories: NmpaCategoryMasterItem[]) => void;
   onResetDefaults?: () => void;
+  readOnly?: boolean;
 }
 
 export const NmpaCategoryTab: React.FC<NmpaCategoryTabProps> = ({
   categoryMaster,
   equipmentList,
   onUpdateCategoryMaster,
-  onResetDefaults
+  onResetDefaults,
+  readOnly = false
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedMainCat, setSelectedMainCat] = useState<string>('ALL');
@@ -239,13 +241,15 @@ export const NmpaCategoryTab: React.FC<NmpaCategoryTabProps> = ({
             <Download className="w-3.5 h-3.5" />
             <span>导出主数据</span>
           </button>
-          <button
-            onClick={handleOpenAdd}
-            className="px-3.5 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm transition cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>新增品类字典</span>
-          </button>
+          {!readOnly && (
+            <button
+              onClick={handleOpenAdd}
+              className="px-3.5 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-sm transition cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>新增品类字典</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -356,13 +360,13 @@ export const NmpaCategoryTab: React.FC<NmpaCategoryTabProps> = ({
                 <th className="py-3 px-3.5">典型品名举例</th>
                 <th className="py-3 px-3.5">推荐折旧/维保</th>
                 <th className="py-3 px-3.5">关联台数</th>
-                <th className="py-3 px-3.5 text-right">操作</th>
+                {!readOnly && <th className="py-3 px-3.5 text-right">操作</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
               {paginatedList.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-8 text-center text-slate-400">
+                  <td colSpan={readOnly ? 7 : 8} className="py-8 text-center text-slate-400">
                     未找到匹配的分类目录条目
                   </td>
                 </tr>
@@ -416,24 +420,26 @@ export const NmpaCategoryTab: React.FC<NmpaCategoryTabProps> = ({
                           {eqCount} 台
                         </span>
                       </td>
-                      <td className="py-3 px-3.5 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            onClick={() => handleOpenEdit(item)}
-                            className="p-1 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded transition cursor-pointer"
-                            title="编辑"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(item.id)}
-                            className="p-1 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded transition cursor-pointer"
-                            title="删除"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
+                      {!readOnly && (
+                        <td className="py-3 px-3.5 text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => handleOpenEdit(item)}
+                              className="p-1 text-slate-500 hover:text-indigo-600 hover:bg-slate-100 rounded transition cursor-pointer"
+                              title="编辑"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(item.id)}
+                              className="p-1 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded transition cursor-pointer"
+                              title="删除"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   );
                 })
@@ -456,7 +462,7 @@ export const NmpaCategoryTab: React.FC<NmpaCategoryTabProps> = ({
       </div>
 
       {/* 新增 / 编辑 弹窗 */}
-      {isModalOpen && (
+      {!readOnly && isModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-2xl w-full shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
             <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">

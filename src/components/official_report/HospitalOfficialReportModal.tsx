@@ -312,6 +312,24 @@ export const HospitalOfficialReportModal: React.FC<HospitalOfficialReportModalPr
         deptSignature: { signed: true, name: '赵海波 (科主任)', role: '超声医学科主任', date: now.toISOString().split('T')[0], opinion: '设备超期服役严重，元器件老化不可逆，经科室技术鉴定无维修价值，建议同意报废申请。' }
       });
       showToast('已载入：超声医学科 彩超技术鉴定报废请示 (工单: WO-SCR-2026-0550)');
+    } else if (type === 'wo_rep_3212') {
+      const deptName = getCanonicalMasterDepartmentName('麻醉手术科');
+      const fullCode = 'WO-REP-2026-3212';
+      setData({
+        ...data,
+        id: `REP-DOC-3212`,
+        docNo: codeDisplayMode === 'full_code' ? `NO. ${fullCode}` : 'NO. 3212',
+        workOrderNo: fullCode,
+        fullWorkOrderCode: fullCode,
+        workOrderTypeLabel: '现场抢修',
+        category: 'repair',
+        department: deptName,
+        subjectUnderlined: `${deptName}生命支持监护设备现场急修与应急换件请示`,
+        body: '麻醉手术科1号层流手术间多参数生命支持监护仪（SN: N17-BENEV-9921）急诊手术前突发心电/血氧采集模块通信中断报警，无法正常监测生命体征。经院内驻场工程师现场紧急抢修排除故障，已自检合格准予投入急诊手术。特此呈报维修工单与对应立项台账（ID: 3212），待取得增值税发票后由医学工程科统一开具《费用预批单》。恳请审批！',
+        applyDate: dateStr,
+        deptSignature: { signed: true, name: '陈建国 (科主任)', role: '麻醉手术科主任', date: now.toISOString().split('T')[0], opinion: '急诊手术生命急救保障急需，工程师已现场排除故障，恳请院领导核准批复并流转费用预批单。' }
+      });
+      showToast('已载入：麻醉手术科 现场急修请示公文 (工单: WO-REP-2026-3212 · 对应台账ID: 3212)');
     }
   };
 
@@ -516,6 +534,16 @@ export const HospitalOfficialReportModal: React.FC<HospitalOfficialReportModalPr
                   <span className="text-[10px] text-slate-400 mt-0.5">医学检验科 / 光度计报错急诊生化保障</span>
                 </button>
                 <button 
+                  onClick={() => handleLoadPreset('wo_rep_3212')}
+                  className="w-full text-left px-3 py-2 text-slate-200 hover:bg-slate-700 transition flex flex-col border-t border-slate-700/50 cursor-pointer"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-white">麻醉手术室生命急修请示</span>
+                    <span className="px-1.5 py-0.2 rounded font-mono text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30">WO-REP-3212</span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 mt-0.5">麻醉手术科 / 联动项目台账ID: 3212 · 预批单 3212</span>
+                </button>
+                <button 
                   onClick={() => handleLoadPreset('us_scrap')}
                   className="w-full text-left px-3 py-2 text-slate-200 hover:bg-slate-700 transition flex flex-col border-t border-slate-700/50 cursor-pointer"
                 >
@@ -691,9 +719,21 @@ export const HospitalOfficialReportModal: React.FC<HospitalOfficialReportModalPr
                       </select>
                     </div>
                   ) : (
-                    <span className="font-semibold tracking-wider font-mono text-slate-900 text-xs sm:text-sm">
-                      {data.docNo || (codeDisplayMode === 'full_code' ? `NO. ${data.fullWorkOrderCode || 'WO-FAC-2026-0546'}` : 'NO. 546')}
-                    </span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold tracking-wider font-mono text-slate-900 text-xs sm:text-sm">
+                        {data.docNo || (codeDisplayMode === 'full_code' ? `NO. ${data.fullWorkOrderCode || 'WO-FAC-2026-0546'}` : 'NO. 546')}
+                      </span>
+                      {(() => {
+                        const parsed = parseWorkOrderCode(data.fullWorkOrderCode || data.docNo);
+                        return (
+                          <span className="print:hidden text-[10px] font-sans text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.2 rounded font-medium flex items-center gap-1 shadow-2xs">
+                            <span>立项台账: ID_{parsed.sequenceNumber}</span>
+                            <span>·</span>
+                            <span>预批单: 编号：{parsed.sequenceNumber}</span>
+                          </span>
+                        );
+                      })()}
+                    </div>
                   )}
                 </div>
                 {/* 右上角保持纯净留白，完全符合真实纸质公文原件版式 */}

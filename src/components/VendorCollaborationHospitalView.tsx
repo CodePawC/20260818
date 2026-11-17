@@ -25,8 +25,15 @@ interface VendorCollaborationHospitalViewProps {
   orders: VendorCollaborationOrder[];
   currentUser?: AuthUser | null;
   departments?: DepartmentMaster[];
+  focusedVendorOrderId?: string;
+  onClearFocusedOrder?: () => void;
   onUpdateOrder: (updatedOrder: VendorCollaborationOrder) => void;
-  onArchiveOrder: (order: VendorCollaborationOrder) => void;
+  onArchiveOrder: (order: VendorCollaborationOrder) => Promise<{
+    success?: boolean;
+    auditBlocked?: boolean;
+    error?: string;
+    missingItems?: string[];
+  } | void> | void;
   onSwitchToVendorPortal?: (vendorAccount: VendorUserAccount) => void;
 }
 
@@ -34,6 +41,8 @@ export const VendorCollaborationHospitalView: React.FC<VendorCollaborationHospit
   orders,
   currentUser,
   departments,
+  focusedVendorOrderId,
+  onClearFocusedOrder,
   onUpdateOrder,
   onArchiveOrder,
   onSwitchToVendorPortal,
@@ -58,13 +67,26 @@ export const VendorCollaborationHospitalView: React.FC<VendorCollaborationHospit
     }
   }, [effectiveUserDept]);
 
-  const [selectedOrderId, setSelectedOrderId] = useState<string>(orders[0]?.id || '');
+  const [selectedOrderId, setSelectedOrderId] = useState<string>(focusedVendorOrderId || orders[0]?.id || '');
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'MULTI_DEPT_NEGOTIATION' | 'INVOICE_AUDIT' | 'COMMUNICATION'>('OVERVIEW');
   const [showDossierModal, setShowDossierModal] = useState(false);
   const [showMonthlyQuoteReportModal, setShowMonthlyQuoteReportModal] = useState(false);
   const [showFrameworkAuditModal, setShowFrameworkAuditModal] = useState(false);
-  const [hospitalCollabMode, setHospitalCollabMode] = useState<'MONTHLY_FRAMEWORK' | 'SPECIAL_ORDERS'>('MONTHLY_FRAMEWORK');
+  const [hospitalCollabMode, setHospitalCollabMode] = useState<'MONTHLY_FRAMEWORK' | 'SPECIAL_ORDERS'>(
+    focusedVendorOrderId ? 'SPECIAL_ORDERS' : 'MONTHLY_FRAMEWORK'
+  );
+
+  useEffect(() => {
+    if (focusedVendorOrderId) {
+      setHospitalCollabMode('SPECIAL_ORDERS');
+      setOrderScopeMode('ALL');
+      setOrderDeptFilter('');
+      setFilterStatus('ALL');
+      setSelectedOrderId(focusedVendorOrderId);
+      onClearFocusedOrder?.();
+    }
+  }, [focusedVendorOrderId]);
   const frameworkBatches = getMonthlyFrameworkBatches();
 
   // 统计各科室包含的专项大修订单数
@@ -120,6 +142,12 @@ export const VendorCollaborationHospitalView: React.FC<VendorCollaborationHospit
 
   // 友好内置消息通知（替代浏览器原生 alert 以免在 iframe 中受阻）
   const [notifyMsg, setNotifyMsg] = useState<{ text: string; type: 'success' | 'warning' | 'info' } | null>(null);
+  const [archiveAuditBlockError, setArchiveAuditBlockError] = useState<{
+    orderId: string;
+    error: string;
+    missingItems: string[];
+  } | null>(null);
+
   const showToast = (text: string, type: 'success' | 'warning' | 'info' = 'success') => {
     setNotifyMsg({ text, type });
     setTimeout(() => {
@@ -131,6 +159,7 @@ export const VendorCollaborationHospitalView: React.FC<VendorCollaborationHospit
   const handleSelectOrder = (order: VendorCollaborationOrder) => {
     setSelectedOrderId(order.id);
     setNegotiationTargetPrice(order.finalNegotiatedPrice || order.quoteGrandTotal || 0);
+    setArchiveAuditBlockError(null);
   };
 
   // 院方发送沟通留言
@@ -266,19 +295,21 @@ export const VendorCollaborationHospitalView: React.FC<VendorCollaborationHospit
   };
 
   // 发票核验通过并完成全套归档
-  const handleVerifyInvoiceAndArchive = () => {
+  const handleVerifyInvoiceAndArchive = async () => {
     if (!selectedOrder) return;
     if (!selectedOrder.invoiceRecord) {
       showToast('供应商尚未上传增值税发票，无法完成归档！', 'warning');
       return;
     }
 
+    setArchiveAuditBlockError(null);
+
     const updated: VendorCollaborationOrder = {
       ...selectedOrder,
       status: 'ARCHIVED',
       isDossierArchived: true,
       archivedAt: new Date().toLocaleString(),
-      archivedBy: '张主任 (医学工程科主任)',
+      archivedBy: currentUser?.name || '张主任 (医学工程科主任)',
       invoiceRecord: {
         ...selectedOrder.invoiceRecord,
         verificationStatus: 'VERIFIED',
@@ -297,8 +328,18 @@ export const VendorCollaborationHospitalView: React.FC<VendorCollaborationHospit
       ]
     };
 
-    // 触发归档，并自动双向同步更新【往来合作单位】
-    onArchiveOrder(updated);
+    // 触发归档，校验后端审计强阻断后同步更新【往来合作单位】
+    const result = await onArchiveOrder(updated);
+    if (result && (result.success === false || result.auditBlocked)) {
+      setArchiveAuditBlockError({
+        orderId: selectedOrder.id,
+        error: result.error || '审计合规强阻断：关联项目台账尚未满足三项强制合规条件，禁止归档！',
+        missingItems: result.missingItems || []
+      });
+      showToast(result.error || '审计合规强阻断：请先补齐审批单、议价/招标记录与会议纪要！', 'warning');
+      return;
+    }
+
     showToast('恭喜！全套外协维修资料已通过发票与资质核验，成功合成【一案一档完整卷宗】，并已自动同步更新至【往来合作单位】台账！', 'success');
   };
 
@@ -1112,6 +1153,41 @@ export const VendorCollaborationHospitalView: React.FC<VendorCollaborationHospit
                         </div>
                       </div>
                     </div>
+
+                    {/* 审计合规强阻断拦截提示 */}
+                    {archiveAuditBlockError && archiveAuditBlockError.orderId === selectedOrder.id && (
+                      <div className="p-3.5 bg-rose-50 border border-rose-300 rounded-xl text-xs text-rose-900 space-y-2">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-start gap-2">
+                            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                            <div>
+                              <div className="font-bold text-rose-950">审计强阻断：外协工单暂不可结案归档</div>
+                              <p className="text-[11px] text-rose-800 mt-0.5">{archiveAuditBlockError.error}</p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const linkedProjId = (selectedOrder as VendorCollaborationOrder & { linkedProjectId?: string }).linkedProjectId || '';
+                              window.dispatchEvent(new CustomEvent('medtech:focus-project-ledger', {
+                                detail: { projectId: linkedProjId }
+                              }));
+                            }}
+                            className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 bg-rose-700 hover:bg-rose-800 text-white rounded-lg text-[11px] font-semibold cursor-pointer"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            <span>前往《设备项目台账》补办材料</span>
+                          </button>
+                        </div>
+                        {archiveAuditBlockError.missingItems.length > 0 && (
+                          <ul className="list-disc pl-6 space-y-0.5 text-[11px] text-rose-800">
+                            {archiveAuditBlockError.missingItems.map((item, idx) => (
+                              <li key={idx}>{item}</li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
 
                     {/* 归档操作 */}
                     <div className="flex justify-end pt-2">

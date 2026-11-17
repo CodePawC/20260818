@@ -40,6 +40,38 @@ export const DEFAULT_STAFF: StaffPersonMaster[] = [
     "notes": "全院设备主数据与调配总负责人"
   },
   {
+    "id": "STAFF-00",
+    "employeeNo": "EMP-8000",
+    "name": "张志远",
+    "gender": "男",
+    "stakeholderCategory": "hospital_engineering",
+    "organization": "五莲县人民医院",
+    "departmentId": "303",
+    "departmentName": "医疗设备科",
+    "role": "医工主管/调度员",
+    "roles": [
+      "医工主管/调度员",
+      "质控主管"
+    ],
+    "phone": "13863373258",
+    "shortPhone": "63258",
+    "workplace": "1号楼 综合楼 4F 医疗设备科调度室",
+    "isEquipmentAdmin": true,
+    "isAdverseEventAdmin": true,
+    "isRadiationWorker": false,
+    "title": "医工主管 / 派工调度中心主任",
+    "isPrimaryContact": true,
+    "specialties": [
+      "全院工单预派工与正式派工调度",
+      "SLA响应时效监管",
+      "规章制度与主数据统筹"
+    ],
+    "serviceScope": "全院设备故障调度分派与备件外协统筹",
+    "emergencyTier": "L1",
+    "status": "active",
+    "notes": "医工派工调度总责人，具备预派工拟定与正式派工签发权"
+  },
+  {
     "id": "STAFF-02",
     "employeeNo": "EMP-8002",
     "name": "孙志强",

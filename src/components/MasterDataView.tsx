@@ -50,6 +50,7 @@ import { StaffMasterTab } from './StaffMasterTab';
 import { DEFAULT_METROLOGY_CATALOGUE } from '../utils/metrologyCatalogueData';
 import { DEFAULT_NMPA_CATEGORY_MASTER } from '../utils/nmpaCategoryData';
 import { canManageMasterData } from '../utils/authUtils';
+import { ROLE_PERMISSION_MATRIX, resolveRoleArchetype } from '../utils/rbacPolicy';
 import { Pagination } from './Pagination';
 
 interface MasterDataViewProps {
@@ -75,8 +76,8 @@ interface MasterDataViewProps {
   onNavigateToDepartmentEquipment?: (deptName: string) => void;
 }
 
-// 空间与院区层级前置 + 强检目录 + 医疗器械22大类分类目录主数据
-type SubTab = 'space' | 'workplaces' | 'matrix' | 'departments' | 'staff' | 'category_master' | 'metrology_catalogue';
+// 空间与院区层级前置 + 强检目录 + 医疗器械22大类分类目录主数据 + 角色权限矩阵
+type SubTab = 'space' | 'workplaces' | 'matrix' | 'departments' | 'staff' | 'category_master' | 'metrology_catalogue' | 'role_matrix';
 
 export const MasterDataView: React.FC<MasterDataViewProps> = ({
   campuses,
@@ -577,18 +578,25 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
             <span className="text-amber-900 font-medium">在册责任人:</span>
             <strong className="font-mono text-amber-700 text-sm">{staff.length}</strong>
           </div>
-          <button
-            onClick={() => {
-              if (window.confirm('确定将所有主数据重置为五莲县人民医院与皮肤病医院完整标准字典模板吗？')) {
-                onResetAllMasterData();
-              }
-            }}
-            className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 flex items-center gap-1 cursor-pointer transition text-xs font-medium"
-            title="重置为主数据标准模板"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            恢复默认
-          </button>
+          {isMasterDataAdmin ? (
+            <button
+              onClick={() => {
+                if (window.confirm('确定将所有主数据重置为五莲县人民医院与皮肤病医院完整标准字典模板吗？')) {
+                  onResetAllMasterData();
+                }
+              }}
+              className="px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-100 text-slate-600 flex items-center gap-1 cursor-pointer transition text-xs font-medium"
+              title="重置为主数据标准模板"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              恢复默认
+            </button>
+          ) : (
+            <span className="px-2.5 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 flex items-center gap-1 text-xs font-semibold">
+              <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
+              <span>只读审计视图 · 仅管理员与医工主管可维护</span>
+            </span>
+          )}
         </div>
       </div>
 
@@ -686,11 +694,24 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
             <Scale className="w-4 h-4 text-emerald-500" />
             <span>7. 国家强检目录与政策 ({activeCatalogue.length})</span>
           </button>
+
+          {/* TAB 8: 7+1 岗位角色权限矩阵规范 */}
+          <button
+            onClick={() => setSubTab('role_matrix')}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition cursor-pointer ${
+              subTab === 'role_matrix' 
+                ? 'bg-slate-900 text-white shadow-xs' 
+                : 'text-slate-700 hover:bg-slate-200/70'
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4 text-indigo-500" />
+            <span>8. 角色权限矩阵 ({ROLE_PERMISSION_MATRIX.length})</span>
+          </button>
         </div>
 
         {/* Search & Actions */}
         <div className="flex items-center gap-2 flex-1 justify-end max-w-md">
-          {subTab !== 'metrology_catalogue' && subTab !== 'category_master' && subTab !== 'staff' && (
+          {subTab !== 'metrology_catalogue' && subTab !== 'category_master' && subTab !== 'staff' && subTab !== 'role_matrix' && (
             <div className="relative flex-1 min-w-[200px]">
               <Search className="w-4 h-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
               <input
@@ -717,7 +738,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
           )}
 
           {/* Quick Add Buttons */}
-          {(subTab === 'space' || subTab === 'workplaces') && (
+          {isMasterDataAdmin && (subTab === 'space' || subTab === 'workplaces') && (
             <button
               onClick={() => {
                 const nextId = `${(rooms.length + 300)}`;
@@ -746,7 +767,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
             </button>
           )}
 
-          {subTab === 'departments' && (
+          {isMasterDataAdmin && subTab === 'departments' && (
             <button
               onClick={() => {
                 setEditingDept({
@@ -882,7 +903,9 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                     <Building2 className="w-4 h-4 text-blue-600" />
                     <span>实体楼宇与楼层科室空间全貌 ({buildings.filter(b => selectedCampusId === 'all' || b.campusId === selectedCampusId).length} 栋楼宇)</span>
                   </h3>
-                  <span className="text-xs text-slate-500">点击科室可直接查看或配置属性</span>
+                  <span className="text-xs text-slate-500">
+                    {isMasterDataAdmin ? '点击科室可直接查看或配置属性' : '当前为只读审计视图'}
+                  </span>
                 </div>
 
                 <div className="space-y-4">
@@ -934,10 +957,15 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                                         <div
                                           key={dept.id}
                                           onClick={() => {
+                                            if (!isMasterDataAdmin) return;
                                             setEditingDept(dept);
                                             setIsDeptModalOpen(true);
                                           }}
-                                          className="group px-3 py-1.5 rounded-lg border border-slate-200 hover:border-indigo-400 hover:bg-indigo-50/50 bg-slate-50 transition cursor-pointer flex items-center gap-2 text-xs shadow-2xs"
+                                          className={`group px-3 py-1.5 rounded-lg border border-slate-200 bg-slate-50 transition flex items-center gap-2 text-xs shadow-2xs ${
+                                            isMasterDataAdmin
+                                              ? 'hover:border-indigo-400 hover:bg-indigo-50/50 cursor-pointer'
+                                              : 'cursor-default'
+                                          }`}
                                         >
                                           <div className="flex items-center gap-1.5">
                                             <span className="font-bold text-slate-800 group-hover:text-indigo-700">
@@ -1008,7 +1036,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                         <th className="py-2.5 px-3">楼层</th>
                         <th className="py-2.5 px-3">归属科室</th>
                         <th className="py-2.5 px-3">标准全路径定位</th>
-                        <th className="py-2.5 px-3 text-right">操作</th>
+                        {isMasterDataAdmin && <th className="py-2.5 px-3 text-right">操作</th>}
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -1036,25 +1064,27 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                               </button>
                             </div>
                           </td>
-                          <td className="py-2 px-3 text-right">
-                            <button
-                              onClick={() => {
-                                setEditingRoom(r);
-                                setIsRoomModalOpen(true);
-                              }}
-                              className="p-1 text-slate-400 hover:text-indigo-600 rounded transition cursor-pointer"
-                              title="编辑房间"
-                            >
-                              <Edit3 className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteRoom(r.id, r.roomName)}
-                              className="p-1 text-slate-400 hover:text-rose-600 rounded transition cursor-pointer ml-1"
-                              title="删除房间"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </td>
+                          {isMasterDataAdmin && (
+                            <td className="py-2 px-3 text-right">
+                              <button
+                                onClick={() => {
+                                  setEditingRoom(r);
+                                  setIsRoomModalOpen(true);
+                                }}
+                                className="p-1 text-slate-400 hover:text-indigo-600 rounded transition cursor-pointer"
+                                title="编辑房间"
+                              >
+                                <Edit3 className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                onClick={() => handleDeleteRoom(r.id, r.roomName)}
+                                className="p-1 text-slate-400 hover:text-rose-600 rounded transition cursor-pointer ml-1"
+                                title="删除房间"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </td>
+                          )}
                         </tr>
                       ))}
                     </tbody>
@@ -1196,13 +1226,13 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                       <th className="py-2.5 px-3">所在空间路径</th>
                       <th className="py-2.5 px-3 w-24">空间类型</th>
                       <th className="py-2.5 px-3 w-20 text-center">承载设备</th>
-                      <th className="py-2.5 px-3 text-right w-24">操作</th>
+                      {isMasterDataAdmin && <th className="py-2.5 px-3 text-right w-24">操作</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-slate-700">
                     {filteredWorkplaces.length === 0 ? (
                       <tr>
-                        <td colSpan={9} className="py-12 text-center text-slate-400">
+                        <td colSpan={isMasterDataAdmin ? 9 : 8} className="py-12 text-center text-slate-400">
                           <DoorOpen className="w-8 h-8 mx-auto mb-2 text-slate-300" />
                           <p className="font-medium text-xs">未找到符合条件的工作场所或安装点</p>
                           <p className="text-[11px] text-slate-400 mt-1">请尝试调整搜索关键词或重置筛选条件</p>
@@ -1310,27 +1340,29 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                             </td>
 
                             {/* 操作 */}
-                            <td className="py-2 px-3 text-right">
-                              <div className="flex items-center justify-end gap-1">
-                                <button
-                                  onClick={() => {
-                                    setEditingRoom(w);
-                                    setIsRoomModalOpen(true);
-                                  }}
-                                  className="p-1 text-slate-400 hover:text-indigo-600 rounded transition cursor-pointer"
-                                  title="编辑场所信息"
-                                >
-                                  <Edit3 className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                  onClick={() => handleDeleteRoom(w.id, w.roomName)}
-                                  className="p-1 text-slate-400 hover:text-rose-600 rounded transition cursor-pointer"
-                                  title="删除场所"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            </td>
+                            {isMasterDataAdmin && (
+                              <td className="py-2 px-3 text-right">
+                                <div className="flex items-center justify-end gap-1">
+                                  <button
+                                    onClick={() => {
+                                      setEditingRoom(w);
+                                      setIsRoomModalOpen(true);
+                                    }}
+                                    className="p-1 text-slate-400 hover:text-indigo-600 rounded transition cursor-pointer"
+                                    title="编辑场所信息"
+                                  >
+                                    <Edit3 className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteRoom(w.id, w.roomName)}
+                                    className="p-1 text-slate-400 hover:text-rose-600 rounded transition cursor-pointer"
+                                    title="删除场所"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </td>
+                            )}
                           </tr>
                         );
                       })
@@ -1544,7 +1576,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                     <th className="py-2.5 px-3 text-center">应急调配</th>
                     <th className="py-2.5 px-3">责任工程师</th>
                     <th className="py-2.5 px-3 text-center">设备数</th>
-                    <th className="py-2.5 px-3 text-right">操作</th>
+                    {isMasterDataAdmin && <th className="py-2.5 px-3 text-right">操作</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -1630,25 +1662,27 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
                             <span className="text-slate-400">0</span>
                           )}
                         </td>
-                        <td className="py-2.5 px-3 text-right">
-                          <button
-                            onClick={() => {
-                              setEditingDept(dept);
-                              setIsDeptModalOpen(true);
-                            }}
-                            className="p-1 text-slate-400 hover:text-indigo-600 rounded transition cursor-pointer"
-                            title="编辑科室"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteDepartment(dept.id, dept.name)}
-                            className="p-1 text-slate-400 hover:text-rose-600 rounded transition cursor-pointer ml-1"
-                            title="删除科室"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </td>
+                        {isMasterDataAdmin && (
+                          <td className="py-2.5 px-3 text-right">
+                            <button
+                              onClick={() => {
+                                setEditingDept(dept);
+                                setIsDeptModalOpen(true);
+                              }}
+                              className="p-1 text-slate-400 hover:text-indigo-600 rounded transition cursor-pointer"
+                              title="编辑科室"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteDepartment(dept.id, dept.name)}
+                              className="p-1 text-slate-400 hover:text-rose-600 rounded transition cursor-pointer ml-1"
+                              title="删除科室"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -1677,6 +1711,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
             departments={departments}
             onUpdateStaff={onUpdateStaff}
             onResetDefaults={onResetDefaults || onResetAllMasterData}
+            readOnly={!isMasterDataAdmin}
           />
         )}
 
@@ -1686,7 +1721,8 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
             categoryMaster={activeCategoryMaster}
             equipmentList={equipmentList}
             onUpdateCategoryMaster={handleUpdateCategoryMaster}
-            onResetDefaults={() => handleUpdateCategoryMaster(DEFAULT_NMPA_CATEGORY_MASTER)}
+            onResetDefaults={isMasterDataAdmin ? () => handleUpdateCategoryMaster(DEFAULT_NMPA_CATEGORY_MASTER) : undefined}
+            readOnly={!isMasterDataAdmin}
           />
         )}
 
@@ -1696,14 +1732,150 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
             catalogue={activeCatalogue}
             equipmentList={equipmentList}
             onUpdateCatalogue={handleUpdateCatalogue}
-            onUpdateEquipmentList={onUpdateEquipmentList}
+            onUpdateEquipmentList={isMasterDataAdmin ? onUpdateEquipmentList : undefined}
             onResetCatalogueToDefault={handleResetCatalogue}
+            readOnly={!isMasterDataAdmin}
           />
         )}
+
+        {/* ==================== SUBTAB 8: 7+1 岗位角色权限矩阵规范 ==================== */}
+        {subTab === 'role_matrix' && (() => {
+          const currentArch = resolveRoleArchetype(currentUser);
+          return (
+            <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-slate-50/40">
+              <div className="px-4 py-3 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-indigo-600" />
+                    <span>7+1 典型岗位角色权限矩阵与业务边界规范</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    前后端同源策略（<code className="font-mono text-indigo-700 bg-indigo-50 px-1 py-0.2 rounded border border-indigo-100">rbacPolicy.ts</code>）同步执行：菜单白名单默认拒绝（Default-Deny）、敏感按钮隐藏与服务端 API 写接口 <code className="font-mono text-rose-700 bg-rose-50 px-1 py-0.2 rounded border border-rose-100">403 Forbidden</code> 强校验。
+                  </p>
+                </div>
+                <div className="px-3 py-1.5 rounded-lg bg-slate-900 text-white text-xs font-semibold flex items-center gap-2">
+                  <span>当前登录岗位原型:</span>
+                  <span className="font-mono font-bold text-emerald-300">
+                    {ROLE_PERMISSION_MATRIX.find(r => r.archetype === currentArch)?.roleLabel || currentArch}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-auto p-4">
+                <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-2xs">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 sticky top-0 z-10">
+                      <tr>
+                        <th className="py-2.5 px-3 w-36 border-r border-slate-200">岗位原型 (8类)</th>
+                        <th className="py-2.5 px-3 w-36 border-r border-slate-200">典型示例人员</th>
+                        <th className="py-2.5 px-3 w-28 border-r border-slate-200">数据可见范围</th>
+                        <th className="py-2.5 px-3 w-32 border-r border-slate-200">派工与抢修权限</th>
+                        <th className="py-2.5 px-3 w-32 border-r border-slate-200">设备台账权限</th>
+                        <th className="py-2.5 px-3 w-28 border-r border-slate-200">规章制度</th>
+                        <th className="py-2.5 px-3 w-28 border-r border-slate-200">财务与审计</th>
+                        <th className="py-2.5 px-3 w-28 border-r border-slate-200">系统与草料运维</th>
+                        <th className="py-2.5 px-3">默认隐藏与隔离模块说明</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200 text-slate-700">
+                      {ROLE_PERMISSION_MATRIX.map(row => {
+                        const isCurrent = row.archetype === currentArch;
+                        return (
+                          <tr
+                            key={row.archetype}
+                            className={isCurrent ? 'bg-indigo-50/70' : 'hover:bg-slate-50/80 transition'}
+                          >
+                            <td className="py-2.5 px-3 border-r border-slate-100 font-bold text-slate-900">
+                              <div className="flex items-center gap-1.5">
+                                <span>{row.roleLabel}</span>
+                                {isCurrent && (
+                                  <span className="px-1.5 py-0.2 rounded bg-indigo-600 text-white text-[10px] font-bold">
+                                    当前
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[10px] font-mono text-slate-400 mt-0.5">{row.archetype}</div>
+                            </td>
+                            <td className="py-2.5 px-3 border-r border-slate-100 font-mono text-[11px] text-slate-700">
+                              {row.typicalPerson}
+                            </td>
+                            <td className="py-2.5 px-3 border-r border-slate-100">
+                              <span className="px-2 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-800 font-semibold text-[11px]">
+                                {row.dataScope}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 border-r border-slate-100">
+                              <span className={`px-2 py-0.5 rounded text-[11px] font-bold border inline-block ${
+                                row.dispatchCap === '正式派工 + 预派'
+                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                  : row.dispatchCap === '仅讨论 + 接单修'
+                                  ? 'bg-blue-50 text-blue-800 border-blue-200'
+                                  : row.dispatchCap === '仅看进度/验收'
+                                  ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                  : 'bg-slate-100 text-slate-500 border-slate-200'
+                              }`}>
+                                {row.dispatchCap}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 border-r border-slate-100">
+                              <span className={`px-2 py-0.5 rounded text-[11px] font-bold border inline-block ${
+                                row.equipmentCap === '全院增删改查'
+                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                  : row.equipmentCap === '仅本科室只读'
+                                  ? 'bg-slate-100 text-slate-600 border-slate-200'
+                                  : 'bg-indigo-50 text-indigo-800 border-indigo-200'
+                              }`}>
+                                {row.equipmentCap}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 border-r border-slate-100">
+                              <span className={`px-2 py-0.5 rounded text-[11px] font-bold border inline-block ${
+                                row.regulationCap === '可增删改/归档'
+                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                  : 'bg-slate-100 text-slate-600 border-slate-200'
+                              }`}>
+                                {row.regulationCap}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 border-r border-slate-100">
+                              <span className={`px-2 py-0.5 rounded text-[11px] font-bold border inline-block ${
+                                row.financeCap === '全权审批/核销'
+                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                  : row.financeCap === '本科室ROI'
+                                  ? 'bg-amber-50 text-amber-800 border-amber-200'
+                                  : 'bg-slate-100 text-slate-400 border-slate-200'
+                              }`}>
+                                {row.financeCap}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 border-r border-slate-100">
+                              <span className={`px-2 py-0.5 rounded text-[11px] font-bold border inline-block ${
+                                row.systemCap === '全系统运维配置'
+                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                  : row.systemCap === '仅看草料日志'
+                                  ? 'bg-blue-50 text-blue-800 border-blue-200'
+                                  : 'bg-rose-50 text-rose-700 border-rose-200'
+                              }`}>
+                                {row.systemCap}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 text-slate-600 text-[11px] leading-relaxed">
+                              {row.hiddenModulesSummary}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* ==================== 模态弹窗：科室编辑/新建 ==================== */}
-      {isDeptModalOpen && editingDept && (
+      {isMasterDataAdmin && isDeptModalOpen && editingDept && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
           <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-xl overflow-hidden flex flex-col max-h-[90vh]">
             <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
@@ -1932,7 +2104,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
       )}
 
       {/* ==================== 模态弹窗：工作场所/空间房间编辑与新建 ==================== */}
-      {isRoomModalOpen && editingRoom && (
+      {isMasterDataAdmin && isRoomModalOpen && editingRoom && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
           <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden flex flex-col">
             <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
@@ -2146,7 +2318,7 @@ export const MasterDataView: React.FC<MasterDataViewProps> = ({
       )}
 
       {/* ==================== 模态弹窗：人员编辑/新建 ==================== */}
-      {isStaffModalOpen && editingStaff && (
+      {isMasterDataAdmin && isStaffModalOpen && editingStaff && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150">
           <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden flex flex-col">
             <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">

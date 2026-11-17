@@ -1,5 +1,6 @@
 import React from 'react';
 import { EngineeringWorkOrder } from '../types/dispatchTypes';
+import { OUTSOURCE_SERVICE_MODE_LABELS } from '../utils/dispatchData';
 import { X, Printer, ShieldCheck, CheckCircle2, QrCode } from 'lucide-react';
 
 interface WorkOrderPrintModalProps {
@@ -31,6 +32,7 @@ export const WorkOrderPrintModal: React.FC<WorkOrderPrintModalProps> = ({
   const getStatusText = (s: string) => {
     switch (s) {
       case 'pending_dispatch': return '待派工';
+      case 'pre_dispatched': return '预派工 (拟定工程师·内部确认中)';
       case 'dispatched': return '已派工待接单';
       case 'accepted': return '已接单在途';
       case 'arrived_inspecting': return '现场排查检修中';
@@ -138,7 +140,11 @@ export const WorkOrderPrintModal: React.FC<WorkOrderPrintModalProps> = ({
               <tr>
                 <td className="border border-slate-900 bg-slate-100 p-2 font-bold text-slate-700">责任工程师</td>
                 <td className="border border-slate-900 p-2 font-bold text-indigo-900">
-                  {workOrder.assignedEngineerName || '未指定'} ({workOrder.assignedEngineerPhone})
+                  {workOrder.assignedEngineerName
+                    ? `${workOrder.assignedEngineerName} (${workOrder.assignedEngineerPhone || ''})`
+                    : workOrder.proposedEngineerName
+                    ? `拟定: ${workOrder.proposedEngineerName} (${workOrder.proposedEngineerPhone || ''}) [内部确认中]`
+                    : '未指定'}
                 </td>
                 <td className="border border-slate-900 bg-slate-100 p-2 font-bold text-slate-700">派工时间</td>
                 <td className="border border-slate-900 p-2 font-mono">{workOrder.dispatchTime || '—'}</td>
@@ -154,6 +160,30 @@ export const WorkOrderPrintModal: React.FC<WorkOrderPrintModalProps> = ({
                   {workOrder.totalDowntimeHours} 小时 (SLA时限: {workOrder.slaRepairLimitHours}小时)
                 </td>
               </tr>
+              {(workOrder.dispatchChannel === 'outsourced' || workOrder.externalPartner) && (
+                <>
+                  <tr>
+                    <td className="border border-slate-900 bg-amber-50 p-2 font-bold text-amber-900">外协承接单位</td>
+                    <td className="border border-slate-900 p-2 font-bold text-slate-900">
+                      {workOrder.externalPartner || '—'}
+                      {workOrder.externalContractNo ? ` (合同: ${workOrder.externalContractNo})` : ''}
+                    </td>
+                    <td className="border border-slate-900 bg-amber-50 p-2 font-bold text-amber-900">外协方式/单号</td>
+                    <td className="border border-slate-900 p-2">
+                      {workOrder.outsourceServiceMode ? OUTSOURCE_SERVICE_MODE_LABELS[workOrder.outsourceServiceMode]?.shortLabel : '外协维保'}
+                      {workOrder.linkedVendorOrderId ? ` · ${workOrder.linkedVendorOrderId}` : ''}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="border border-slate-900 bg-amber-50 p-2 font-bold text-amber-900">厂商联系人</td>
+                    <td className="border border-slate-900 p-2">
+                      {workOrder.externalVendorContact || '—'} {workOrder.externalVendorPhone ? `(${workOrder.externalVendorPhone})` : ''}
+                    </td>
+                    <td className="border border-slate-900 bg-amber-50 p-2 font-bold text-amber-900">转外协说明</td>
+                    <td className="border border-slate-900 p-2">{workOrder.outsourceReason || '原厂/第三方协同处置'}</td>
+                  </tr>
+                </>
+              )}
               <tr>
                 <td className="border border-slate-900 bg-slate-100 p-2 font-bold text-slate-700">现场检测结论</td>
                 <td colSpan={3} className="border border-slate-900 p-2 text-slate-800 leading-relaxed">

@@ -67,7 +67,7 @@ import { RegulationCompilationPdfModal } from './RegulationCompilationPdfModal';
 import { ThreeTierManagementArchitectureDiagram } from './ThreeTierManagementArchitectureDiagram';
 import { getRegulationWorkflow } from '../utils/regulationWorkflowPresets';
 import { ActiveTab, AuthUser } from '../types';
-import { getUserDepartment, isHeadNurse, isDepartmentRestricted, canUploadRegulationPdf } from '../utils/authUtils';
+import { getUserDepartment, isHeadNurse, isDepartmentRestricted, canEditRegulation } from '../utils/authUtils';
 
 interface RegulationsViewProps {
   currentUser?: AuthUser;
@@ -163,8 +163,8 @@ export const RegulationsView: React.FC<RegulationsViewProps> = ({
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingRegulation, setEditingRegulation] = useState<RegulationItem | null>(null);
 
-  // 管理员权限判断 (允许具备管理员权限的用户上传 PDF 格式的规章制度文件并归档)
-  const isAdmin = canUploadRegulationPdf(currentUser);
+  // 规章制度维护权限判断 (仅系统管理员与医工主管/调度员可增删改与归档PDF)
+  const isAdmin = canEditRegulation(currentUser);
   const [isUploadPdfModalOpen, setIsUploadPdfModalOpen] = useState(false);
   const [isCompilationPdfModalOpen, setIsCompilationPdfModalOpen] = useState(false);
   const [showEmbeddedPdf, setShowEmbeddedPdf] = useState(true);
@@ -356,6 +356,10 @@ export const RegulationsView: React.FC<RegulationsViewProps> = ({
 
   // 归档上传 PDF 规章制度文件
   const handleArchivePdfRegulation = (archivedItem: RegulationItem) => {
+    if (!isAdmin) {
+      triggerToast('权限不足：仅系统管理员或医工主管/调度员可归档制度文件');
+      return;
+    }
     const updated = [archivedItem, ...regulations];
     setRegulations(updated);
     saveStoredRegulations(updated);
@@ -438,12 +442,20 @@ export const RegulationsView: React.FC<RegulationsViewProps> = ({
 
   // 打开修订制度弹窗
   const handleOpenEditModal = (item: RegulationItem) => {
+    if (!isAdmin) {
+      triggerToast('权限不足：仅系统管理员或医工主管/调度员可编辑规章制度');
+      return;
+    }
     setEditingRegulation(item);
     setIsAddModalOpen(true);
   };
 
   // 保存新增或修订制度
   const handleSaveRegulation = (savedItem: RegulationItem) => {
+    if (!isAdmin) {
+      triggerToast('权限不足：仅系统管理员或医工主管/调度员可保存规章制度');
+      return;
+    }
     let updated: RegulationItem[];
     const exists = regulations.some(r => r.id === savedItem.id);
     if (exists) {
@@ -460,6 +472,10 @@ export const RegulationsView: React.FC<RegulationsViewProps> = ({
 
   // 删除制度
   const handleDeleteRegulation = (id: string, title: string) => {
+    if (!isAdmin) {
+      triggerToast('权限不足：仅系统管理员或医工主管/调度员可废止或删除规章制度');
+      return;
+    }
     if (!window.confirm(`确认要删除制度《${title.replace(/[《》]/g, '')}》吗？此操作不可撤销。`)) {
       return;
     }
@@ -474,6 +490,10 @@ export const RegulationsView: React.FC<RegulationsViewProps> = ({
 
   // 恢复默认初始制度库
   const handleResetToDefault = () => {
+    if (!isAdmin) {
+      triggerToast('权限不足：仅系统管理员或医工主管/调度员可重置标准制度库');
+      return;
+    }
     if (window.confirm('确认要重置恢复为医院标准18项核心制度库吗？自定义新增的制度将被初始化覆盖。')) {
       const defs = resetStoredRegulations();
       setRegulations(defs);
@@ -697,49 +717,41 @@ export const RegulationsView: React.FC<RegulationsViewProps> = ({
               <span className="hidden md:inline">导出目录</span>
             </button>
 
-            {/* 重置初始库 (系统管理) */}
-            <button
-              type="button"
-              onClick={handleResetToDefault}
-              className="p-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-500 hover:text-slate-700 rounded-xl text-xs transition-colors shadow-2xs"
-              title="恢复为标准三甲制度库"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-            </button>
+            {/* 重置初始库 / 上传PDF / 新增制度（仅管理员与医工主管可见） */}
+            {isAdmin && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleResetToDefault}
+                  className="p-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-500 hover:text-slate-700 rounded-xl text-xs transition-colors shadow-2xs"
+                  title="恢复为标准三甲制度库"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                </button>
 
-            {/* 管理员专属：上传 PDF 格式规章制度文件归档 */}
-            {isAdmin ? (
-              <button
-                type="button"
-                onClick={() => setIsUploadPdfModalOpen(true)}
-                className="px-3.5 py-1.5 bg-gradient-to-r from-red-600 via-rose-600 to-red-700 hover:from-red-700 hover:to-rose-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm ring-1 ring-red-400/40"
-                title="具备管理员权限：上传 PDF 格式规章制度文件，录入标题、适用部门和发布日期进行正式归档"
-              >
-                <Upload className="w-4 h-4" />
-                <span>归档 PDF 制度</span>
-              </button>
-            ) : (
-              <div 
-                className="px-2.5 py-1.5 bg-slate-100 border border-slate-200 text-slate-400 rounded-xl text-xs flex items-center gap-1 cursor-not-allowed select-none"
-                title="仅具备管理员权限的用户方可上传并归档 PDF 格式制度文件"
-              >
-                <Lock className="w-3.5 h-3.5 text-slate-400" />
-                <span className="hidden sm:inline">PDF归档(限管理员)</span>
-              </div>
+                <button
+                  type="button"
+                  onClick={() => setIsUploadPdfModalOpen(true)}
+                  className="px-3.5 py-1.5 bg-gradient-to-r from-red-600 via-rose-600 to-red-700 hover:from-red-700 hover:to-rose-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm ring-1 ring-red-400/40"
+                  title="上传 PDF 格式规章制度文件，录入标题、适用部门和发布日期进行正式归档"
+                >
+                  <Upload className="w-4 h-4" />
+                  <span>归档 PDF 制度</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingRegulation(null);
+                    setIsAddModalOpen(true);
+                  }}
+                  className="px-3.5 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>存放 / 录入新制度</span>
+                </button>
+              </>
             )}
-
-            {/* 存放新制度 / 录入制度按钮 */}
-            <button
-              type="button"
-              onClick={() => {
-                setEditingRegulation(null);
-                setIsAddModalOpen(true);
-              }}
-              className="px-3.5 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm"
-            >
-              <Plus className="w-4 h-4" />
-              <span>存放 / 录入新制度</span>
-            </button>
           </div>
         </div>
 
@@ -1088,18 +1100,20 @@ export const RegulationsView: React.FC<RegulationsViewProps> = ({
                               <Eye className="w-3 h-3" />
                               <span>{reg.readCount}</span>
                             </span>
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleOpenEditModal(reg);
-                              }}
-                              className="px-2 py-0.5 rounded text-blue-600 hover:text-blue-800 bg-blue-50/80 hover:bg-blue-100 border border-blue-200/80 font-bold text-[10px] flex items-center gap-1 transition-colors cursor-pointer"
-                              title="编辑修改制度全项信息"
-                            >
-                              <Edit3 className="w-2.5 h-2.5" />
-                              <span>编辑</span>
-                            </button>
+                            {isAdmin && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenEditModal(reg);
+                                }}
+                                className="px-2 py-0.5 rounded text-blue-600 hover:text-blue-800 bg-blue-50/80 hover:bg-blue-100 border border-blue-200/80 font-bold text-[10px] flex items-center gap-1 transition-colors cursor-pointer"
+                                title="编辑修改制度全项信息"
+                              >
+                                <Edit3 className="w-2.5 h-2.5" />
+                                <span>编辑</span>
+                              </button>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -1197,26 +1211,30 @@ export const RegulationsView: React.FC<RegulationsViewProps> = ({
                         <Printer className="w-3.5 h-3.5" />
                       </button>
 
-                      {/* 核心动作：编辑/修订此制度 */}
-                      <button
-                        type="button"
-                        onClick={() => handleOpenEditModal(currentRegulation)}
-                        className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer text-xs"
-                        title="编辑修改制度全称、发文字号、条款正文、适用科室与版本记录"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                        <span>编辑此制度</span>
-                      </button>
+                      {isAdmin && (
+                        <>
+                          {/* 核心动作：编辑/修订此制度 */}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditModal(currentRegulation)}
+                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer text-xs"
+                            title="编辑修改制度全称、发文字号、条款正文、适用科室与版本记录"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                            <span>编辑此制度</span>
+                          </button>
 
-                      {/* 删除 */}
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteRegulation(currentRegulation.id, currentRegulation.title)}
-                        className="p-1.5 hover:bg-rose-50 rounded-lg text-slate-400 hover:text-rose-600 transition-colors"
-                        title="废止/删除此制度"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                          {/* 删除 */}
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteRegulation(currentRegulation.id, currentRegulation.title)}
+                            className="p-1.5 hover:bg-rose-50 rounded-lg text-slate-400 hover:text-rose-600 transition-colors"
+                            title="废止/删除此制度"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
 
@@ -1596,15 +1614,21 @@ export const RegulationsView: React.FC<RegulationsViewProps> = ({
                         </p>
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handleOpenEditModal(currentRegulation)}
-                      className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-all flex items-center gap-1.5 shrink-0 self-start sm:self-auto cursor-pointer shadow-xs"
-                      title="进入制度编辑窗口，修改正文或添加修订记录"
-                    >
-                      <Edit3 className="w-3.5 h-3.5" />
-                      <span>修订制度正文与版本</span>
-                    </button>
+                    {isAdmin ? (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditModal(currentRegulation)}
+                        className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-all flex items-center gap-1.5 shrink-0 self-start sm:self-auto cursor-pointer shadow-xs"
+                        title="进入制度编辑窗口，修改正文或添加修订记录"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                        <span>修订制度正文与版本</span>
+                      </button>
+                    ) : (
+                      <span className="px-3 py-1.5 bg-slate-100 text-slate-500 border border-slate-200 rounded-xl text-[11px] font-semibold shrink-0">
+                        只读宣贯模式（限医工主管/管理员修订）
+                      </span>
+                    )}
                   </div>
 
                   {/* 附件与配套表单下载区 */}
@@ -1661,13 +1685,15 @@ export const RegulationsView: React.FC<RegulationsViewProps> = ({
                         <History className="w-4 h-4 text-blue-600" />
                         <span>制度修订记录与版本沿革台账</span>
                       </h4>
-                      <button
-                        type="button"
-                        onClick={() => handleOpenEditModal(currentRegulation)}
-                        className="text-xs text-blue-600 hover:text-blue-700 font-semibold hover:underline"
-                      >
-                        编辑/新增修订记录
-                      </button>
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditModal(currentRegulation)}
+                          className="text-xs text-blue-600 hover:text-blue-700 font-semibold hover:underline"
+                        >
+                          编辑/新增修订记录
+                        </button>
+                      )}
                     </div>
 
                     <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xs">

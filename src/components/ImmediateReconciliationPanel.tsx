@@ -385,7 +385,7 @@ export const ImmediateReconciliationPanel: React.FC<ImmediateReconciliationPanel
       </div>
 
       {/* 待办工单列表主体 */}
-      <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-slate-100 p-2 sm:p-2.5 space-y-1.5">
+      <div className="flex-1 min-h-[280px] max-h-[60vh] overflow-y-auto overscroll-contain divide-y divide-slate-100 p-2 sm:p-2.5 space-y-1.5">
         {filteredItems.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center p-6 text-center text-slate-400 min-h-[160px]">
             <CheckCircle2 className="w-9 h-9 text-emerald-500 opacity-90 mb-1.5" />

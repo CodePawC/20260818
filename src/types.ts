@@ -19,7 +19,7 @@ export interface MetrologyCatalogueItem {
   notes?: string;
 }
 
-export type ActiveTab = 'welcome' | 'ledger' | 'dashboard' | 'maintenance' | 'repairs' | 'dispatch' | 'parts_inventory' | 'adverse_events' | 'emergency_reserve' | 'tracking' | 'analytics' | 'roi' | 'drg_cost_audit' | 'ai' | 'partners' | 'master_data' | 'approvals' | 'mobile_inspection' | 'vendor_collaboration' | 'factory_repair_workflow' | 'repair_closed_loop' | 'regulations' | 'project_concluding' | 'ai_config' | 'database_backup' | 'system_update' | 'system_ops' | 'caoliao_integration' | 'caoliao_sync_settings' | 'caoliao_webhook_logs' | 'mobile_collaboration' | 'accreditation_quality' | 'scrap_workflow' | 'smart_management' | 'digital_twin_sandbox';
+export type ActiveTab = 'welcome' | 'ledger' | 'project_ledger' | 'dashboard' | 'maintenance' | 'repairs' | 'dispatch' | 'parts_inventory' | 'adverse_events' | 'emergency_reserve' | 'tracking' | 'analytics' | 'roi' | 'drg_cost_audit' | 'ai' | 'partners' | 'master_data' | 'approvals' | 'mobile_inspection' | 'vendor_collaboration' | 'factory_repair_workflow' | 'repair_closed_loop' | 'regulations' | 'project_concluding' | 'ai_config' | 'database_backup' | 'system_update' | 'system_ops' | 'caoliao_integration' | 'caoliao_sync_settings' | 'caoliao_webhook_logs' | 'mobile_collaboration' | 'accreditation_quality' | 'scrap_workflow' | 'smart_management' | 'digital_twin_sandbox' | 'user_manual' | 'regulatory_platforms';
 
 // ==================== 草料二维码接口对接与分类映射规则配置 ====================
 export interface CaoliaoCategoryMappingRule {
@@ -893,4 +893,39 @@ export interface EmergencySimulationScenario {
     durationMin: number;
   }[];
 }
+
+// ==================== 全院分级消息通知与统一下发模型 ====================
+export type NoticePriority = 'urgent' | 'important' | 'normal';
+export type NoticeCategory = '安全警示' | '强检召回' | '维保排期' | '财务结算' | '院级通告' | '工作协同';
+export type NoticeTargetScope = 'all' | 'clinical_all' | 'department' | 'role_archetype';
+
+export interface NoticeReadReceipt {
+  userId: string;
+  userName: string;
+  userRole: string;
+  department: string;
+  readAt: string;
+  acknowledged: boolean;
+}
+
+export interface HospitalNotice {
+  id: string;
+  title: string;
+  content: string;
+  category: NoticeCategory;
+  priority: NoticePriority;
+  senderName: string;
+  senderRole: string;
+  senderDepartment: string;
+  senderArchetype?: string;
+  targetScope: NoticeTargetScope;
+  targetDepartments?: string[];
+  targetRoles?: string[];
+  requireAck: boolean;
+  targetTab?: ActiveTab;
+  relatedEquipmentSn?: string;
+  createdAt: string;
+  readReceipts: NoticeReadReceipt[];
+}
+
 

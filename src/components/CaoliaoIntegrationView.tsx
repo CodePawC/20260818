@@ -260,28 +260,10 @@ export const CaoliaoIntegrationView: React.FC<CaoliaoIntegrationViewProps> = ({
       const res = await fetch('/api/caoliao/pull-and-sync-dispatch', { method: 'POST' });
       const json = await res.json();
       if (json.success && Array.isArray(json.candidateWorkOrders)) {
-        const raw = localStorage.getItem('hospital-medtech-workorders');
-        let currentOrders: any[] = [];
-        try {
-          if (raw) currentOrders = JSON.parse(raw);
-        } catch (e) {}
-        if (!Array.isArray(currentOrders)) currentOrders = [];
-
-        const existingIds = new Set(currentOrders.map(o => o.id));
-        let addedCount = 0;
-        const newOrders = [...currentOrders];
-
-        json.candidateWorkOrders.forEach((candidate: any) => {
-          if (!existingIds.has(candidate.id)) {
-            newOrders.unshift(candidate);
-            existingIds.add(candidate.id);
-            addedCount++;
-          }
-        });
-
-        localStorage.setItem('hospital-medtech-workorders', JSON.stringify(newOrders));
         window.dispatchEvent(new CustomEvent('work_orders_updated'));
-        showToast('success', `单向同步完成！已从草料抽取并转建 ${addedCount} 条全新院内待派工单。`);
+        window.dispatchEvent(new CustomEvent('medical_equipment_updated'));
+        window.dispatchEvent(new CustomEvent('caoliao_repair_received'));
+        showToast('success', json.message || `单向同步完成！已从草料抽取并转建 ${json.addedCount ?? json.candidateWorkOrders.length} 条工单。`);
         fetchRepairs();
       } else {
         showToast('error', json.error || '同步失败');
@@ -394,6 +376,9 @@ export const CaoliaoIntegrationView: React.FC<CaoliaoIntegrationViewProps> = ({
       const json = await res.json();
       if (json.success) {
         setSyncedOrderIds(prev => new Set(prev).add(repairRecord.recordId));
+        window.dispatchEvent(new CustomEvent('work_orders_updated'));
+        window.dispatchEvent(new CustomEvent('medical_equipment_updated'));
+        window.dispatchEvent(new CustomEvent('caoliao_repair_received'));
         showToast('success', json.message || '已成功将草料报修同步生成平台工单！');
       } else {
         showToast('error', json.error || '工单同步失败');

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { MedicalEquipment, EquipmentStatus } from '../types';
+import { MedicalEquipment, EquipmentStatus, AuthUser } from '../types';
+import { canInitiateRepair, canChangeEquipmentStatus } from '../utils/authUtils';
 import { getEquipmentPhoto } from '../utils/equipmentPhotoUtils';
 import { getEquipmentHealthScore } from '../utils/equipmentUtils';
 import { ImagePreviewModal } from './ImagePreviewModal';
@@ -32,6 +33,7 @@ interface EquipmentPhotoStreamProps {
   onAiDiagnoseDevice: (item: MedicalEquipment) => void;
   onPrintQrLabel?: (item: MedicalEquipment) => void;
   onHealthScoreClick?: (item: MedicalEquipment) => void;
+  currentUser?: AuthUser | null;
 }
 
 export const EquipmentPhotoStream: React.FC<EquipmentPhotoStreamProps> = ({
@@ -46,10 +48,13 @@ export const EquipmentPhotoStream: React.FC<EquipmentPhotoStreamProps> = ({
   onAiDiagnoseDevice,
   onPrintQrLabel,
   onHealthScoreClick,
+  currentUser,
 }) => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [previewDevice, setPreviewDevice] = useState<MedicalEquipment | null>(null);
   const [uploadDevice, setUploadDevice] = useState<MedicalEquipment | null>(null);
+  const allowRepair = currentUser ? canInitiateRepair(currentUser) : true;
+  const allowPhotoEdit = currentUser ? canChangeEquipmentStatus(currentUser) : true;
 
   const handleCopy = (text: string, key: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -200,14 +205,16 @@ export const EquipmentPhotoStream: React.FC<EquipmentPhotoStreamProps> = ({
                     >
                       <Maximize2 className="w-3 h-3" />
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setUploadDevice(item)}
-                      className="p-1 rounded-md bg-white/90 hover:bg-white text-slate-800 transition cursor-pointer shadow-xs"
-                      title="上传或更换现场实拍照片"
-                    >
-                      <Camera className="w-3 h-3" />
-                    </button>
+                    {allowPhotoEdit && (
+                      <button
+                        type="button"
+                        onClick={() => setUploadDevice(item)}
+                        className="p-1 rounded-md bg-white/90 hover:bg-white text-slate-800 transition cursor-pointer shadow-xs"
+                        title="上传或更换现场实拍照片"
+                      >
+                        <Camera className="w-3 h-3" />
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -274,14 +281,16 @@ export const EquipmentPhotoStream: React.FC<EquipmentPhotoStreamProps> = ({
                   </button>
 
                   <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => onAddRepairForDevice(item)}
-                      className="p-1 hover:bg-rose-50 text-rose-600 rounded transition cursor-pointer"
-                      title="发起报修"
-                    >
-                      <Wrench className="w-3.5 h-3.5" />
-                    </button>
+                    {allowRepair && (
+                      <button
+                        type="button"
+                        onClick={() => onAddRepairForDevice(item)}
+                        className="p-1 hover:bg-rose-50 text-rose-600 rounded transition cursor-pointer"
+                        title="发起报修"
+                      >
+                        <Wrench className="w-3.5 h-3.5" />
+                      </button>
+                    )}
 
                     {onPrintQrLabel && (
                       <button

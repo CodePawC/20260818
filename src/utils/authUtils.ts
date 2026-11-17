@@ -1,7 +1,34 @@
 import { AuthUser, StaffPersonMaster, ActiveTab, StaffRole, StakeholderCluster } from '../types';
 import { DEFAULT_STAFF_ROLES, STAKEHOLDER_CLUSTERS, inferStakeholderCluster } from './staffRolesData';
 import { matchesDepartment } from './masterData';
+import { setAuthFetchUser } from './authFetch';
+import {
+  RoleArchetype,
+  resolveRoleArchetype,
+  canAccessTabByPolicy,
+  canDispatchWorkOrderByPolicy,
+  canPreDispatchWorkOrderByPolicy,
+  canParticipateDispatchDiscussionByPolicy,
+  canExecuteFieldRepairByPolicy,
+  canClinicalAcceptWorkOrderByPolicy,
+  canEditRegulationByPolicy,
+  canManageSystemOpsByPolicy,
+  canViewCaoliaoLogsByPolicy,
+  canManageMasterDataByPolicy,
+  canAddEquipmentByPolicy,
+  canEditEquipmentByPolicy,
+  canDeleteOrScrapEquipmentByPolicy,
+  canChangeEquipmentStatusByPolicy,
+  canManageSparePartsByPolicy,
+  canApproveFinanceOrAuditByPolicy,
+  canInitiateRepairByPolicy,
+  canBroadcastNoticeByPolicy,
+  PROJECT_LEDGER_PERMISSION,
+  canViewProjectLedgerByPolicy,
+  canOperateProjectLedgerByPolicy
+} from './rbacPolicy';
 
+export type { RoleArchetype };
 export const AUTH_STORAGE_KEY = 'hospital_medtech_current_user';
 
 /**
@@ -12,7 +39,7 @@ export function getPermissionsForStaff(staff: StaffPersonMaster): string[] {
   if (staff.employeeNo === 'ADMIN-001' || staff.role === '系统管理员' || staff.role === '超级管理员') {
     return [
       'ALL',
-      '台账管理', '新增设备', '编辑设备', '删除设备', '状态变更', '调拨调配', '报废处置',
+      '台账管理', '项目台账管理', '新增设备', '编辑设备', '删除设备', '状态变更', '调拨调配', '报废处置',
       '故障报修', '工单维修', '抢修响应', '预防性维护', '配件申领', '停机诊断',
       '强检申报', '计量计划', '法定检定', '证书录入', '定级复核', '溯源档案',
       '质控抽检', '不良事件', '风险预警', '报废鉴定', '巡检监督', '质量月报',
@@ -45,70 +72,102 @@ export function getPermissionsForStaff(staff: StaffPersonMaster): string[] {
     });
   }
 
-  // 4. 根据角色类别与集群进行补充权限扩充
+  // 4. 根据岗位角色精细收敛权限（杜绝向普通工程师、临床科室过度授权）
   const cluster = staff.stakeholderCategory || inferStakeholderCluster(staff.role, staff.departmentName, staff.organization);
+  const roleStr = (staff.role || '').trim();
+  const isSupervisor =
+    roleStr === '医工主管/调度员' ||
+    roleStr.includes('调度') ||
+    roleStr.includes('医工主管') ||
+    roleStr.includes('设备科长') ||
+    (staff.title && (staff.title.includes('科长') || staff.title.includes('总监')));
 
   if (cluster === 'hospital_engineering') {
-    // 院内医工保障集群：拥有设备维保、台账管理与基础主数据权限
-    permissionsSet.add('台账管理');
-    permissionsSet.add('新增设备');
-    permissionsSet.add('编辑设备');
-    permissionsSet.add('状态变更');
-    permissionsSet.add('调拨调配');
     permissionsSet.add('数据导出');
-    permissionsSet.add('批量导入');
-    permissionsSet.add('往来单位管理');
-    
-    if (staff.role === '设备管理员' || staff.role === '质控主管') {
+
+    if (isSupervisor) {
+      permissionsSet.add('派工调度');
+      permissionsSet.add('预派工管理');
+      permissionsSet.add('制度管理');
+      permissionsSet.add('台账管理');
+      permissionsSet.add(PROJECT_LEDGER_PERMISSION);
+      permissionsSet.add('新增设备');
+      permissionsSet.add('编辑设备');
+      permissionsSet.add('删除设备');
+      permissionsSet.add('状态变更');
+      permissionsSet.add('调拨调配');
+      permissionsSet.add('报废处置');
+      permissionsSet.add('批量导入');
+      permissionsSet.add('往来单位管理');
+      permissionsSet.add('服务商协同');
       permissionsSet.add('组织主数据');
       permissionsSet.add('强检目录维护');
       permissionsSet.add('分类目录维护');
       permissionsSet.add('人员角色配置');
-      permissionsSet.add('报废处置');
-    }
-    if (staff.role === '维修工程师') {
       permissionsSet.add('工单维修');
       permissionsSet.add('抢修响应');
       permissionsSet.add('预防性维护');
-      permissionsSet.add('配件申领');
-    }
-    if (staff.role === '计量管理员') {
+    } else if (roleStr === '质控主管') {
+      permissionsSet.add('质控抽检');
+      permissionsSet.add('不良事件');
+      permissionsSet.add('风险预警');
+      permissionsSet.add('巡检监督');
+      permissionsSet.add('质量月报');
+    } else if (roleStr === '计量管理员') {
       permissionsSet.add('强检申报');
       permissionsSet.add('计量计划');
       permissionsSet.add('法定检定');
       permissionsSet.add('证书录入');
       permissionsSet.add('强检目录维护');
+      permissionsSet.add('状态变更');
+    } else if (roleStr === '库管员') {
+      permissionsSet.add('应急库管理');
+      permissionsSet.add('备用机借调');
+      permissionsSet.add('备件进销存');
+    } else {
+      // 维修工程师：仅负责现场维修、内部技术讨论、备件申领与状态回写，不具备派工/增删台账/改制度权限
+      permissionsSet.add('工单维修');
+      permissionsSet.add('抢修响应');
+      permissionsSet.add('预防性维护');
+      permissionsSet.add('配件申领');
+      permissionsSet.add('停机诊断');
+      permissionsSet.add('状态变更');
     }
   } else if (cluster === 'hospital_administration') {
-    // 行政监管集群
     permissionsSet.add('数据导出');
     permissionsSet.add('效能分析');
-    if (staff.role === '财务资产管理员') {
+    if (roleStr === '财务资产管理员') {
       permissionsSet.add('财务折旧');
       permissionsSet.add('成本效益');
       permissionsSet.add('资产建卡');
+      permissionsSet.add('新增设备');
       permissionsSet.add('编辑设备');
+      permissionsSet.add('往来单位管理');
+      permissionsSet.add('服务商协同');
     }
-    if (staff.role === '招标采购主管') {
+    if (roleStr === '招标采购主管') {
       permissionsSet.add('往来单位管理');
       permissionsSet.add('合同管理');
       permissionsSet.add('新增设备');
     }
   } else if (cluster === 'hospital_clinical') {
-    // 临床医护集群
-    if (staff.role === '科室主任' || staff.role === '护士长') {
+    if (roleStr.includes('主任')) {
       permissionsSet.add('效能分析');
+      permissionsSet.add('成本效益');
+      permissionsSet.add('应急借用');
+      permissionsSet.add('报修协同');
+      permissionsSet.add('科室盘点');
+      permissionsSet.add('数据导出');
+    } else if (roleStr.includes('护士长')) {
       permissionsSet.add('应急借用');
       permissionsSet.add('报修协同');
       permissionsSet.add('科室盘点');
     }
   } else if (cluster === 'oem_vendor' || cluster === 'third_party_service') {
-    // 外部原厂 / 三方维保
     permissionsSet.add('工单维修');
     permissionsSet.add('预防性维护');
     permissionsSet.add('服务商协同');
   } else if (cluster === 'metrology_regulatory') {
-    // 法定计量监管机构
     permissionsSet.add('法定检定');
     permissionsSet.add('证书录入');
     permissionsSet.add('定级复核');
@@ -177,196 +236,119 @@ export function hasAnyPermission(user: AuthUser | null | undefined, permissions:
 }
 
 /**
- * 检查当前角色是否可以访问指定侧边栏 Tab 模块
+ * 检查当前角色是否可以访问指定侧边栏 Tab 模块（采用 Default-Deny 白名单策略）
  */
 export function canAccessTab(user: AuthUser | null | undefined, tab: ActiveTab): boolean {
-  if (!user) return false;
-  if (user.isAdmin || user.permissions.includes('ALL')) return true;
-
-  // 护士长角色专属菜单：包含工作台概览、科室设备台账、移动扫码巡检盘点、医疗设备应急库(全院共享)、维保与强检、维修记录(科室报修跟踪及外协零修验收签单)、不良事件直报、业务审批、AI智能专家
-  // 临床科室不需要看到科室常用备件耗材、不需要看到医工调度中心、不要有独立的外协维修协同菜单（外协零修进度及复核验收签字在科室报修跟踪中呈现）
-  if (isHeadNurse(user)) {
-    const nurseAllowedTabs: ActiveTab[] = ['dashboard', 'ledger', 'mobile_inspection', 'emergency_reserve', 'maintenance', 'repairs', 'adverse_events', 'approvals', 'ai', 'regulations', 'project_concluding', 'drg_cost_audit', 'mobile_collaboration', 'accreditation_quality', 'scrap_workflow', 'smart_management', 'digital_twin_sandbox'];
-    return nurseAllowedTabs.includes(tab);
-  }
-
-  switch (tab) {
-    case 'mobile_collaboration':
-      // 移动端即时协同与消息推送中枢：全院医护、工程师、管理层均可使用
-      return true;
-
-    case 'project_concluding':
-      // 日照市2026年度社会科学专项课题结项专区：全院职工、管理层、专家及评审人员均可查阅
-      return true;
-
-    case 'regulations':
-      // 医学装备管理规章制度库：全院所有岗位均可查阅检索、学习宣贯
-      return true;
-
-    case 'dashboard':
-      // 工作台概览：全员可用
-      return true;
-
-    case 'adverse_events':
-      // 医疗器械不良事件（MDR）监测与警戒直报：全院临床医护初报、医工技术调查、质量管理部门与不良事件监测员直报
-      return true;
-
-    case 'parts_inventory':
-      // 维修备品配件耗材库：仅医学工程、设备科、工程维修人员、库管及第三方服务商可用；临床科室不需要看到科室常用备件耗材
-      if (isHeadNurse(user) || isClinicalStaff(user) || isDepartmentRestricted(user)) {
-        return false;
-      }
-      return true;
-
-    case 'dispatch':
-      // 智能派工调度 / 医工调度中心：仅医学工程、设备科、调度员、工程师与外部服务商可用；临床科室不需要看到医工调度中心
-      if (isHeadNurse(user) || isClinicalStaff(user) || isDepartmentRestricted(user)) {
-        return false;
-      }
-      return true;
-
-    case 'mobile_inspection':
-      // 移动端扫码巡检与快速盘点：全员可用（临床科室日常盘点、工程师现场巡检、质控核验）
-      return true;
-
-    case 'approvals':
-      // 业务审批与单据中心：全院临床申报、工程师技术鉴定、管理层审批
-      return true;
-
-    case 'ledger':
-      // 设备台账：全员可浏览
-      return true;
-
-    case 'emergency_reserve':
-      // 医疗设备应急库：全院所有科室、护士长、医生、工程师等均可查看库存并申请借调
-      return true;
-
-    case 'maintenance':
-      // 维保计划 & 强检：医工、计量、质控、管理层、外部服务商、特检机构
-      return hasAnyPermission(user, ['预防性维护', '强检申报', '计量计划', '法定检定', '日常巡检', '台账管理', '灭菌质控']);
-
-    case 'repairs':
-      // 维修记录：全员可用（临床报修、工程师修、服务商处理）
-      return true;
-
-    case 'tracking':
-      // 状态追踪轨迹：医工保障、设备管理
-      return hasAnyPermission(user, ['台账管理', '工单维修', '状态变更', '状态追踪']);
-
-    case 'partners':
-      // 临床科室不应该看到往来合作单位（原厂供应商、第三方维保与检测机构档案）
-      if (
-        isHeadNurse(user) ||
-        isClinicalStaff(user) ||
-        isDepartmentRestricted(user) ||
-        isClinicalDepartmentUser(user) ||
-        isClinicalDepartment(user?.departmentName)
-      ) {
-        return false;
-      }
-      // 往来单位与服务商协同：仅限院级医工保障、采购招标、财务资产、院领导或系统管理
-      return hasAnyPermission(user, ['往来单位管理', '服务商协同', '商务合同', '招投标管理']);
-
-    case 'vendor_collaboration':
-      // 临床科室视角中不要有外协协同菜单：外协零修内容在科室报修跟踪中呈现进度与复核验收签字
-      if (
-        isHeadNurse(user) ||
-        isClinicalStaff(user) ||
-        isDepartmentRestricted(user) ||
-        isClinicalDepartmentUser(user) ||
-        isClinicalDepartment(user?.departmentName)
-      ) {
-        return false;
-      }
-      // 外协维修协同（报价议价、维保协同、发票审计）：仅限医工、采购、财务、审计等职能管理角色
-      return hasAnyPermission(user, ['往来单位管理', '服务商协同', '商务合同', '招投标管理', '台账管理', '工单维修', '预算审批', '采购审计', '报修协同']);
-
-    case 'factory_repair_workflow':
-    case 'repair_closed_loop':
-      // 维修闭环管理视图：麻醉手术科（临床使用科室）、医疗设备科（技术勘查）、院领导（分管院长/主管终审）均可访问协同
-      return true;
-
-    case 'master_data':
-      // 组织与空间主数据、强检目录、分类目录、人员角色：需要医工管理、计量或系统管理权限
-      return hasAnyPermission(user, ['组织主数据', '强检目录维护', '分类目录维护', '人员角色配置', '台账管理', '质控抽检']);
-
-    case 'analytics':
-    case 'roi':
-    case 'drg_cost_audit':
-      // 效能、单机成本效益与ROI决策分析、DRG专耗核算：医工主管、科主任、财务、医务、审计、采购等
-      return hasAnyPermission(user, ['效能分析', '财务折旧', '成本效益', '质量月报', '预算审批', '绩效考核', '采购审计', '台账管理', '工单维修']);
-
-    case 'ai':
-      // AI 智能诊断：全员可用
-      return true;
-
-    case 'system_ops':
-    case 'ai_config':
-    case 'database_backup':
-    case 'system_update':
-    case 'caoliao_integration':
-    case 'caoliao_sync_settings':
-    case 'caoliao_webhook_logs':
-      // 系统运维配置、AI模型配置与数据备份、草料二维码接口及同步设置：医工管理与系统运维均可访问配置
-      return true;
-
-    default:
-      return true;
-  }
+  return canAccessTabByPolicy(user, tab);
 }
 
 /**
- * 检查关键业务操作权限
+ * 检查关键业务操作权限（基于 7+1 细分岗位原型与 RBAC 策略矩阵）
  */
+export function canDispatchWorkOrder(user: AuthUser | null | undefined): boolean {
+  return canDispatchWorkOrderByPolicy(user);
+}
+
+export function canPreDispatchWorkOrder(user: AuthUser | null | undefined): boolean {
+  return canPreDispatchWorkOrderByPolicy(user);
+}
+
+export function canParticipateDispatchDiscussion(user: AuthUser | null | undefined): boolean {
+  return canParticipateDispatchDiscussionByPolicy(user);
+}
+
+export function canExecuteFieldRepair(user: AuthUser | null | undefined): boolean {
+  return canExecuteFieldRepairByPolicy(user);
+}
+
+export function canClinicalAcceptWorkOrder(user: AuthUser | null | undefined): boolean {
+  return canClinicalAcceptWorkOrderByPolicy(user);
+}
+
+export function canEditRegulation(user: AuthUser | null | undefined): boolean {
+  return canEditRegulationByPolicy(user);
+}
+
+export function canManageSystemOps(user: AuthUser | null | undefined): boolean {
+  return canManageSystemOpsByPolicy(user);
+}
+
+export function canViewCaoliaoLogs(user: AuthUser | null | undefined): boolean {
+  return canViewCaoliaoLogsByPolicy(user);
+}
+
 export function canManageEquipment(user: AuthUser | null | undefined): boolean {
-  return hasAnyPermission(user, ['台账管理', '新增设备', '编辑设备', '状态变更', '调拨调配']);
+  return canEditEquipmentByPolicy(user);
 }
 
 export function canAddEquipment(user: AuthUser | null | undefined): boolean {
-  return hasAnyPermission(user, ['新增设备', '台账管理', '资产建卡']);
+  return canAddEquipmentByPolicy(user);
+}
+
+export function canEditEquipment(user: AuthUser | null | undefined): boolean {
+  return canEditEquipmentByPolicy(user);
 }
 
 export function canDeleteEquipment(user: AuthUser | null | undefined): boolean {
-  return hasAnyPermission(user, ['删除设备', '报废处置']) || (user?.isAdmin ?? false);
+  return canDeleteOrScrapEquipmentByPolicy(user);
+}
+
+export function canChangeEquipmentStatus(user: AuthUser | null | undefined): boolean {
+  return canChangeEquipmentStatusByPolicy(user);
 }
 
 export function canManageMasterData(user: AuthUser | null | undefined): boolean {
-  return hasAnyPermission(user, ['组织主数据', '强检目录维护', '分类目录维护', '人员角色配置']) || (user?.isAdmin ?? false);
+  return canManageMasterDataByPolicy(user);
+}
+
+export function canManageSpareParts(user: AuthUser | null | undefined): boolean {
+  return canManageSparePartsByPolicy(user);
+}
+
+export function canApproveFinanceOrAudit(user: AuthUser | null | undefined): boolean {
+  return canApproveFinanceOrAuditByPolicy(user);
 }
 
 /**
- * 检查规章制度归档与上传权限 (仅管理员或具备全权/制度维护权限的医工主管)
+ * 检查规章制度编辑、修订、删除与 PDF 归档权限（仅系统管理员与医工主管/调度员）
  */
 export function canUploadRegulationPdf(user: AuthUser | null | undefined): boolean {
-  if (!user) return false;
-  return Boolean(
-    user.isAdmin || 
-    user.employeeNo === 'ADMIN-001' || 
-    user.role === '系统管理员' || 
-    user.permissions.includes('ALL') ||
-    user.permissions.includes('制度管理') ||
-    user.permissions.includes('组织主数据')
-  );
+  return canEditRegulationByPolicy(user);
 }
 
 export function canManageMetrology(user: AuthUser | null | undefined): boolean {
-  return hasAnyPermission(user, ['强检申报', '计量计划', '法定检定', '证书录入', '强检目录维护']);
+  const arch = resolveRoleArchetype(user);
+  return arch === 'admin' || arch === 'engineering_supervisor' || hasAnyPermission(user, ['强检申报', '计量计划', '法定检定', '证书录入', '强检目录维护']);
 }
 
 export function canInitiateRepair(user: AuthUser | null | undefined): boolean {
-  return hasAnyPermission(user, ['故障报修', '报修协同', '工单维修', '台账管理']);
+  return canInitiateRepairByPolicy(user);
+}
+
+export function canBroadcastNotice(user: AuthUser | null | undefined): boolean {
+  return canBroadcastNoticeByPolicy(user);
+}
+
+export function canViewProjectLedger(user: AuthUser | null | undefined): boolean {
+  return canViewProjectLedgerByPolicy(user);
+}
+
+export function canOperateProjectLedger(user: AuthUser | null | undefined): boolean {
+  return canOperateProjectLedgerByPolicy(user);
 }
 
 export function canHandleRepair(user: AuthUser | null | undefined): boolean {
-  return hasAnyPermission(user, ['工单维修', '抢修响应', '预防性维护', '停机诊断', '配件申领']);
+  return canExecuteFieldRepairByPolicy(user);
 }
 
 export function canExportData(user: AuthUser | null | undefined): boolean {
-  return hasAnyPermission(user, ['数据导出', '台账管理', '效能分析', '财务折旧']);
+  const arch = resolveRoleArchetype(user);
+  return ['admin', 'engineering_supervisor', 'engineer', 'financial', 'executive', 'clinical_director'].includes(arch);
 }
 
 export function canImportData(user: AuthUser | null | undefined): boolean {
-  return hasAnyPermission(user, ['批量导入', '台账管理', '组织主数据']);
+  const arch = resolveRoleArchetype(user);
+  return ['admin', 'engineering_supervisor', 'financial'].includes(arch);
 }
 
 /**
@@ -646,35 +628,15 @@ export function isVendorStaff(user: AuthUser | null | undefined): boolean {
   return role.includes('原厂') || role.includes('三方') || role.includes('服务商') || role.includes('检定员');
 }
 
-export type RoleArchetype = 'admin' | 'financial' | 'clinical' | 'engineering' | 'executive' | 'vendor';
-
 /**
- * 智能判定当前用户的核心角色原型，用于驱动差异化工作台首屏与业务功能呈现
+ * 智能判定当前用户的 7+1 细分角色原型，用于驱动差异化工作台、按钮权限与数据范围
  */
 export function getUserRoleArchetype(user: AuthUser | null | undefined): RoleArchetype {
-  if (!user || user.isAdmin || user.employeeNo === 'ADMIN-001') {
-    return 'admin';
-  }
-  if (isFinancialStaff(user)) {
-    return 'financial';
-  }
-  if (isExecutiveLeader(user)) {
-    return 'executive';
-  }
-  if (isVendorStaff(user)) {
-    return 'vendor';
-  }
-  if (isClinicalDepartmentUser(user)) {
-    return 'clinical';
-  }
-  if (isMedicalEngineeringStaff(user)) {
-    return 'engineering';
-  }
-  return 'admin';
+  return resolveRoleArchetype(user);
 }
 
 /**
- * 预设快速切换的 7 类典型医院干系人角色模型
+ * 预设快速切换的 7+1 类典型医院干系人角色模型（含医工主管/调度员与维修工程师区分）
  */
 export interface QuickRolePreset {
   id: string;
@@ -699,49 +661,23 @@ export const PRESET_ROLE_PERSONAS: QuickRolePreset[] = [
     departmentName: '医疗设备科',
     organization: '五莲县人民医院',
     stakeholderCategory: 'hospital_engineering',
-    description: '全院设备主数据与调配总管 · 全功能控制权限',
+    description: '全院设备主数据与系统运维总管 · 全功能控制权限',
     badge: '系统总管',
     badgeColor: 'purple',
     archetype: 'admin'
   },
   {
-    id: 'ROLE_PERSONA_FINANCE',
-    name: '杨世杰',
-    employeeNo: 'EMP-3191',
-    role: '财务资产管理员',
-    departmentName: '财务科',
+    id: 'ROLE_PERSONA_DISPATCHER',
+    name: '张志远',
+    employeeNo: 'EMP-8000',
+    role: '医工主管/调度员',
+    departmentName: '医疗设备科',
     organization: '五莲县人民医院',
-    stakeholderCategory: 'hospital_administration',
-    description: '资金付款请款审核 · 服务商电汇结算 · 全成本分摊',
-    badge: '财务资产',
-    badgeColor: 'amber',
-    archetype: 'financial'
-  },
-  {
-    id: 'ROLE_PERSONA_NURSE',
-    name: '范丽华',
-    employeeNo: 'EMP-3042',
-    role: '护士长',
-    departmentName: '重症医学科(ICU)',
-    organization: '五莲县人民医院',
-    stakeholderCategory: 'hospital_clinical',
-    description: '病区急救设备晨间交接盘点 · 故障急速报修跟踪',
-    badge: '临床护士长',
-    badgeColor: 'rose',
-    archetype: 'clinical'
-  },
-  {
-    id: 'ROLE_PERSONA_DIRECTOR',
-    name: '刘振国',
-    employeeNo: 'EMP-3081',
-    role: '科室主任',
-    departmentName: '医学影像科',
-    organization: '五莲县人民医院',
-    stakeholderCategory: 'hospital_clinical',
-    description: '大型放疗影像设备立项论证 · 单机保本点效益评估',
-    badge: '临床科主任',
-    badgeColor: 'emerald',
-    archetype: 'clinical'
+    stakeholderCategory: 'hospital_engineering',
+    description: '工单预派工拟定与正式派工签发 · 规章制度维护 · 全院台账统筹',
+    badge: '医工调度',
+    badgeColor: 'violet',
+    archetype: 'engineering_supervisor'
   },
   {
     id: 'ROLE_PERSONA_ENGINEER',
@@ -751,10 +687,49 @@ export const PRESET_ROLE_PERSONAS: QuickRolePreset[] = [
     departmentName: '医疗设备科',
     organization: '五莲县人民医院',
     stakeholderCategory: 'hospital_engineering',
-    description: '派工抢修现场处置 · 备件申领 · 强检法定计量保障',
-    badge: '医工工程师',
+    description: '参与派前技术讨论 · 接单现场抢修 · 备件申领与状态回写',
+    badge: '维修工程师',
     badgeColor: 'sky',
-    archetype: 'engineering'
+    archetype: 'engineer'
+  },
+  {
+    id: 'ROLE_PERSONA_NURSE',
+    name: '范丽华',
+    employeeNo: 'EMP-3042',
+    role: '护士长',
+    departmentName: '重症医学科(ICU)',
+    organization: '五莲县人民医院',
+    stakeholderCategory: 'hospital_clinical',
+    description: '仅限本科室台账查阅 · 晨间巡检盘点 · 故障报修与临床验收',
+    badge: '临床护士长',
+    badgeColor: 'rose',
+    archetype: 'clinical_nurse'
+  },
+  {
+    id: 'ROLE_PERSONA_DIRECTOR',
+    name: '刘振国',
+    employeeNo: 'EMP-3081',
+    role: '科室主任',
+    departmentName: '医学影像科',
+    organization: '五莲县人民医院',
+    stakeholderCategory: 'hospital_clinical',
+    description: '仅限本科室台账查阅 · 立项论证审批 · 本科室单机ROI效益评估',
+    badge: '临床科主任',
+    badgeColor: 'emerald',
+    archetype: 'clinical_director'
+  },
+  {
+    id: 'ROLE_PERSONA_FINANCE',
+    name: '杨世杰',
+    employeeNo: 'EMP-3191',
+    role: '财务资产管理员',
+    departmentName: '财务科',
+    organization: '五莲县人民医院',
+    stakeholderCategory: 'hospital_administration',
+    description: '固定资产建卡 · 资金请款与服务商结算 · DRG专耗核算',
+    badge: '财务资产',
+    badgeColor: 'amber',
+    archetype: 'financial'
   },
   {
     id: 'ROLE_PERSONA_EXECUTIVE',
@@ -764,7 +739,7 @@ export const PRESET_ROLE_PERSONAS: QuickRolePreset[] = [
     departmentName: '院长办公室',
     organization: '五莲县人民医院',
     stakeholderCategory: 'hospital_administration',
-    description: '全院宏观设备运行与投资回报 · 单笔≥5千大额签批',
+    description: '全院宏观设备运行与投资回报 · 大额维修审批与合规监管',
     badge: '分管副院长',
     badgeColor: 'indigo',
     archetype: 'executive'
@@ -798,6 +773,7 @@ export function loadSavedUser(): AuthUser | null {
     if (saved) {
       const parsed = JSON.parse(saved);
       if (parsed && parsed.name && parsed.role) {
+        setAuthFetchUser(parsed);
         return parsed;
       }
     }
@@ -808,6 +784,7 @@ export function loadSavedUser(): AuthUser | null {
 }
 
 export function saveUserToStorage(user: AuthUser | null): void {
+  setAuthFetchUser(user);
   try {
     if (user) {
       localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(user));

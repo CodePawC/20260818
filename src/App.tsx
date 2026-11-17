@@ -81,16 +81,23 @@ import { EquipmentScrapWorkflowView } from './components/scrap/EquipmentScrapWor
 import { SmartManagementRatingView } from './components/smart_management/SmartManagementRatingView';
 import { EquipmentDigitalTwinSandbox } from './components/smart_management/EquipmentDigitalTwinSandbox';
 import { AiTroubleshootModal } from './components/smart_management/AiTroubleshootModal';
+import { UserManualView } from './components/UserManualView';
+import { RegulatoryPlatformsView } from './components/regulatory/RegulatoryPlatformsView';
+import { HospitalProjectLedgerView } from './components/ledger/HospitalProjectLedgerView';
 import { MobileCollaborationView } from './components/mobile_collaboration/MobileCollaborationView';
 import { MobileNotificationCenterDrawer } from './components/mobile_collaboration/MobileNotificationCenterDrawer';
 import { RepairAlertPopupModal, RepairAlertData } from './components/RepairAlertPopupModal';
 import { RepairReportDetailModal, RepairReportDetailData } from './components/RepairReportDetailModal';
+import { DispatchAssignModal } from './components/DispatchAssignModal';
+import { DEFAULT_BIOMEDICAL_ENGINEERS, buildVendorOrderFromWorkOrder, upsertVendorCollaborationOrder } from './utils/dispatchData';
+import { EngineeringWorkOrder, OutsourcedDispatchMeta } from './types/dispatchTypes';
 import { BorrowEquipmentModal } from './components/BorrowEquipmentModal';
 import { ReturnEquipmentModal } from './components/ReturnEquipmentModal';
 import { LoanVoucherPrintModal } from './components/LoanVoucherPrintModal';
 import { INITIAL_EMERGENCY_EQUIPMENT } from './utils/emergencyReserveData';
 import { ApprovalApplication } from './types/approvalTypes';
 import { INITIAL_APPROVAL_APPLICATIONS } from './utils/approvalMockData';
+import { HospitalProjectRecord } from './types/hospitalProjectLedgerTypes';
 import { EquipmentLoanRecord } from './types';
 import { CheckCircle2 } from 'lucide-react';
 import { ClinicalQuickActionPortal } from './components/clinical/ClinicalQuickActionPortal';
@@ -116,8 +123,17 @@ import {
   loadSavedUser, 
   saveUserToStorage, 
   canAccessTab, 
-  canManageEquipment, 
+  canManageEquipment,
+  canAddEquipment,
+  canEditEquipment,
+  canDeleteEquipment,
+  canChangeEquipmentStatus,
+  canDispatchWorkOrder,
+  canParticipateDispatchDiscussion,
   canManageMasterData,
+  canManageSystemOps,
+  canViewCaoliaoLogs,
+  canInitiateRepair,
   createAuthUserFromStaff,
   isHeadNurse,
   isClinicalStaff,
@@ -128,6 +144,7 @@ import {
   getUserDepartment,
   SUPER_ADMIN_USER
 } from './utils/authUtils';
+import { resolveRoleArchetype } from './utils/rbacPolicy';
 import { 
   loadMasterData, 
   saveMasterData, 
@@ -155,19 +172,99 @@ export default function App() {
   const [vendorCollabOrders, setVendorCollabOrders] = useState<VendorCollaborationOrder[]>(() => {
     return getVendorCollaborationOrders();
   });
+  const [focusedVendorOrderId, setFocusedVendorOrderId] = useState<string>('');
 
-  const handleUpdateVendorOrder = (updatedOrder: VendorCollaborationOrder) => {
-    const nextOrders = vendorCollabOrders.map(o => o.id === updatedOrder.id ? updatedOrder : o);
-    setVendorCollabOrders(nextOrders);
-    saveVendorCollaborationOrders(nextOrders);
+  const syncVendorOrdersFromServer = async () => {
+    try {
+      const res = await fetch('/api/vendor-collaboration/orders');
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        setVendorCollabOrders(prev => {
+          const map = new Map<string, VendorCollaborationOrder>();
+          prev.forEach(o => map.set(o.id, o));
+          json.data.forEach((o: VendorCollaborationOrder) => map.set(o.id, o));
+          const merged = Array.from(map.values());
+          saveVendorCollaborationOrders(merged);
+          return merged;
+        });
+      }
+    } catch {
+      // ignore background fetch error
+    }
   };
 
-  const handleArchiveVendorOrder = (archivedOrder: VendorCollaborationOrder) => {
-    const nextOrders = vendorCollabOrders.map(o => o.id === archivedOrder.id ? archivedOrder : o);
+  useEffect(() => {
+    syncVendorOrdersFromServer();
+    const handleUpdated = () => {
+      const localList = getVendorCollaborationOrders();
+      setVendorCollabOrders(localList);
+      syncVendorOrdersFromServer();
+    };
+    const handleFocusVendorOrder = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (detail?.vendorOrderId) {
+        setFocusedVendorOrderId(detail.vendorOrderId);
+      }
+      setActiveTab('vendor_collaboration');
+      syncVendorOrdersFromServer();
+    };
+    window.addEventListener('vendor_orders_updated', handleUpdated);
+    window.addEventListener('medtech:focus-vendor-order', handleFocusVendorOrder as EventListener);
+    return () => {
+      window.removeEventListener('vendor_orders_updated', handleUpdated);
+      window.removeEventListener('medtech:focus-vendor-order', handleFocusVendorOrder as EventListener);
+    };
+  }, []);
+
+  const handleUpdateVendorOrder = (updatedOrder: VendorCollaborationOrder) => {
+    const nextOrders = vendorCollabOrders.some(o => o.id === updatedOrder.id)
+      ? vendorCollabOrders.map(o => o.id === updatedOrder.id ? updatedOrder : o)
+      : [updatedOrder, ...vendorCollabOrders];
     setVendorCollabOrders(nextOrders);
     saveVendorCollaborationOrders(nextOrders);
-    // 自动双向同步至往来合作单位
-    syncVendorCollaborationToPartner(archivedOrder);
+    fetch(`/api/vendor-collaboration/orders/${encodeURIComponent(updatedOrder.id)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updatedOrder)
+    }).catch(() => {});
+  };
+
+  const handleArchiveVendorOrder = async (archivedOrder: VendorCollaborationOrder): Promise<{
+    success: boolean;
+    auditBlocked?: boolean;
+    error?: string;
+    missingItems?: string[];
+  }> => {
+    try {
+      const res = await fetch(`/api/vendor-collaboration/orders/${encodeURIComponent(archivedOrder.id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(archivedOrder)
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return {
+          success: false,
+          auditBlocked: Boolean(json?.auditBlocked || res.status === 409),
+          error: json?.error || '审计合规强阻断：关联项目台账尚未完成审批/议价招标/会议纪要闭环，禁止归档',
+          missingItems: Array.isArray(json?.missingItems) ? json.missingItems : []
+        };
+      }
+      const savedOrder: VendorCollaborationOrder = json?.data || archivedOrder;
+      const nextOrders = vendorCollabOrders.some(o => o.id === savedOrder.id)
+        ? vendorCollabOrders.map(o => o.id === savedOrder.id ? savedOrder : o)
+        : [savedOrder, ...vendorCollabOrders];
+      setVendorCollabOrders(nextOrders);
+      saveVendorCollaborationOrders(nextOrders);
+      syncVendorCollaborationToPartner(savedOrder);
+      window.dispatchEvent(new CustomEvent('medtech:project-ledger-updated'));
+      return { success: true };
+    } catch (e) {
+      return {
+        success: false,
+        error: e instanceof Error ? e.message : '网络异常，外协归档同步失败'
+      };
+    }
   };
 
   const handleLoginAsVendor = (vendor: VendorUserAccount) => {
@@ -274,7 +371,62 @@ export default function App() {
     }
   }, [approvalApplications]);
 
+  // 启动时从后端拉取电子审批记录并与本地合并
+  useEffect(() => {
+    let active = true;
+    fetch('/api/approvals')
+      .then(res => res.json())
+      .then(json => {
+        if (!active || !json?.success || !Array.isArray(json.data) || json.data.length === 0) return;
+        setApprovalApplications(prev => {
+          const map = new Map<string, ApprovalApplication>();
+          prev.forEach(a => map.set(a.id, a));
+          json.data.forEach((a: ApprovalApplication) => map.set(a.id, a));
+          return Array.from(map.values());
+        });
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  const handleUpdateApprovalApplications = (nextApps: ApprovalApplication[]) => {
+    const prevMap = new Map<string, ApprovalApplication>();
+    approvalApplications.forEach(a => prevMap.set(a.id, a));
+
+    setApprovalApplications(nextApps);
+
+    nextApps.forEach(app => {
+      const existing = prevMap.get(app.id);
+      if (!existing) {
+        fetch('/api/approvals', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(app)
+        })
+          .then(() => {
+            window.dispatchEvent(new CustomEvent('medtech:project-ledger-updated'));
+          })
+          .catch(() => {});
+      } else if (
+        existing.status !== app.status ||
+        existing.updatedAt !== app.updatedAt ||
+        (existing.auditLogs?.length || 0) !== (app.auditLogs?.length || 0)
+      ) {
+        fetch(`/api/approvals/${encodeURIComponent(app.id)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(app)
+        })
+          .then(() => {
+            window.dispatchEvent(new CustomEvent('medtech:project-ledger-updated'));
+          })
+          .catch(() => {});
+      }
+    });
+  };
+
   const [initialApprovalData, setInitialApprovalData] = useState<Partial<ApprovalApplication> | null>(null);
+  const [focusedProjectId, setFocusedProjectId] = useState<string | null>(null);
 
   const pendingApprovalCount = useMemo(() => {
     return approvalApplications.filter(a => a.status.startsWith('pending_')).length;
@@ -284,6 +436,44 @@ export default function App() {
     setInitialApprovalData(data);
     setActiveTab('approvals');
   };
+
+  const handleStartProjectApproval = (project: HospitalProjectRecord) => {
+    const amount = project.complianceDossier?.estimatedAmount || project.invoice?.totalAmount || 0;
+    handleNavigateToApprovals({
+      type: 'part_replacement',
+      linkedProjectId: project.id,
+      linkedWorkOrderId: project.complianceDossier?.sourceWorkOrderId,
+      equipmentId: project.complianceDossier?.equipmentId,
+      equipmentName: project.complianceDossier?.equipmentName || project.projectName,
+      partName: `${project.projectName}（维修与合规采购）`,
+      partEstimatedCost: amount,
+      estimatedBudget: amount,
+      applicantDepartment: project.department || '医学工程科',
+      title: `【${project.id}】${project.projectName} 收费维修立项与采购合规补办审批`
+    });
+  };
+
+  useEffect(() => {
+    const onFocusLedger = (e: Event) => {
+      const detail = (e as CustomEvent<{ projectId?: string }>)?.detail;
+      if (detail?.projectId) {
+        setFocusedProjectId(detail.projectId);
+      }
+      setActiveTab('project_ledger');
+    };
+    const onStartApproval = (e: Event) => {
+      const detail = (e as CustomEvent<{ project?: HospitalProjectRecord }>)?.detail;
+      if (detail?.project) {
+        handleStartProjectApproval(detail.project);
+      }
+    };
+    window.addEventListener('medtech:focus-project-ledger', onFocusLedger as EventListener);
+    window.addEventListener('medtech:start-project-approval', onStartApproval as EventListener);
+    return () => {
+      window.removeEventListener('medtech:focus-project-ledger', onFocusLedger as EventListener);
+      window.removeEventListener('medtech:start-project-approval', onStartApproval as EventListener);
+    };
+  }, []);
 
   // 不良事件 (MDR) 直报联动选定设备
   const [initialAdverseEventEquipment, setInitialAdverseEventEquipment] = useState<MedicalEquipment | null>(null);
@@ -298,6 +488,16 @@ export default function App() {
     }, 4500);
   };
 
+  // 全局监听后端 RBAC 403 拦截事件并即时弹出提示
+  useEffect(() => {
+    const handleForbidden = (e: Event) => {
+      const custom = e as CustomEvent<{ message?: string }>;
+      showToast(custom.detail?.message || '权限不足：当前角色无权执行该操作', 'warning');
+    };
+    window.addEventListener('medtech:rbac-forbidden', handleForbidden);
+    return () => window.removeEventListener('medtech:rbac-forbidden', handleForbidden);
+  }, []);
+
   const handleNavigateToAdverseEvent = (eq?: MedicalEquipment) => {
     setInitialAdverseEventEquipment(eq || null);
     setActiveTab('adverse_events');
@@ -310,14 +510,222 @@ export default function App() {
   const [globalRepairAlert, setGlobalRepairAlert] = useState<RepairAlertData | null>(null);
   const [selectedGlobalRepairDetail, setSelectedGlobalRepairDetail] = useState<RepairReportDetailData | null>(null);
 
+  // 全局直通现场智能派工指派弹窗 (在任意页面点击立即派工即可直接指派，无需跳转)
+  const [globalDirectAssignOrder, setGlobalDirectAssignOrder] = useState<EngineeringWorkOrder | null>(null);
+  const [focusedDispatchOrderId, setFocusedDispatchOrderId] = useState<string | null>(null);
+
+  const handleOpenDirectDispatch = (target: any) => {
+    if (!target) return;
+    if (!canParticipateDispatchDiscussion(currentUser)) {
+      showToast('权限不足：仅医工主管/调度员、系统管理员或维修工程师可进入派工协同窗口', 'warning');
+      return;
+    }
+    let resolvedOrder: EngineeringWorkOrder;
+    if (target.id && (target.priority || target.biomedicalGroup || target.workOrderType)) {
+      resolvedOrder = target;
+    } else {
+      resolvedOrder = {
+        id: target?.workOrderId || target?.id || `WO-${Date.now().toString().slice(-6)}`,
+        equipmentId: target?.equipmentId || target?.id || '',
+        equipmentName: target?.equipmentName || target?.name || '报修设备',
+        equipmentModel: target?.equipmentModel || target?.model || '',
+        equipmentSn: target?.equipmentSn || target?.sn || '',
+        internalNo: target?.internalNo || '',
+        category: target?.category || '通用医疗器械',
+        department: target?.department || '临床科室',
+        location: target?.location || '科室现场',
+        reporterName: target?.reporterName || target?.reporter || '临床医护',
+        reporterPhone: target?.reporterPhone || target?.phone || '',
+        reportTime: target?.reportTime || target?.faultDate || target?.timestamp || new Date().toISOString().slice(0, 16).replace('T', ' '),
+        priority: (target?.priority || (target?.faultDescription?.includes('急') ? 'P1_CRITICAL' : 'P2_URGENT')) as any,
+        workOrderType: 'emergency_breakdown',
+        faultDescription: target?.faultDescription || '临床设备故障现场报修',
+        status: target?.status || 'pending_dispatch',
+        biomedicalGroup: target?.biomedicalGroup || '急救生命支持技术组',
+        source: target?.source === '草料二维码' || target?.source === 'caoliao' || target?.recordNo || target?.caoliaoRecordNo ? 'caoliao' : (target?.source || 'manual'),
+        caoliaoRecordNo: target?.caoliaoRecordNo || target?.recordNo || undefined,
+        photoUrl: target?.photoUrl,
+        partsReplaced: [],
+        totalRepairCost: 0,
+        totalDowntimeHours: 0.5,
+        slaResponseLimitMinutes: 15,
+        slaRepairLimitHours: 2,
+        isSlaResponseMet: false,
+        isSlaRepairMet: false
+      };
+    }
+
+    setGlobalDirectAssignOrder(resolvedOrder);
+
+    // 同步向后端查询该工单最新状态（确保预派工拟定工程师与内部讨论记录实时回显）
+    fetch('/api/work-orders')
+      .then(res => res.json())
+      .then(json => {
+        if (json.success && Array.isArray(json.data)) {
+          const fresh = json.data.find((o: EngineeringWorkOrder) =>
+            o.id === resolvedOrder.id ||
+            (resolvedOrder.caoliaoRecordNo && o.caoliaoRecordNo === resolvedOrder.caoliaoRecordNo)
+          );
+          if (fresh) {
+            setGlobalDirectAssignOrder(prev => prev && prev.id === resolvedOrder.id ? fresh : prev);
+          }
+        }
+      })
+      .catch(() => {
+        // ignore background refresh error
+      });
+  };
+
+  const handleGlobalPreDispatch = async (
+    orderId: string,
+    engineer: any,
+    notes: string,
+    discussionContent?: string,
+    dispatchMeta?: OutsourcedDispatchMeta
+  ) => {
+    if (!canDispatchWorkOrder(currentUser)) {
+      showToast('权限不足：仅系统管理员或医工主管/调度员可执行预派工拟定', 'warning');
+      return;
+    }
+    try {
+      const res = await fetch(`/api/work-orders/${encodeURIComponent(orderId)}/pre-dispatch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          engineerId: engineer.id,
+          engineerName: engineer.name,
+          engineerPhone: engineer.phone,
+          preDispatcherName: currentUser?.name || '医工调度中心',
+          authorRole: currentUser?.role || '设备科调度员',
+          notes,
+          discussionMessage: discussionContent,
+          ...(dispatchMeta || {})
+        })
+      });
+      if (!res.ok) return;
+      const json = await res.json();
+      if (json.success && json.data) {
+        setGlobalDirectAssignOrder(prev => prev && prev.id === orderId ? json.data : prev);
+        window.dispatchEvent(new CustomEvent('work_orders_updated'));
+      }
+      showToast(
+        dispatchMeta?.dispatchChannel === 'outsourced'
+          ? `已暂存【外协预派工：${dispatchMeta.externalPartner}】（院内监护：${engineer.name}）`
+          : `已暂存预派工方案（拟定：${engineer.name}），可继续内部讨论确认后正式派工。`,
+        'success'
+      );
+      return json.data;
+    } catch (e) {
+      console.error('Failed to pre-dispatch globally:', e);
+    }
+  };
+
+  const handleGlobalAddDiscussion = async (
+    orderId: string,
+    content: string,
+    proposedEngineer?: any
+  ) => {
+    if (!canParticipateDispatchDiscussion(currentUser)) {
+      showToast('权限不足：当前角色无权提交派工内部技术讨论', 'warning');
+      return;
+    }
+    try {
+      const engName = typeof proposedEngineer === 'string' ? proposedEngineer : proposedEngineer?.name;
+      const res = await fetch(`/api/work-orders/${encodeURIComponent(orderId)}/discussion`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          authorName: currentUser?.name || '医工调度中心',
+          authorRole: currentUser?.role || '设备科调度员',
+          content,
+          proposedEngineerName: engName
+        })
+      });
+      if (!res.ok) return;
+      const json = await res.json();
+      if (json.success && json.data) {
+        setGlobalDirectAssignOrder(prev => prev && prev.id === orderId ? json.data : prev);
+        window.dispatchEvent(new CustomEvent('work_orders_updated'));
+      }
+      showToast('已留存内部调度讨论意见。', 'success');
+      return json.data;
+    } catch (e) {
+      console.error('Failed to add global discussion:', e);
+    }
+  };
+
+  const handleConfirmGlobalDispatch = async (
+    orderId: string,
+    engineer: any,
+    notes: string,
+    dispatchMeta?: OutsourcedDispatchMeta
+  ) => {
+    if (!canDispatchWorkOrder(currentUser)) {
+      showToast('权限不足：仅系统管理员或医工主管/调度员可执行正式派工', 'warning');
+      return;
+    }
+    try {
+      const res = await fetch(`/api/work-orders/${encodeURIComponent(orderId)}/dispatch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          engineerId: engineer.id,
+          engineerName: engineer.name,
+          engineerPhone: engineer.phone,
+          dispatcherName: currentUser?.name || '医工调度中心',
+          authorRole: currentUser?.role || '设备科调度员',
+          notes,
+          ...(dispatchMeta || {})
+        })
+      });
+      if (!res.ok) return;
+      const json = await res.json();
+      if (json.vendorCollabOrder) {
+        const nextList = upsertVendorCollaborationOrder(json.vendorCollabOrder);
+        setVendorCollabOrders(nextList);
+      } else if (json.success && json.data && dispatchMeta?.dispatchChannel === 'outsourced' && dispatchMeta.syncToVendorPortal !== false) {
+        const nextList = upsertVendorCollaborationOrder(buildVendorOrderFromWorkOrder(json.data, currentUser?.name || '医工调度中心'));
+        setVendorCollabOrders(nextList);
+      }
+      if (json.success && json.data) {
+        setGlobalDirectAssignOrder(prev => prev && prev.id === orderId ? json.data : prev);
+      }
+      if (json.linkedProject || json.data?.linkedProjectId) {
+        window.dispatchEvent(new CustomEvent('medtech:project-ledger-updated', {
+          detail: { projectId: json.linkedProject?.id || json.data?.linkedProjectId }
+        }));
+      }
+      window.dispatchEvent(new CustomEvent('work_orders_updated'));
+      const linkedProjTag = json.linkedProject?.id ? ` · 已自动在《设备项目台账》生成项目 ${json.linkedProject.id}` : '';
+      showToast(
+        (dispatchMeta?.dispatchChannel === 'outsourced'
+          ? `外协协同派工成功！已转派【${dispatchMeta.externalPartner}】并同步外协协同单，院内监护：${engineer.name}`
+          : `已正式下发派工单至责任工程师【${engineer.name}】(${engineer.phone})，响应SLA计时启动！`) + linkedProjTag,
+        'success'
+      );
+      return json;
+    } catch (e) {
+      console.error('Failed to confirm global dispatch:', e);
+    }
+  };
+
   useEffect(() => {
     let isMounted = true;
+    let lastAlertId = '';
+
     const checkAlert = async () => {
       try {
         const res = await fetch('/api/caoliao/latest-alert');
         const json = await res.json();
         if (isMounted && json.success && json.hasNewAlert && json.alert) {
           setGlobalRepairAlert(json.alert);
+          if (json.alert.id !== lastAlertId) {
+            lastAlertId = json.alert.id;
+            window.dispatchEvent(new CustomEvent('work_orders_updated'));
+            window.dispatchEvent(new CustomEvent('medical_equipment_updated'));
+            const recTag = json.alert.rawRecordNo ? ` [${json.alert.rawRecordNo}]` : '';
+            showToast(`收到草料扫码报修${recTag}：${json.alert.department} · ${json.alert.equipmentName}`, 'info');
+          }
         }
       } catch (e) {}
     };
@@ -328,14 +736,24 @@ export default function App() {
     const handleAlert = (e: any) => {
       if (e.detail?.alert) {
         setGlobalRepairAlert(e.detail.alert);
+        if (e.detail.alert.id !== lastAlertId) {
+          lastAlertId = e.detail.alert.id;
+        }
       }
+      window.dispatchEvent(new CustomEvent('work_orders_updated'));
+      window.dispatchEvent(new CustomEvent('medical_equipment_updated'));
+    };
+    const handleAlertDismissed = () => {
+      setGlobalRepairAlert(null);
     };
     window.addEventListener('caoliao_repair_received', handleAlert);
+    window.addEventListener('caoliao_alert_dismissed', handleAlertDismissed);
 
     return () => {
       isMounted = false;
       clearInterval(t);
       window.removeEventListener('caoliao_repair_received', handleAlert);
+      window.removeEventListener('caoliao_alert_dismissed', handleAlertDismissed);
     };
   }, []);
 
@@ -888,6 +1306,10 @@ export default function App() {
   };
 
   const handleOpenTransferModal = () => {
+    if (!canEditEquipment(currentUser)) {
+      showToast('权限不足：当前角色无权执行科室调拨', 'warning');
+      return;
+    }
     const selected = equipmentList.filter((eq) => selectedIds.includes(eq.id));
     if (selected.length === 0) {
       showToast('请先勾选需要进行科室调拨的设备！', 'warning');
@@ -985,12 +1407,22 @@ export default function App() {
 
   useEffect(() => {
     fetchEquipmentData();
+    // 兜底捕获服务端启动 1.5s 异步 RDS 对账结果，避免首屏加载早于后端同步完成
+    const bootCatchupTimer = setTimeout(() => {
+      fetchEquipmentData();
+    }, 2800);
+
     const handleRefresh = () => {
       fetchEquipmentData();
     };
     window.addEventListener('medical_equipment_updated', handleRefresh);
+    window.addEventListener('caoliao_repair_received', handleRefresh);
+    window.addEventListener('work_orders_updated', handleRefresh);
     return () => {
+      clearTimeout(bootCatchupTimer);
       window.removeEventListener('medical_equipment_updated', handleRefresh);
+      window.removeEventListener('caoliao_repair_received', handleRefresh);
+      window.removeEventListener('work_orders_updated', handleRefresh);
     };
   }, []);
 
@@ -1066,7 +1498,12 @@ export default function App() {
         (ownerDept && ownerDept.toLowerCase().includes(kw)) ||
         (borrowingDept && borrowingDept.toLowerCase().includes(kw)) ||
         (item.currentLoan?.borrowerName && item.currentLoan.borrowerName.toLowerCase().includes(kw)) ||
-        (item.nursePhone && item.nursePhone.toLowerCase().includes(kw));
+        (item.nursePhone && item.nursePhone.toLowerCase().includes(kw)) ||
+        (item.repairRecords || []).some((r: any) =>
+          (r.recordNo && String(r.recordNo).toLowerCase().includes(kw)) ||
+          (r.id && String(r.id).toLowerCase().includes(kw)) ||
+          (r.faultDescription && String(r.faultDescription).toLowerCase().includes(kw))
+        );
 
       let matchesDept = true;
       if (filterState.department) {
@@ -1401,6 +1838,14 @@ export default function App() {
 
   // Add / Edit Equipment
   const handleSaveEquipment = async (data: Partial<MedicalEquipment>) => {
+    if (editingDevice && !canEditEquipment(currentUser)) {
+      showToast('权限不足：当前角色无权修改设备台账档案', 'warning');
+      return;
+    }
+    if (!editingDevice && !canAddEquipment(currentUser)) {
+      showToast('权限不足：当前角色无权新增设备建卡', 'warning');
+      return;
+    }
     if (editingDevice) {
       // Edit
       try {
@@ -1409,6 +1854,7 @@ export default function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data)
         });
+        if (!res.ok) return;
         const json = await res.json();
         if (json.success && json.data) {
           setEquipmentList(prev => prev.map(e => e.id === editingDevice.id ? json.data : e));
@@ -1426,6 +1872,7 @@ export default function App() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(data)
         });
+        if (!res.ok) return;
         const json = await res.json();
         if (json.success && json.data) {
           setEquipmentList(prev => [json.data, ...prev]);
@@ -1441,9 +1888,14 @@ export default function App() {
 
   // Delete Equipment
   const handleDeleteEquipment = async (id: string) => {
+    if (!canDeleteEquipment(currentUser)) {
+      showToast('权限不足：当前角色无权删除或报废设备台账', 'warning');
+      return;
+    }
     if (window.confirm('确定将该设备从台账中永久移除吗？此操作不可撤销。')) {
       try {
-        await fetch(`/api/equipment/${id}`, { method: 'DELETE' });
+        const res = await fetch(`/api/equipment/${id}`, { method: 'DELETE' });
+        if (!res.ok) return;
         setEquipmentList(prev => prev.filter(e => e.id !== id));
       } catch (err) {
         setEquipmentList(prev => prev.filter(e => e.id !== id));
@@ -1457,11 +1909,17 @@ export default function App() {
       const res = await fetch(`/api/equipment/${repairData.equipmentId}/repair`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(repairData)
+        body: JSON.stringify({
+          ...repairData,
+          reporterName: repairData.reporterName || currentUser?.name || repairData.technician,
+          reporterPhone: repairData.reporterPhone || currentUser?.phone || ''
+        })
       });
       const json = await res.json();
       if (json.success && json.data) {
         setEquipmentList(prev => prev.map(e => e.id === repairData.equipmentId ? json.data : e));
+        window.dispatchEvent(new CustomEvent('work_orders_updated', { detail: json.workOrder }));
+        window.dispatchEvent(new CustomEvent('medical_equipment_updated'));
       } else {
         fetchEquipmentData();
       }
@@ -1502,12 +1960,17 @@ export default function App() {
 
   // Status Change
   const handleSubmitStatusChange = async (id: string, newStatus: EquipmentStatus, reason: string, operator: string) => {
+    if (!canChangeEquipmentStatus(currentUser)) {
+      showToast('权限不足：仅医工人员或系统管理员可变更设备运行状态', 'warning');
+      return;
+    }
     try {
       const res = await fetch(`/api/equipment/${id}/status`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newStatus, reason, operator })
       });
+      if (!res.ok) return;
       const json = await res.json();
       if (json.success && json.data) {
         setEquipmentList(prev => prev.map(e => e.id === id ? json.data : e));
@@ -1530,6 +1993,10 @@ export default function App() {
 
   // Batch Actions
   const handleBatchDelete = () => {
+    if (!canDeleteEquipment(currentUser)) {
+      showToast('权限不足：当前角色无权批量删除设备台账', 'warning');
+      return;
+    }
     if (selectedIds.length === 0) return;
     if (confirm(`确定要删除选中的 ${selectedIds.length} 台设备台账记录吗？`)) {
       setEquipmentList(prev => prev.filter(item => !selectedIds.includes(item.id)));
@@ -1538,6 +2005,10 @@ export default function App() {
   };
 
   const handleBatchStatusChange = async (newStatus: EquipmentStatus) => {
+    if (!canChangeEquipmentStatus(currentUser)) {
+      showToast('权限不足：仅医工人员或系统管理员可批量变更设备状态', 'warning');
+      return;
+    }
     if (selectedIds.length === 0) return;
     const targetIds = [...selectedIds];
     setEquipmentList(prev =>
@@ -1641,6 +2112,13 @@ export default function App() {
   // 检查当前Tab对于当前用户的访问权限
   const isCurrentTabRestricted = !canAccessTab(currentUser, activeTab);
 
+  // 若非指定人员试图打开设备项目台账，主动触发后端 RBAC 403 权限拦截校验
+  useEffect(() => {
+    if (currentUser && activeTab === 'project_ledger' && isCurrentTabRestricted) {
+      fetch('/api/project-ledger').catch(() => {});
+    }
+  }, [currentUser, activeTab, isCurrentTabRestricted]);
+
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-slate-50 font-sans antialiased text-slate-800">
       {/* 1. Left Sidebar */}
@@ -1682,15 +2160,27 @@ export default function App() {
           faultCount={stats.faultCount}
           onRefreshData={fetchEquipmentData}
           isClinicalQuickMode={isClinicalQuickMode}
-          onToggleDualTrackMode={() => setIsClinicalQuickMode(prev => !prev)}
-          onOpenUdiModal={() => {
-            setUdiPreSelectedDevice(null);
-            setIsUdiModalOpen(true);
-          }}
-          onOpenBatchRecallRadar={() => {
-            setRadarPreSelectedLot('');
-            setIsBatchRecallRadarOpen(true);
-          }}
+          onToggleDualTrackMode={
+            ['admin', 'engineering_supervisor', 'engineer', 'clinical_nurse', 'clinical_director'].includes(resolveRoleArchetype(currentUser))
+              ? () => setIsClinicalQuickMode(prev => !prev)
+              : undefined
+          }
+          onOpenUdiModal={
+            ['admin', 'engineering_supervisor', 'engineer', 'clinical_director', 'executive'].includes(resolveRoleArchetype(currentUser))
+              ? () => {
+                  setUdiPreSelectedDevice(null);
+                  setIsUdiModalOpen(true);
+                }
+              : undefined
+          }
+          onOpenBatchRecallRadar={
+            ['admin', 'engineering_supervisor', 'engineer', 'clinical_director', 'executive'].includes(resolveRoleArchetype(currentUser))
+              ? () => {
+                  setRadarPreSelectedLot('');
+                  setIsBatchRecallRadarOpen(true);
+                }
+              : undefined
+          }
         />
 
         {/* Main Workspace Body */}
@@ -1782,6 +2272,7 @@ export default function App() {
                    stats={stats}
                    equipmentList={userAccessibleEquipment}
                    allEquipmentList={equipmentList}
+                   departmentOptions={departments.map(d => d.name)}
                    currentUser={currentUser}
                    approvalApplications={approvalApplications}
                    onNavigateToTab={setActiveTab}
@@ -1814,6 +2305,7 @@ export default function App() {
                    }}
                    onSelectDeviceDetail={(device) => setDetailDevice(device)}
                    onOpenOfficialReport={handleOpenOfficialReport}
+                   onDirectDispatch={handleOpenDirectDispatch}
                  />
                )}
 
@@ -1923,6 +2415,7 @@ export default function App() {
                    onPrintQrLabel={(device) => handleOpenQrModal([device])}
                    onOpenOverdueFiling={(device) => setOverdueFilingDevice(device)}
                    onOpenTroubleshootModal={handleOpenAiTroubleshoot}
+                   currentUser={currentUser}
                  />
 
                  {/* Segment 3: Fixed Footer Pagination */}
@@ -1964,7 +2457,7 @@ export default function App() {
            {activeTab === 'approvals' && (
              <ApprovalsView
                applications={approvalApplications}
-               onUpdateApplications={setApprovalApplications}
+               onUpdateApplications={handleUpdateApprovalApplications}
                equipmentList={equipmentList}
                currentUser={currentUser}
                initialCreateData={initialApprovalData}
@@ -1976,6 +2469,23 @@ export default function App() {
                onOpenPrintLabel={(eq) => handleOpenQrModal([eq])}
                onOpenOverdueFilingModal={(eq) => setOverdueFilingDevice(eq)}
                onOpenOfficialReport={handleOpenOfficialReport}
+             />
+           )}
+
+           {activeTab === 'project_ledger' && (
+             <HospitalProjectLedgerView
+               currentUser={currentUser}
+               showToast={showToast}
+               onNavigateTab={(tab) => setActiveTab(tab as ActiveTab)}
+               focusedProjectId={focusedProjectId}
+               onClearFocusedProject={() => setFocusedProjectId(null)}
+               approvals={approvalApplications}
+               vendorOrders={vendorCollabOrders}
+               onStartProjectApproval={handleStartProjectApproval}
+               onNavigateToVendorOrder={(vendorOrderId) => {
+                 setFocusedVendorOrderId(vendorOrderId);
+                 setActiveTab('vendor_collaboration');
+               }}
              />
            )}
 
@@ -2016,6 +2526,7 @@ export default function App() {
                }}
                onNavigateToTab={(tab) => setActiveTab(tab)}
                onOpenRegulation={handleOpenRegulation}
+               onDirectDispatch={handleOpenDirectDispatch}
              />
            )}
 
@@ -2023,8 +2534,13 @@ export default function App() {
              <DispatchWorkOrderView
                equipmentList={userAccessibleEquipment}
                currentUser={currentUser}
+               initialFocusedOrderId={focusedDispatchOrderId || undefined}
                onEquipmentUpdated={(updated) => {
                  setEquipmentList(prev => prev.map(e => e.id === updated.id ? updated : e));
+               }}
+               onNavigateToVendorCollab={(vendorOrderId) => {
+                 if (vendorOrderId) setFocusedVendorOrderId(vendorOrderId);
+                 setActiveTab('vendor_collaboration');
                }}
              />
            )}
@@ -2152,6 +2668,8 @@ export default function App() {
               orders={vendorCollabOrders}
               currentUser={currentUser}
               departments={departments}
+              focusedVendorOrderId={focusedVendorOrderId}
+              onClearFocusedOrder={() => setFocusedVendorOrderId('')}
               onUpdateOrder={handleUpdateVendorOrder}
               onArchiveOrder={handleArchiveVendorOrder}
               onSwitchToVendorPortal={handleLoginAsVendor}
@@ -2170,7 +2688,7 @@ export default function App() {
               onNavigateToFactoryWorkflow={() => setActiveTab('factory_repair_workflow')}
               onNavigateToApprovals={() => setActiveTab('approvals')}
               approvalApplications={approvalApplications}
-              onUpdateApprovalApplications={setApprovalApplications}
+              onUpdateApprovalApplications={handleUpdateApprovalApplications}
               showToast={showToast}
             />
           )}
@@ -2195,6 +2713,18 @@ export default function App() {
                 setCurrentPage(1);
               }}
             />
+          )}
+
+          {activeTab === 'user_manual' && (
+            <UserManualView
+              currentUser={currentUser}
+              onNavigateTab={(tab) => setActiveTab(tab)}
+              showToast={showToast}
+            />
+          )}
+
+          {activeTab === 'regulatory_platforms' && (
+            <RegulatoryPlatformsView />
           )}
 
           {activeTab === 'regulations' && (
@@ -2318,7 +2848,7 @@ export default function App() {
         </main>
 
         {/* 3. Bottom Status Bar */}
-        <StatusBar onOpenDiagnostics={() => setActiveTab('system_ops')} />
+        <StatusBar onOpenDiagnostics={canManageSystemOps(currentUser) ? () => setActiveTab('system_ops') : undefined} />
       </div>
 
       {/* 移动端即时协同与消息推送抽屉 (企业微信 / 钉钉 / 移动护理PDA) */}
@@ -2698,8 +3228,18 @@ export default function App() {
 
       {/* 全局操作交互反馈 (Toast Banner) */}
       {toastMessage && (
-        <div className="fixed top-5 right-5 z-50 bg-slate-900/95 text-white px-4 py-3 rounded-xl shadow-2xl border border-slate-700/80 flex items-center gap-2.5 text-xs font-semibold backdrop-blur-md animate-in fade-in slide-in-from-top-4 duration-200">
-          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+        <div
+          className={`fixed top-5 right-5 z-50 px-4 py-3 rounded-xl shadow-2xl border flex items-center gap-2.5 text-xs font-semibold backdrop-blur-md animate-in fade-in slide-in-from-top-4 duration-200 ${
+            toastMessage.type === 'warning'
+              ? 'bg-rose-950/95 text-rose-50 border-rose-500/70'
+              : 'bg-slate-900/95 text-white border-slate-700/80'
+          }`}
+        >
+          {toastMessage.type === 'warning' ? (
+            <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0" />
+          ) : (
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+          )}
           <span>{toastMessage.text}</span>
         </div>
       )}
@@ -2708,19 +3248,24 @@ export default function App() {
       {activeTab !== 'dashboard' && (
         <RepairAlertPopupModal
           alert={globalRepairAlert}
+          currentUser={currentUser}
           onClose={async () => {
             setGlobalRepairAlert(null);
+            window.dispatchEvent(new CustomEvent('caoliao_alert_dismissed'));
             try {
               await fetch('/api/caoliao/dismiss-alert', { method: 'POST' });
             } catch {}
           }}
-          onFastDispatch={(device) => {
-            setRepairPreSelectedDevice(device || null);
-            setIsRepairModalOpen(true);
+          onFastDispatch={(device, alert) => {
+            handleOpenDirectDispatch(alert || device);
           }}
-          onViewLogs={() => {
-            setActiveTab('caoliao_webhook_logs');
-          }}
+          onViewLogs={
+            canViewCaoliaoLogs(currentUser)
+              ? () => {
+                  setActiveTab('caoliao_webhook_logs');
+                }
+              : undefined
+          }
           onViewEquipmentDetail={(device) => {
             setDetailDevice(device);
           }}
@@ -2752,10 +3297,10 @@ export default function App() {
         onClose={() => setSelectedGlobalRepairDetail(null)}
         data={selectedGlobalRepairDetail}
         equipmentList={equipmentList}
-        onFastDispatch={(device) => {
+        currentUser={currentUser}
+        onFastDispatch={(device, detail) => {
           setSelectedGlobalRepairDetail(null);
-          setRepairPreSelectedDevice(device || null);
-          setIsRepairModalOpen(true);
+          handleOpenDirectDispatch(detail || device);
         }}
         onViewEquipmentDetail={(device) => {
           setSelectedGlobalRepairDetail(null);
@@ -2782,6 +3327,10 @@ export default function App() {
         equipments={equipmentList}
         initialLotNumber={radarPreSelectedLot}
         onLockEquipment={(equipId, reason) => {
+          if (!canChangeEquipmentStatus(currentUser)) {
+            showToast('权限不足：仅医工人员或系统管理员可锁定故障设备', 'warning');
+            return;
+          }
           setEquipmentList(prev => prev.map(e => e.id === equipId ? {
             ...e,
             status: '故障待修' as EquipmentStatus,
@@ -2852,6 +3401,35 @@ export default function App() {
               lastFaultReason: conclusion
             });
           }
+        }}
+      />
+
+      {/* 全局直通现场智能派工指派单模态框 (支持在任意页面进行预派工拟定、内部讨论确认与正式下发派工) */}
+      <DispatchAssignModal
+        isOpen={Boolean(globalDirectAssignOrder)}
+        workOrder={globalDirectAssignOrder}
+        engineers={DEFAULT_BIOMEDICAL_ENGINEERS}
+        currentUserName={currentUser?.name || '医工调度中心'}
+        currentUserRole={currentUser?.role || '设备科调度员'}
+        canDispatch={canDispatchWorkOrder(currentUser)}
+        onClose={() => setGlobalDirectAssignOrder(null)}
+        onPreDispatch={handleGlobalPreDispatch}
+        onAddDiscussion={handleGlobalAddDiscussion}
+        onConfirmDispatch={handleConfirmGlobalDispatch}
+        onNavigateToDispatchTab={(orderId) => {
+          setGlobalDirectAssignOrder(null);
+          setFocusedDispatchOrderId(orderId);
+          setActiveTab('dispatch');
+        }}
+        onNavigateToVendorCollab={(vendorOrderId) => {
+          setGlobalDirectAssignOrder(null);
+          if (vendorOrderId) setFocusedVendorOrderId(vendorOrderId);
+          setActiveTab('vendor_collaboration');
+        }}
+        onNavigateToProjectLedger={(projectId) => {
+          setGlobalDirectAssignOrder(null);
+          setFocusedProjectId(projectId);
+          setActiveTab('project_ledger');
         }}
       />
     </div>

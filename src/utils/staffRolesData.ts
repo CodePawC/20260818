@@ -101,9 +101,19 @@ export const DEFAULT_STAFF_ROLES: StaffRoleDefinition[] = [
     name: '设备管理员',
     category: 'clinical',
     categoryLabel: '临床科室管理',
-    description: '负责科室设备资产建档、台账日常核对、故障报修发起、日常巡检登记与盘点。',
+    description: '负责科室设备资产日常核对、故障报修发起、日常巡检登记与科室盘点。',
     badgeColor: 'indigo',
-    permissions: ['台账管理', '故障报修', '日常巡检', '科室盘点', '借用申请'],
+    permissions: ['台账查看', '故障报修', '日常巡检', '科室盘点', '借用申请'],
+    isSystemDefault: true
+  },
+  {
+    id: 'ROLE_ENG_SUPERVISOR',
+    name: '医工主管/调度员',
+    category: 'engineering',
+    categoryLabel: '医学工程保障',
+    description: '负责全院故障工单预派工拟定与正式派工调度、响应SLA监管、台账与制度维护及主数据管理。',
+    badgeColor: 'purple',
+    permissions: ['派工调度', '预派工管理', '工单维修', '抢修响应', '台账管理', '项目台账管理', '新增设备', '编辑设备', '删除设备', '状态变更', '调拨调配', '报废处置', '制度管理', '组织主数据', '往来单位管理', '服务商协同', '预防性维护', '质控抽检', '数据导出', '批量导入'],
     isSystemDefault: true
   },
   {
@@ -111,9 +121,9 @@ export const DEFAULT_STAFF_ROLES: StaffRoleDefinition[] = [
     name: '维修工程师',
     category: 'engineering',
     categoryLabel: '医学工程保障',
-    description: '负责医院医疗设备故障现场抢修、工单闭环、核心备件更换、预防性维护(PM)及技术支持。',
+    description: '负责医院医疗设备故障现场抢修、内部技术讨论、核心备件更换、预防性维护(PM)及技术支持（不含正式派工权限）。',
     badgeColor: 'emerald',
-    permissions: ['工单维修', '抢修响应', '预防性维护', '配件申领', '停机诊断', '技术档案'],
+    permissions: ['工单维修', '抢修响应', '预防性维护', '配件申领', '停机诊断', '技术档案', '状态变更', '数据导出'],
     isSystemDefault: true
   },
   {
@@ -428,6 +438,8 @@ export function inferStakeholderCluster(
  */
 export function getRoleBadgeStyle(roleName: string, customRoles?: StaffRoleDefinition[]): string {
   switch (roleName) {
+    case '医工主管/调度员':
+      return 'bg-violet-50 text-violet-700 border-violet-200';
     case '设备管理员':
       return 'bg-indigo-50 text-indigo-700 border-indigo-200';
     case '维修工程师':

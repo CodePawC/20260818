@@ -265,11 +265,18 @@ export const CaoliaoRepairIntegrationOverview: React.FC<CaoliaoRepairIntegration
 
   useEffect(() => {
     fetchCaoliaoData();
-    // 30秒定时轮询最新现场扫码报修
+    // 每8秒轮询最新现场扫码报修，并监听全局跨模块实时事件
     const timer = setInterval(() => {
       fetchCaoliaoData(true);
-    }, 30000);
-    return () => clearInterval(timer);
+    }, 8000);
+    const onLiveRefresh = () => fetchCaoliaoData(true);
+    window.addEventListener('caoliao_repair_received', onLiveRefresh);
+    window.addEventListener('work_orders_updated', onLiveRefresh);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('caoliao_repair_received', onLiveRefresh);
+      window.removeEventListener('work_orders_updated', onLiveRefresh);
+    };
   }, []);
 
   // 匹配院内技术台账
@@ -284,10 +291,26 @@ export const CaoliaoRepairIntegrationOverview: React.FC<CaoliaoRepairIntegration
     matched = equipmentList.find(e => String(e.id) === cStr);
     if (matched) return matched;
 
-    // 3. 按名称或模糊匹配
+    // 3. 按草料活码全称精确匹配
     if (eqName) {
-      const cleanName = eqName.replace(/^[^-]+-/, '').trim();
-      matched = equipmentList.find(e => e.name.includes(cleanName) || cleanName.includes(e.name));
+      const trimmedEqName = eqName.trim();
+      matched = equipmentList.find(e => e.caoliaoCodeName && e.caoliaoCodeName.trim() === trimmedEqName);
+      if (matched) return matched;
+
+      // 4. 科室 + 设备名称精确/模糊匹配
+      const inferredDept = trimmedEqName.includes('-') ? trimmedEqName.split('-')[0].trim() : '';
+      const cleanName = trimmedEqName.replace(/^[^-]+-/, '').trim();
+      if (inferredDept) {
+        matched =
+          equipmentList.find(e => e.department === inferredDept && e.name === cleanName) ||
+          equipmentList.find(
+            e => e.department === inferredDept && (e.name.includes(cleanName) || cleanName.includes(e.name))
+          );
+        if (matched) return matched;
+      }
+      matched =
+        equipmentList.find(e => e.name === cleanName) ||
+        equipmentList.find(e => e.name.includes(cleanName) || cleanName.includes(e.name));
     }
     return matched || null;
   };
@@ -311,52 +334,16 @@ export const CaoliaoRepairIntegrationOverview: React.FC<CaoliaoRepairIntegration
         setSyncedOrderIds(prev => new Set(prev).add(item.recordId));
         showToast(`已成功将【${item.equipmentName}】草料报修直转为院内正式维修工单！`, 'success');
 
-        // 同步直接写入院内调度大厅工单池
-        try {
-          const raw = localStorage.getItem('hospital-medtech-workorders');
-          const currentOrders = raw ? JSON.parse(raw) : [];
-          const woId = `WO-CL-${item.recordNo || item.recordId}`;
-          if (!currentOrders.some((o: any) => o.id === woId)) {
-            const matchedEquip = getMatchedEquipment(item.codeId, item.equipmentName);
-            const newWO = {
-              id: woId,
-              equipmentId: matchedEquip?.id || `EQ-CL-${item.codeId}`,
-              equipmentName: matchedEquip?.name || item.equipmentName,
-              equipmentModel: matchedEquip?.model || '在册机具',
-              equipmentSn: matchedEquip?.sn || 'SN-CAOLIAO',
-              internalNo: matchedEquip?.internalNo || `CL-${item.codeId}`,
-              category: matchedEquip?.category || '草料在册机具',
-              department: matchedEquip?.department || '临床科室',
-              location: `${matchedEquip?.department || '临床科室'} · 现场使用区`,
-              reporterName: item.reporterName || '临床医护',
-              reporterPhone: item.reporterPhone || '',
-              reportTime: item.recordTime ? String(item.recordTime).replace('T', ' ').slice(0, 16) : new Date().toISOString().slice(0, 16),
-              priority: 'P2_URGENT',
-              workOrderType: 'emergency_breakdown',
-              faultDescription: `【草料扫码直报 单号 ${item.recordNo || item.recordId}】${item.faultDescription}`,
-              status: 'pending_dispatch',
-              biomedicalGroup: '急救生命支持技术组',
-              source: 'caoliao',
-              caoliaoRecordId: item.recordId,
-              caoliaoRecordNo: item.recordNo,
-              caoliaoCodeId: String(item.codeId),
-              photoUrl: item.photoUrl,
-              videoUrl: item.videoUrl,
-              partsReplaced: [],
-              totalRepairCost: 0,
-              totalDowntimeHours: 0.5,
-              slaResponseLimitMinutes: 30,
-              slaRepairLimitHours: 4,
-              isSlaResponseMet: false,
-              isSlaRepairMet: false
-            };
-            currentOrders.unshift(newWO);
-            localStorage.setItem('hospital-medtech-workorders', JSON.stringify(currentOrders));
-            window.dispatchEvent(new CustomEvent('work_orders_updated'));
+        window.dispatchEvent(new CustomEvent('work_orders_updated'));
+        window.dispatchEvent(new CustomEvent('medical_equipment_updated'));
+        window.dispatchEvent(new CustomEvent('caoliao_repair_received', {
+          detail: {
+            workOrderId: json.workOrder?.id || `WO-CL-${item.recordNo || item.recordId}`,
+            matchedEquipmentId: matched?.id,
+            equipmentName: matched?.name || item.equipmentName,
+            department: matched?.department || '临床科室'
           }
-        } catch (e) {
-          console.warn('Sync to local workorders storage warning:', e);
-        }
+        }));
 
         if (onRepairSynced) onRepairSynced();
       } else {

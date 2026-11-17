@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { MedicalEquipment, EquipmentStatus, SortField, SortOrder, ColumnVisibility, DEFAULT_COLUMN_VISIBILITY, DepartmentMaster, EquipmentViewMode, EquipmentQuickFilterKey } from '../types';
+import { MedicalEquipment, EquipmentStatus, SortField, SortOrder, ColumnVisibility, DEFAULT_COLUMN_VISIBILITY, DepartmentMaster, EquipmentViewMode, EquipmentQuickFilterKey, AuthUser } from '../types';
+import { canEditEquipment, canDeleteEquipment, canChangeEquipmentStatus, canInitiateRepair, canExportData } from '../utils/authUtils';
 import { getEquipmentValidityInfo } from '../utils/validityUtils';
 import { getEquipmentHealthScore, getEquipmentMaintenanceNode } from '../utils/equipmentUtils';
 import { getEquipmentCalibrationInfo } from '../utils/calibrationUtils';
@@ -93,6 +94,7 @@ interface EquipmentTableProps {
   onOpenOverdueFiling?: (item: MedicalEquipment) => void;
   onPrintQrLabel?: (item: MedicalEquipment) => void;
   onOpenTroubleshootModal?: (item: MedicalEquipment) => void;
+  currentUser?: AuthUser | null;
 }
 
 export const EquipmentTable: React.FC<EquipmentTableProps> = ({
@@ -134,10 +136,17 @@ export const EquipmentTable: React.FC<EquipmentTableProps> = ({
   onOpenOverdueFiling,
   onPrintQrLabel,
   onOpenTroubleshootModal,
+  currentUser,
 }) => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: MedicalEquipment } | null>(null);
   const [healthModalDevice, setHealthModalDevice] = useState<MedicalEquipment | null>(null);
+
+  const allowEdit = currentUser ? canEditEquipment(currentUser) : true;
+  const allowDelete = currentUser ? canDeleteEquipment(currentUser) : true;
+  const allowStatus = currentUser ? canChangeEquipmentStatus(currentUser) : true;
+  const allowRepair = currentUser ? canInitiateRepair(currentUser) : true;
+  const allowExport = currentUser ? canExportData(currentUser) : true;
 
   const cols = columnVisibility || DEFAULT_COLUMN_VISIBILITY;
 
@@ -216,7 +225,7 @@ export const EquipmentTable: React.FC<EquipmentTableProps> = ({
               <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shadow-xs"></span>
               故障待修
             </span>
-            {item && (
+            {item && allowStatus && (
               <button
                 type="button"
                 onClick={(e) => {
@@ -420,6 +429,7 @@ export const EquipmentTable: React.FC<EquipmentTableProps> = ({
           onOpenOverdueFiling={onOpenOverdueFiling}
           onPrintQrLabel={onPrintQrLabel}
           onHealthScoreClick={(device) => setHealthModalDevice(device)}
+          currentUser={currentUser}
         />
       ) : viewMode === 'card_grid' ? (
         <EquipmentCardGrid
@@ -443,6 +453,7 @@ export const EquipmentTable: React.FC<EquipmentTableProps> = ({
           onOpenOverdueFiling={onOpenOverdueFiling}
           onPrintQrLabel={onPrintQrLabel}
           onHealthScoreClick={(device) => setHealthModalDevice(device)}
+          currentUser={currentUser}
         />
       ) : viewMode === 'photo_stream' ? (
         <EquipmentPhotoStream
@@ -457,6 +468,7 @@ export const EquipmentTable: React.FC<EquipmentTableProps> = ({
           onAiDiagnoseDevice={onAiDiagnoseDevice}
           onPrintQrLabel={onPrintQrLabel}
           onHealthScoreClick={(device) => setHealthModalDevice(device)}
+          currentUser={currentUser}
         />
       ) : (
         /* Scrollable Container for Table */
@@ -1216,7 +1228,7 @@ export const EquipmentTable: React.FC<EquipmentTableProps> = ({
                               <Hourglass className="w-3.5 h-3.5 text-amber-700 shrink-0" />
                               超龄服役: +{vInfo.yearsPast}年
                             </span>
-                            {onOpenOverdueFiling && (
+                            {onOpenOverdueFiling && allowStatus && (
                               <button
                                 type="button"
                                 onClick={(e) => {
@@ -1493,7 +1505,7 @@ export const EquipmentTable: React.FC<EquipmentTableProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            {onBatchStatusChange && (
+            {onBatchStatusChange && allowStatus && (
               <div className="flex items-center gap-1.5 flex-wrap">
                 {selectedIds.some(id => equipmentList.find(e => e.id === id)?.status === '故障待修') && (
                   <button
@@ -1549,7 +1561,7 @@ export const EquipmentTable: React.FC<EquipmentTableProps> = ({
               </button>
             )}
 
-            {onBatchTransfer && (
+            {onBatchTransfer && allowEdit && (
               <button
                 type="button"
                 onClick={onBatchTransfer}
@@ -1571,7 +1583,7 @@ export const EquipmentTable: React.FC<EquipmentTableProps> = ({
               </button>
             )}
 
-            {onBatchExport && (
+            {onBatchExport && allowExport && (
               <button
                 type="button"
                 onClick={onBatchExport}
@@ -1582,7 +1594,7 @@ export const EquipmentTable: React.FC<EquipmentTableProps> = ({
               </button>
             )}
 
-            {onBatchDelete && (
+            {onBatchDelete && allowDelete && (
               <button
                 type="button"
                 onClick={onBatchDelete}
@@ -1632,7 +1644,7 @@ export const EquipmentTable: React.FC<EquipmentTableProps> = ({
             </div>
 
             <div className="py-1">
-              {contextMenu.item.status === '故障待修' && (
+              {contextMenu.item.status === '故障待修' && allowStatus && (
                 <button
                   type="button"
                   onClick={() => {
@@ -1675,17 +1687,19 @@ export const EquipmentTable: React.FC<EquipmentTableProps> = ({
                 <span>查看台账详情</span>
               </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  onAddRepairForDevice(contextMenu.item);
-                  setContextMenu(null);
-                }}
-                className="w-full text-left px-3 py-1.5 text-slate-700 hover:bg-amber-50 hover:text-amber-800 font-medium flex items-center gap-2 transition cursor-pointer"
-              >
-                <Wrench className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                <span>登记维保工单</span>
-              </button>
+              {allowRepair && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onAddRepairForDevice(contextMenu.item);
+                    setContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-1.5 text-slate-700 hover:bg-amber-50 hover:text-amber-800 font-medium flex items-center gap-2 transition cursor-pointer"
+                >
+                  <Wrench className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                  <span>登记维保工单</span>
+                </button>
+              )}
 
               {onNavigateToInspection && (
                 <button
@@ -1765,7 +1779,7 @@ export const EquipmentTable: React.FC<EquipmentTableProps> = ({
                 <span>打印资产二维码贴</span>
               </button>
 
-              {onOpenOverdueFiling && (
+              {onOpenOverdueFiling && (allowStatus || contextMenu.item.overdueFiling?.filingStatus === 'ACTIVE') && (
                 <button
                   type="button"
                   onClick={() => {
@@ -1813,43 +1827,51 @@ export const EquipmentTable: React.FC<EquipmentTableProps> = ({
                 </button>
               )}
 
-              <button
-                type="button"
-                onClick={() => {
-                  onChangeStatusForDevice(contextMenu.item);
-                  setContextMenu(null);
-                }}
-                className="w-full text-left px-3 py-1.5 text-slate-700 hover:bg-slate-100 font-medium flex items-center gap-2 transition cursor-pointer"
-              >
-                <RefreshCw className="w-3.5 h-3.5 text-slate-600 shrink-0" />
-                <span>变更设备状态</span>
-              </button>
+              {allowStatus && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChangeStatusForDevice(contextMenu.item);
+                    setContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-1.5 text-slate-700 hover:bg-slate-100 font-medium flex items-center gap-2 transition cursor-pointer"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                  <span>变更设备状态</span>
+                </button>
+              )}
 
-              <button
-                type="button"
-                onClick={() => {
-                  onEditDevice(contextMenu.item);
-                  setContextMenu(null);
-                }}
-                className="w-full text-left px-3 py-1.5 text-slate-700 hover:bg-slate-100 font-medium flex items-center gap-2 transition cursor-pointer"
-              >
-                <Edit className="w-3.5 h-3.5 text-slate-600 shrink-0" />
-                <span>编辑设备资料</span>
-              </button>
+              {allowEdit && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onEditDevice(contextMenu.item);
+                    setContextMenu(null);
+                  }}
+                  className="w-full text-left px-3 py-1.5 text-slate-700 hover:bg-slate-100 font-medium flex items-center gap-2 transition cursor-pointer"
+                >
+                  <Edit className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                  <span>编辑设备资料</span>
+                </button>
+              )}
 
-              <div className="border-t border-slate-100 my-1" />
+              {allowDelete && (
+                <>
+                  <div className="border-t border-slate-100 my-1" />
 
-              <button
-                type="button"
-                onClick={() => {
-                  onDeleteDevice(contextMenu.item.id);
-                  setContextMenu(null);
-                }}
-                className="w-full text-left px-3 py-1.5 text-rose-600 hover:bg-rose-50 font-medium flex items-center gap-2 transition cursor-pointer"
-              >
-                <Trash2 className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                <span>删除设备条目</span>
-              </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onDeleteDevice(contextMenu.item.id);
+                      setContextMenu(null);
+                    }}
+                    className="w-full text-left px-3 py-1.5 text-rose-600 hover:bg-rose-50 font-medium flex items-center gap-2 transition cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                    <span>删除设备条目</span>
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </>
